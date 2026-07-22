@@ -98,8 +98,8 @@ Copia `.env.example` a `.env` y edita las variables. Las variables de entorno ti
     {"id": -1002229558644, "name": "Películas"},
     {"id": -1001234567890, "name": "Series"}
   ],
-  "download_path": "/mnt/usb1/torrent-complete",
-  "extract_path": "/mnt/usb1/torrent-complete",
+  "download_path": "/mnt/usb1/",
+  "extract_path": "/mnt/usb1/",
   "server_host": "0.0.0.0",
   "server_port": 8000,
   "delete_archives_after_extract": true,
@@ -285,7 +285,7 @@ docker run -d \
   -p 8000:8000 \
   -v $(pwd)/config.json:/app/config.json \
   -v $(pwd)/session:/app/session \
-  -v /mnt/usb1/torrent-complete:/mnt/usb1/torrent-complete \
+  -v /mnt/usb1/:/mnt/usb1/ \
   telegram-movie
 ```
 
