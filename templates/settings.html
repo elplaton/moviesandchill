@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Configuración · Telegram Movie Downloader</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0d1117; color: #c9d1d9; max-width: 700px; margin: 0 auto; padding: 20px; }
+        h1 { color: #58a6ff; margin-bottom: 5px; font-size: 20px; }
+        .back-link { color: #8b949e; text-decoration: none; font-size: 13px; margin-bottom: 20px; display: inline-block; }
+        .card { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 16px 20px; margin-bottom: 16px; }
+        .card-title { color: #f0f6fc; font-weight: 600; font-size: 14px; margin-bottom: 12px; }
+        .form-row { display: flex; align-items: center; margin-bottom: 10px; gap: 10px; flex-wrap: wrap; }
+        .form-row label { width: 120px; color: #8b949e; font-size: 13px; flex-shrink: 0; }
+        .form-row input, .form-row select { flex: 1; min-width: 150px; padding: 8px 10px; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; color: #c9d1d9; font-size: 13px; outline: none; }
+        .form-row input:focus { border-color: #58a6ff; }
+        .form-row input[type="number"] { max-width: 100px; flex: 0; }
+        .toggle { position: relative; display: inline-block; width: 40px; height: 22px; flex-shrink: 0; }
+        .toggle input { opacity: 0; width: 0; height: 0; }
+        .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background: #21262d; border-radius: 22px; transition: .3s; }
+        .slider:before { position: absolute; content: ""; height: 16px; width: 16px; left: 3px; bottom: 3px; background: #8b949e; border-radius: 50%; transition: .3s; }
+        input:checked + .slider { background: #238636; }
+        input:checked + .slider:before { transform: translateX(18px); background: #fff; }
+        .channel-row { display: flex; gap: 8px; margin-bottom: 6px; align-items: center; }
+        .channel-row input { flex: 1; min-width: 80px; padding: 6px 8px; background: #0d1117; border: 1px solid #30363d; border-radius: 4px; color: #c9d1d9; font-size: 12px; outline: none; }
+        .channel-row input:focus { border-color: #58a6ff; }
+        .channel-row .ch-id { max-width: 150px; }
+        .btn-sm { padding: 6px 12px; font-size: 12px; border: none; border-radius: 4px; cursor: pointer; font-weight: 500; }
+        .btn-danger { background: #da3633; color: #fff; }
+        .btn-danger:hover { background: #f85149; }
+        .btn-add { background: #21262d; color: #8b949e; border: 1px solid #30363d; }
+        .btn-add:hover { background: #30363d; color: #c9d1d9; }
+        .btn-primary { background: #238636; color: #fff; padding: 10px 24px; font-size: 14px; border: none; border-radius: 6px; cursor: pointer; font-weight: 500; }
+        .btn-primary:hover { background: #2ea043; }
+        .save-row { display: flex; align-items: center; gap: 12px; }
+        .toast { color: #3fb950; font-size: 13px; opacity: 0; transition: opacity .2s; }
+        .toast.show { opacity: 1; }
+        .env-badge { font-size: 10px; background: #6e40c9; color: #fff; padding: 1px 5px; border-radius: 6px; margin-left: 6px; vertical-align: middle; cursor: help; }
+        .env-notice { color: #6e40c9; font-size: 11px; margin-bottom: 12px; display: none; }
+    </style>
+</head>
+<body>
+    <a href="/" class="back-link">← Volver</a>
+    <h1>Configuración</h1>
+    <p style="color:#8b949e;font-size:13px;margin-bottom:16px;">Ajusta los parámetros del servidor de descargas</p>
+    <div class="env-notice" id="envNotice">Las variables con badge <span class="env-badge">.env</span> se guardan en el archivo .env (prioridad sobre config.json)</div>
+
+    <div class="card">
+        <div class="card-title">Telegram API</div>
+        <div class="form-row">
+            <label>API ID</label>
+            <input type="number" id="api_id" placeholder="Ej: 12345678">
+        </div>
+        <div class="form-row">
+            <label id="apiHashLabel">API Hash</label>
+            <input type="password" id="api_hash" placeholder="••••••••">
+        </div>
+        <div class="form-row">
+            <label>Teléfono</label>
+            <input type="text" id="phone" placeholder="+34123456789">
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-title">Canales de Telegram</div>
+        <div id="channelsList"></div>
+        <button class="btn-sm btn-add" onclick="addChannel()">+ Añadir canal</button>
+    </div>
+
+    <div class="card">
+        <div class="card-title">Rutas</div>
+        <div class="form-row">
+            <label id="downloadPathLabel">Descargas</label>
+            <input type="text" id="download_path" placeholder="/mnt/usb1/descargas/">
+        </div>
+        <div class="form-row">
+            <label id="extractPathLabel">Extracción</label>
+            <input type="text" id="extract_path" placeholder="/mnt/usb1/peliculas/">
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-title">Servidor</div>
+        <div class="form-row">
+            <label>Host</label>
+            <input type="text" id="server_host" placeholder="0.0.0.0">
+        </div>
+        <div class="form-row">
+            <label>Puerto</label>
+            <input type="number" id="server_port" placeholder="8000" min="1024" max="65535">
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-title">Comportamiento</div>
+        <div class="form-row">
+            <label>Borrar ZIPs tras extraer</label>
+            <label class="toggle"><input type="checkbox" id="delete_archives"><span class="slider"></span></label>
+        </div>
+        <div class="form-row">
+            <label>Convertir DTS → AC3</label>
+            <label class="toggle"><input type="checkbox" id="convert_dts"><span class="slider"></span></label>
+        </div>
+        <div class="form-row">
+            <label>Descargas paralelas</label>
+            <select id="download_parallel" style="flex:0;min-width:60px;">
+                <option value="1">1</option><option value="2">2</option><option value="3">3</option>
+                <option value="4">4</option><option value="5">5</option><option value="6">6</option>
+                <option value="7">7</option><option value="8">8</option>
+            </select>
+        </div>
+    </div>
+
+    <div class="save-row">
+        <button class="btn-primary" onclick="saveConfig()">💾 Guardar configuración</button>
+        <span class="toast" id="toast">✓ Guardado</span>
+    </div>
+
+    <script>
+        let channels = [];
+
+        async function loadConfig() {
+            try {
+                const res = await fetch('/api/config');
+                const data = await res.json();
+                const c = data.config;
+                const s = data.sources || {};
+                if (data.has_env) {
+                    document.getElementById('envNotice').style.display = 'block';
+                }
+
+                function envBadge(key) {
+                    return s[key] === 'env' ? '<span class="env-badge" title="Valor desde .env">.env</span>' : '';
+                }
+
+                document.getElementById('api_id').value = c.api_id || '';
+                document.getElementById('apiHashLabel').innerHTML = 'API Hash' + envBadge('api_hash');
+                document.getElementById('api_id').value = c.api_id || '';
+                document.getElementById('api_hash').value = c.api_hash || '';
+                document.getElementById('phone').value = c.phone || '';
+                document.getElementById('downloadPathLabel').innerHTML = 'Descargas' + envBadge('download_path');
+                document.getElementById('download_path').value = c.download_path || '';
+                document.getElementById('extractPathLabel').innerHTML = 'Extracción' + envBadge('extract_path');
+                document.getElementById('extract_path').value = c.extract_path || '';
+                document.getElementById('server_host').value = c.server_host || '0.0.0.0';
+                document.getElementById('server_port').value = c.server_port || 8000;
+                document.getElementById('delete_archives').checked = c.delete_archives_after_extract !== false;
+                document.getElementById('convert_dts').checked = c.convert_dts_to_ac3 !== false;
+                document.getElementById('download_parallel').value = c.download_parallel || 5;
+                channels = c.channels || [];
+                if (!channels.length && c.channel_id) {
+                    channels = [{id: c.channel_id, name: 'Canal principal'}];
+                }
+                renderChannels();
+            } catch (err) {
+                alert('Error cargando configuracion');
+            }
+        }
+
+        function renderChannels() {
+            const container = document.getElementById('channelsList');
+            if (!channels.length) {
+                container.innerHTML = '<div style="color:#8b949e;font-size:12px;margin-bottom:6px;">Sin canales configurados</div>';
+                return;
+            }
+            container.innerHTML = channels.map((ch, i) => `
+                <div class="channel-row">
+                    <input class="ch-id" type="number" value="${ch.id || ''}" placeholder="ID" onchange="channels[${i}].id = parseInt(this.value) || 0">
+                    <input value="${ch.name || ''}" placeholder="Nombre" onchange="channels[${i}].name = this.value">
+                    <button class="btn-sm btn-danger" onclick="removeChannel(${i})">✕</button>
+                </div>
+            `).join('');
+        }
+
+        function addChannel() {
+            channels.push({id: 0, name: ''});
+            renderChannels();
+        }
+
+        function removeChannel(i) {
+            channels.splice(i, 1);
+            renderChannels();
+        }
+
+        async function saveConfig() {
+            const toast = document.getElementById('toast');
+            toast.classList.remove('show');
+
+            const body = {
+                api_id: parseInt(document.getElementById('api_id').value) || undefined,
+                api_hash: document.getElementById('api_hash').value || undefined,
+                phone: document.getElementById('phone').value || undefined,
+                channels: channels.filter(ch => ch.id && ch.name),
+                download_path: document.getElementById('download_path').value || undefined,
+                extract_path: document.getElementById('extract_path').value || undefined,
+                server_host: document.getElementById('server_host').value || undefined,
+                server_port: parseInt(document.getElementById('server_port').value) || undefined,
+                delete_archives_after_extract: document.getElementById('delete_archives').checked,
+                download_parallel: parseInt(document.getElementById('download_parallel').value),
+                convert_dts_to_ac3: document.getElementById('convert_dts').checked,
+            };
+
+            try {
+                const res = await fetch('/api/config', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body),
+                });
+                const data = await res.json();
+                if (data.status === 'saved') {
+                    toast.classList.add('show');
+                    setTimeout(() => toast.classList.remove('show'), 2000);
+                }
+            } catch (err) {
+                alert('Error guardando configuracion');
+            }
+        }
+
+        loadConfig();
+    </script>
+</body>
+</html>

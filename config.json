@@ -1,0 +1,15 @@
+{
+  "api_id": 10000,
+  "api_hash": "",
+  "phone": "",
+  "channels": [
+    {"id": -1000000000, "name": ""}
+  ],
+  "download_path": "",
+  "extract_path": "",
+  "server_host": "",
+  "server_port": 8000,
+  "delete_archives_after_extract": true,
+  "download_parallel": 5,
+  "convert_dts_to_ac3": true
+}

@@ -1,0 +1,13 @@
+# Python dependencies
+telethon>=1.36.0
+fastapi>=0.110.0
+uvicorn>=0.29.0
+jinja2>=3.1.0
+rarfile>=4.1
+py7zr>=0.21.0
+aiofiles>=23.2.0
+python-multipart>=0.0.9
+python-dotenv>=1.0.0
+
+# System dependencies (install with apt):
+# sudo apt install mediainfo ffmpeg unrar
