@@ -124,6 +124,32 @@ async def channels():
     ]}
 
 
+@app.get("/api/dialogs")
+async def dialogs():
+    try:
+        dialogs = await downloader.list_dialogs()
+    except Exception:
+        return {"dialogs": [], "error": "No se pudo conectar a Telegram"}
+    configured_ids = {ch["id"] for ch in config.get("channels", [])}
+    items = []
+    for d in dialogs:
+        items.append({
+            "id": d["id"],
+            "name": d["name"],
+            "is_channel": d["is_channel"],
+            "is_group": d["is_group"],
+            "is_megagroup": d.get("is_megagroup", False),
+            "active": d["id"] in configured_ids,
+        })
+    items.sort(key=lambda x: (not x["active"], not x["is_channel"], x["name"].lower()))
+    return {"dialogs": items}
+
+
+@app.get("/channels", response_class=HTMLResponse)
+async def channels_page():
+    return FileResponse("templates/channels.html")
+
+
 @app.post("/api/download")
 async def download(req: DownloadRequest, background_tasks: BackgroundTasks):
     dl = downloader

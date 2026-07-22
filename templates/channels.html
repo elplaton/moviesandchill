@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Canales · Telegram Movie Downloader</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0d1117; color: #c9d1d9; max-width: 700px; margin: 0 auto; padding: 20px; }
+        h1 { color: #58a6ff; margin-bottom: 5px; font-size: 20px; }
+        .back-link { color: #8b949e; text-decoration: none; font-size: 13px; margin-bottom: 20px; display: inline-block; }
+        .card { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 16px 20px; margin-bottom: 16px; }
+        .card-title { color: #f0f6fc; font-weight: 600; font-size: 14px; margin-bottom: 12px; }
+        .channel-row { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid #21262d; }
+        .channel-row:last-child { border-bottom: none; }
+        .channel-row label { flex: 1; cursor: pointer; font-size: 13px; display: flex; align-items: center; gap: 8px; min-width: 0; }
+        .channel-row .ch-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .channel-row .ch-id { color: #8b949e; font-size: 11px; flex-shrink: 0; }
+        .channel-row .ch-type { font-size: 10px; padding: 2px 6px; border-radius: 8px; flex-shrink: 0; }
+        .type-channel { background: #1f6feb22; color: #58a6ff; }
+        .type-group { background: #d2992222; color: #d29922; }
+        .type-megagroup { background: #6e40c922; color: #c084fc; }
+        input[type="checkbox"] { width: 16px; height: 16px; accent-color: #238636; cursor: pointer; flex-shrink: 0; }
+        .search-bar { margin-bottom: 10px; }
+        .search-bar input { width: 100%; padding: 8px 10px; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; color: #c9d1d9; font-size: 13px; outline: none; }
+        .search-bar input:focus { border-color: #58a6ff; }
+        .btn-primary { background: #238636; color: #fff; padding: 10px 24px; font-size: 14px; border: none; border-radius: 6px; cursor: pointer; font-weight: 500; }
+        .btn-primary:hover { background: #2ea043; }
+        .save-row { display: flex; align-items: center; gap: 12px; }
+        .toast { color: #3fb950; font-size: 13px; opacity: 0; transition: opacity .2s; }
+        .toast.show { opacity: 1; }
+        .empty { color: #8b949e; font-size: 13px; text-align: center; padding: 20px; }
+        .count { color: #8b949e; font-size: 11px; }
+    </style>
+</head>
+<body>
+    <a href="/settings" class="back-link">← Configuración</a>
+    <h1>Canales disponibles</h1>
+    <p style="color:#8b949e;font-size:13px;margin-bottom:16px;">Selecciona los canales y grupos de Telegram que quieres usar para buscar contenido</p>
+
+    <div class="card" id="activeCard" style="display:none;">
+        <div class="card-title">Canales activos <span class="count" id="activeCount"></span></div>
+        <div id="activeList"></div>
+    </div>
+
+    <div class="card">
+        <div class="card-title">Todos los canales y grupos <span class="count" id="allCount"></span></div>
+        <div class="search-bar"><input type="text" id="filter" placeholder="Buscar por nombre..." oninput="renderAll()"></div>
+        <div id="allList"></div>
+    </div>
+
+    <div class="save-row">
+        <button class="btn-primary" onclick="saveChannels()">💾 Guardar selección</button>
+        <span class="toast" id="toast">✓ Guardado</span>
+    </div>
+
+    <script>
+        let dialogs = [];
+        let activeIds = new Set();
+
+        async function loadDialogs() {
+            try {
+                const res = await fetch('/api/dialogs');
+                const data = await res.json();
+                dialogs = data.dialogs || [];
+                activeIds = new Set(dialogs.filter(d => d.active).map(d => d.id));
+                renderActive();
+                renderAll();
+            } catch (err) {
+                document.getElementById('allList').innerHTML = '<div class="empty">Error al cargar canales</div>';
+            }
+        }
+
+        function toggle(id) {
+            if (activeIds.has(id)) activeIds.delete(id);
+            else activeIds.add(id);
+            renderActive();
+            renderAll();
+        }
+
+        function typeBadge(d) {
+            if (d.is_megagroup) return '<span class="ch-type type-megagroup">Megagrupo</span>';
+            if (d.is_channel) return '<span class="ch-type type-channel">Canal</span>';
+            return '<span class="ch-type type-group">Grupo</span>';
+        }
+
+        function renderActive() {
+            const container = document.getElementById('activeList');
+            const card = document.getElementById('activeCard');
+            const active = dialogs.filter(d => activeIds.has(d.id));
+            document.getElementById('activeCount').textContent = `(${active.length})`;
+            if (active.length === 0) {
+                card.style.display = 'none';
+                return;
+            }
+            card.style.display = '';
+            container.innerHTML = active.map(d => `
+                <div class="channel-row">
+                    <label><input type="checkbox" checked onchange="toggle(${d.id})"><span class="ch-name">${esc(d.name)}</span></label>
+                    ${typeBadge(d)}
+                    <span class="ch-id">${d.id}</span>
+                </div>
+            `).join('');
+        }
+
+        function renderAll() {
+            const container = document.getElementById('allList');
+            const filter = document.getElementById('filter').value.toLowerCase();
+            const filtered = dialogs.filter(d => {
+                if (activeIds.has(d.id)) return false;
+                if (filter && !d.name.toLowerCase().includes(filter)) return false;
+                return true;
+            });
+            document.getElementById('allCount').textContent = `(${filtered.length})`;
+            if (filtered.length === 0) {
+                container.innerHTML = '<div class="empty">Sin resultados</div>';
+                return;
+            }
+            container.innerHTML = filtered.map(d => `
+                <div class="channel-row">
+                    <label><input type="checkbox" onchange="toggle(${d.id})"><span class="ch-name">${esc(d.name)}</span></label>
+                    ${typeBadge(d)}
+                    <span class="ch-id">${d.id}</span>
+                </div>
+            `).join('');
+        }
+
+        async function saveChannels() {
+            const channels = dialogs
+                .filter(d => activeIds.has(d.id))
+                .map(d => ({ id: d.id, name: d.name }));
+            const toast = document.getElementById('toast');
+            toast.classList.remove('show');
+            try {
+                await fetch('/api/config', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ channels }),
+                });
+                toast.classList.add('show');
+                setTimeout(() => toast.classList.remove('show'), 2000);
+            } catch (err) {
+                alert('Error guardando canales');
+            }
+        }
+
+        function esc(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        loadDialogs();
+    </script>
+</body>
+</html>

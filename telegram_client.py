@@ -58,11 +58,14 @@ class TelegramDownloader:
     async def list_dialogs(self):
         dialogs = []
         async for dialog in self.client.iter_dialogs():
+            if dialog.is_user:
+                continue
             dialogs.append({
                 "id": dialog.id,
                 "name": dialog.name,
                 "is_channel": dialog.is_channel,
                 "is_group": dialog.is_group,
+                "is_megagroup": dialog.is_channel and getattr(dialog.entity, "megagroup", False),
             })
         return dialogs
 

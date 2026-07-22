@@ -17,6 +17,7 @@ Un servidor web autoalojado para buscar y descargar películas y series desde ca
 - **Soporte `.env`** — Variables de entorno para secretos y overrides
 - **Paginación real** — Búsqueda paginada contra Telegram, sin límite de resultados
 - **Filtro por canal** — Chips de selección de canal en los resultados de búsqueda
+- **Gestión visual de canales** — Página `/channels` que lista todos tus canales/grupos de Telegram y permite seleccionarlos
 - **Tailscale Funnel** — Acceso remoto desde internet sin abrir puertos
 
 ---
@@ -98,8 +99,8 @@ Copia `.env.example` a `.env` y edita las variables. Las variables de entorno ti
     {"id": -1002229558644, "name": "Películas"},
     {"id": -1001234567890, "name": "Series"}
   ],
-  "download_path": "/mnt/usb1/",
-  "extract_path": "/mnt/usb1/",
+  "download_path": "/mnt/usb1/torrent-complete",
+  "extract_path": "/mnt/usb1/torrent-complete",
   "server_host": "0.0.0.0",
   "server_port": 8000,
   "delete_archives_after_extract": true,
@@ -218,6 +219,17 @@ Tu app será accesible en `https://<hostname>.tail<id>.ts.net`.
 - Filtro por texto, pausa/reanudar, selector de líneas
 - Se actualiza cada 3 segundos
 
+### Canales disponibles (`/channels`)
+
+- Lista **todos** los canales y grupos de tu cuenta de Telegram en tiempo real
+- Filtra automáticamente chats privados y bots — solo muestra canales y grupos
+- Badges de color: `[Canal]` azul, `[Megagrupo]` morado, `[Grupo]` naranja
+- Barra de búsqueda para filtrar por nombre entre cientos de diálogos
+- Checkboxes ☑/☐ para activar/desactivar canales
+- Los canales activos aparecen en una sección superior fija para confirmar la selección
+- Botón "💾 Guardar selección" persiste en `config.json` y `.env`
+- Accesible desde Configuración → "Gestionar canales desde Telegram →"
+
 ---
 
 ## Flujo de descarga
@@ -285,7 +297,7 @@ docker run -d \
   -p 8000:8000 \
   -v $(pwd)/config.json:/app/config.json \
   -v $(pwd)/session:/app/session \
-  -v /mnt/usb1/:/mnt/usb1/ \
+  -v /mnt/usb1/torrent-complete:/mnt/usb1/torrent-complete \
   telegram-movie
 ```
 
