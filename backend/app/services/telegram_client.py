@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import os
 import re
 from datetime import datetime, timedelta
@@ -6,7 +7,9 @@ from datetime import datetime, timedelta
 from telethon import TelegramClient
 from telethon.errors import SessionPasswordNeededError
 
-from storage import _detect_multipart, suggest_folder_name, create_movie_folder
+from app.services.storage import _detect_multipart, suggest_folder_name, create_movie_folder
+
+logger = logging.getLogger("tmd")
 
 
 class TelegramDownloader:
@@ -17,28 +20,91 @@ class TelegramDownloader:
         self.download_path = config["download_path"]
         self.client = None
         self.active_batches = {}
-        channels = config.get("channels")
-        if not channels and "channel_id" in config:
-            channels = [{"id": config["channel_id"], "name": "Canal principal"}]
-        self.channel_ids = channels or []
+        self.channel_ids = []
         self.channels = {}
+        self._config_channels = config.get("channels") or []
+        self.session_dir = None
+
+    def _session_path(self):
+        if self.session_dir:
+            return os.path.join(self.session_dir, "user")
+        for base in [os.getcwd(), os.path.join(os.path.dirname(__file__), "..", "..", "..")]:
+            d = os.path.join(base, "session")
+            if os.path.isdir(d):
+                return os.path.join(d, "user")
+        d = os.path.join(os.getcwd(), "session")
+        os.makedirs(d, exist_ok=True)
+        return os.path.join(d, "user")
+
+    async def load_channels_from_list(self, channels: list[dict]):
+        if not channels:
+            channels = self._config_channels
+        self.channel_ids = [{"id": ch["id"], "name": ch["name"]} for ch in channels]
+        if self.client:
+            for ch in self.channel_ids:
+                try:
+                    ref = self._resolve_channel_id(ch["id"])
+                    entity = await self.client.get_entity(ref)
+                    self.channels[ch["id"]] = {"entity": entity, "name": ch["name"]}
+                except Exception as e:
+                    logger.warning("No se pudo resolver canal %d: %s", ch["id"], e)
+
+    def _resolve_channel_id(self, ch_id):
+        if ch_id > 0:
+            return int(f"-100{ch_id}")
+        return ch_id
 
     async def start(self):
-        session_file = os.path.join("session", "user")
-        os.makedirs("session", exist_ok=True)
+        session_file = self._session_path()
+        os.makedirs(os.path.dirname(session_file), exist_ok=True)
         self.client = TelegramClient(session_file, self.api_id, self.api_hash)
         await self.client.start(phone=self.phone)
         for ch in self.channel_ids:
-            entity = await self.client.get_entity(ch["id"])
-            self.channels[ch["id"]] = {"entity": entity, "name": ch["name"]}
+            try:
+                ref = self._resolve_channel_id(ch["id"])
+                entity = await self.client.get_entity(ref)
+                self.channels[ch["id"]] = {"entity": entity, "name": ch["name"]}
+            except Exception as e:
+                logger.warning("No se pudo resolver canal %d: %s", ch["id"], e)
+
+    async def add_channel(self, ch_id, name):
+        for ch in self.channel_ids:
+            if ch["id"] == ch_id:
+                ch["name"] = name
+                return False
+        self.channel_ids.append({"id": ch_id, "name": name})
+        try:
+            ref = self._resolve_channel_id(ch_id)
+            entity = await self.client.get_entity(ref)
+            self.channels[ch_id] = {"entity": entity, "name": name}
+        except Exception:
+            pass
+        return True
+
+    async def refresh_from_db(self, db_channels: list[dict]):
+        self.channel_ids = [{"id": ch["id"], "name": ch["name"]} for ch in db_channels]
+        new_channels = {}
+        for ch in self.channel_ids:
+            cid = ch["id"]
+            if cid in self.channels:
+                new_channels[cid] = self.channels[cid]
+                new_channels[cid]["name"] = ch["name"]
+            elif self.client:
+                try:
+                    ref = self._resolve_channel_id(cid)
+                    entity = await self.client.get_entity(ref)
+                    new_channels[cid] = {"entity": entity, "name": ch["name"]}
+                except Exception:
+                    pass
+        self.channels = new_channels
 
     async def stop(self):
         if self.client:
             await self.client.disconnect()
 
     async def login_interactive(self):
-        session_file = os.path.join("session", "user")
-        os.makedirs("session", exist_ok=True)
+        session_file = self._session_path()
+        os.makedirs(os.path.dirname(session_file), exist_ok=True)
         self.client = TelegramClient(session_file, self.api_id, self.api_hash)
         await self.client.connect()
 
@@ -52,7 +118,7 @@ class TelegramDownloader:
                 await self.client.sign_in(password=password)
 
         for ch in self.channel_ids:
-            await self.client.get_entity(ch["id"])
+            await self.client.get_entity(self._resolve_channel_id(ch["id"]))
         print("Login correcto. Sesion guardada en session/user.session")
 
     async def list_dialogs(self):

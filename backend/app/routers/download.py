@@ -6,33 +6,35 @@ import re
 import shutil
 import subprocess
 import time
+from typing import Annotated
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, BackgroundTasks, HTTPException, Request
-from fastapi.responses import HTMLResponse, FileResponse, StreamingResponse
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
-from telegram_client import TelegramDownloader
-from extractor import extract_archive, find_first_archive
+from app.auth.dependencies import get_current_user, get_current_user_ws
+from app.services.telegram_client import TelegramDownloader
+from app.services.extractor import extract_archive, find_first_archive
+from app.services.storage import format_size, get_free_space, suggest_folder_name, create_movie_folder
+from app.services.storage import save_paused_batch, load_paused_batches, delete_paused_batch
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s | %(levelname)-7s | %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-    stream=__import__("sys").stdout,
-)
 logger = logging.getLogger("tmd")
-from storage import format_size, get_free_space, suggest_folder_name, create_movie_folder
-from storage import save_paused_batch, load_paused_batches, delete_paused_batch
 
-app = FastAPI(title="Telegram Movie Downloader")
+router = APIRouter(prefix="/api", tags=["download"])
 
-ENV_FILE = ".env"
+active_ws: list[WebSocket] = []
+_batch_tasks: dict[str, asyncio.Task] = {}
 
-downloader = None
-config = {}
-active_ws = []
-_batch_tasks = {}
-_stream_semaphore = None
+downloader: TelegramDownloader | None = None
+config: dict = {}
+_stream_semaphore: asyncio.Semaphore | None = None
+
+
+def init_download_router(dl: TelegramDownloader, cfg: dict):
+    global downloader, config, _stream_semaphore
+    downloader = dl
+    config = cfg
+    _stream_semaphore = asyncio.Semaphore(cfg.get("stream_max", 3))
 
 
 class SearchRequest(BaseModel):
@@ -52,56 +54,22 @@ class CancelRequest(BaseModel):
     batch_id: str
 
 
-class DeleteRequest(BaseModel):
-    path: str
-
-
 class PauseRequest(BaseModel):
     batch_id: str
 
 
-class ConfigRequest(BaseModel):
-    api_id: int | None = None
-    api_hash: str | None = None
-    phone: str | None = None
-    channels: list[dict] | None = None
-    download_path: str | None = None
-    extract_path: str | None = None
-    server_host: str | None = None
-    server_port: int | None = None
-    delete_archives_after_extract: bool | None = None
-    download_parallel: int | None = None
-    convert_dts_to_ac3: bool | None = None
+class DeleteRequest(BaseModel):
+    path: str
 
 
-@app.on_event("startup")
-async def startup():
-    global downloader, config, _stream_semaphore
-    with open("config.json") as f:
-        config = json.load(f)
-    _stream_semaphore = asyncio.Semaphore(config.get("stream_max", 3))
-    downloader = TelegramDownloader(config)
-    await downloader.start()
-    logger.info("Server started | channels: %d | download_parallel: %d",
-                len(config.get("channels", [])), config.get("download_parallel", 3))
-
-
-@app.on_event("shutdown")
-async def shutdown():
-    if downloader:
-        await downloader.stop()
-
-
-@app.get("/", response_class=HTMLResponse)
-async def index():
-    return FileResponse("templates/index.html")
-
-
-@app.post("/api/search")
-async def search(req: SearchRequest):
+@router.post("/search")
+async def search(req: SearchRequest, user: Annotated[str, Depends(get_current_user)]):
     if not req.query.strip():
         return {"results": [], "count": 0, "has_more": False, "last_message_id": 0}
-    results = await downloader.search_messages(req.query.strip(), 50, req.offset_id, reverse=req.sort_asc, channel_ids=req.channel_ids)
+    results = await downloader.search_messages(
+        req.query.strip(), 50, req.offset_id,
+        reverse=req.sort_asc, channel_ids=req.channel_ids,
+    )
     has_more = len(results) > req.page_size
     if has_more:
         results = results[:req.page_size]
@@ -116,42 +84,8 @@ async def search(req: SearchRequest):
     }
 
 
-@app.get("/api/channels")
-async def channels():
-    return {"channels": [
-        {"id": ch["id"], "name": ch["name"]}
-        for ch in downloader.channel_ids
-    ]}
-
-
-@app.get("/api/dialogs")
-async def dialogs():
-    try:
-        dialogs = await downloader.list_dialogs()
-    except Exception:
-        return {"dialogs": [], "error": "No se pudo conectar a Telegram"}
-    configured_ids = {ch["id"] for ch in config.get("channels", [])}
-    items = []
-    for d in dialogs:
-        items.append({
-            "id": d["id"],
-            "name": d["name"],
-            "is_channel": d["is_channel"],
-            "is_group": d["is_group"],
-            "is_megagroup": d.get("is_megagroup", False),
-            "active": d["id"] in configured_ids,
-        })
-    items.sort(key=lambda x: (not x["active"], not x["is_channel"], x["name"].lower()))
-    return {"dialogs": items}
-
-
-@app.get("/channels", response_class=HTMLResponse)
-async def channels_page():
-    return FileResponse("templates/channels.html")
-
-
-@app.post("/api/download")
-async def download(req: DownloadRequest, background_tasks: BackgroundTasks):
+@router.post("/download")
+async def download(req: DownloadRequest, background_tasks: BackgroundTasks, user: Annotated[str, Depends(get_current_user)]):
     dl = downloader
 
     for batch_id, batch in list(dl.active_batches.items()):
@@ -165,7 +99,6 @@ async def download(req: DownloadRequest, background_tasks: BackgroundTasks):
                     }
 
     base_name, folder_name, parts = await dl.find_related_parts(req.message_id, req.channel_id)
-
     if not parts:
         return {"error": "No se encontro el mensaje o no tiene archivo adjunto"}
 
@@ -220,8 +153,8 @@ async def download(req: DownloadRequest, background_tasks: BackgroundTasks):
     }
 
 
-@app.post("/api/cancel")
-async def cancel(req: CancelRequest):
+@router.post("/cancel")
+async def cancel(req: CancelRequest, user: Annotated[str, Depends(get_current_user)]):
     task = _batch_tasks.get(req.batch_id)
     if not task:
         return {"error": "Descarga no encontrada o ya finalizada"}
@@ -233,8 +166,8 @@ async def cancel(req: CancelRequest):
     return {"status": "cancelling", "batch_id": req.batch_id}
 
 
-@app.post("/api/pause")
-async def pause(req: PauseRequest):
+@router.post("/pause")
+async def pause(req: PauseRequest, user: Annotated[str, Depends(get_current_user)]):
     task = _batch_tasks.get(req.batch_id)
     batch = downloader.active_batches.get(req.batch_id)
     if not task or not batch or batch["status"] != "downloading":
@@ -257,8 +190,8 @@ async def pause(req: PauseRequest):
     return {"status": "paused", "batch_id": req.batch_id}
 
 
-@app.get("/api/resumable")
-async def resumable():
+@router.get("/resumable")
+async def resumable(user: Annotated[str, Depends(get_current_user)]):
     items = []
     for bid, b in load_paused_batches().items():
         items.append({
@@ -277,8 +210,8 @@ async def resumable():
     return {"batches": items}
 
 
-@app.post("/api/resume")
-async def resume(req: PauseRequest, background_tasks: BackgroundTasks):
+@router.post("/resume")
+async def resume(req: PauseRequest, background_tasks: BackgroundTasks, user: Annotated[str, Depends(get_current_user)]):
     dl = downloader
     saved = load_paused_batches().get(req.batch_id)
     if not saved:
@@ -313,8 +246,8 @@ async def resume(req: PauseRequest, background_tasks: BackgroundTasks):
     }
 
 
-@app.get("/api/status")
-async def status():
+@router.get("/status")
+async def status(user: Annotated[str, Depends(get_current_user)]):
     batches = []
     for bid, b in downloader.active_batches.items():
         batches.append({
@@ -340,8 +273,8 @@ async def status():
     }
 
 
-@app.delete("/api/files")
-async def delete_file(req: DeleteRequest):
+@router.delete("/files")
+async def delete_file(req: DeleteRequest, user: Annotated[str, Depends(get_current_user)]):
     base_dir = os.path.realpath(config["extract_path"])
     target = os.path.realpath(req.path)
     if not target.startswith(base_dir + os.sep) and target != base_dir:
@@ -358,8 +291,9 @@ async def delete_file(req: DeleteRequest):
         return {"error": str(e)}
 
 
-@app.get("/api/files")
-async def list_files(subpath: str = ""):
+@router.get("/files")
+async def list_files(subpath: str = "", user: Annotated[str, Depends(get_current_user)] = None):
+    from app.services.tmdb import clean_title
     base = os.path.realpath(config["extract_path"])
     if subpath:
         target = os.path.realpath(os.path.join(base, subpath))
@@ -369,26 +303,120 @@ async def list_files(subpath: str = ""):
         target = base
     if not os.path.isdir(target):
         return {"files": [], "path": target}
+
+    VIDEO_EXTS = {".mkv", ".mp4", ".avi", ".mov", ".wmv", ".flv", ".webm", ".m4v", ".ts"}
+    SEASON_RE = re.compile(r"^(.*?)\s*[sS](\d{1,2})\s*$")
+
+    dirs = [e for e in sorted(os.listdir(target)) if os.path.isdir(os.path.join(target, e))]
+    season_groups: dict[str, list[str]] = {}
+    standalone_dirs = []
+
+    for d in dirs:
+        m = SEASON_RE.match(d)
+        if m:
+            base_name = m.group(1).strip()
+            key = base_name.lower()
+            if key not in season_groups:
+                season_groups[key] = []
+            season_groups[key].append(d)
+        else:
+            standalone_dirs.append(d)
+
     items = []
+    processed_dirs = set()
+
+    for key, season_dirs in season_groups.items():
+        all_episodes = []
+        for sd in sorted(season_dirs):
+            sd_path = os.path.join(target, sd)
+            for vf in sorted(os.listdir(sd_path)):
+                vf_path = os.path.join(sd_path, vf)
+                if os.path.splitext(vf)[1].lower() in VIDEO_EXTS and os.path.isfile(vf_path):
+                    all_episodes.append({
+                        "name": vf,
+                        "size": format_size(os.path.getsize(vf_path)),
+                        "path": vf_path,
+                    })
+            processed_dirs.add(sd)
+        if len(all_episodes) >= 1:
+            display_name = season_dirs[0] if len(season_dirs) == 1 else key.title()
+            items.append({
+                "name": display_name,
+                "is_dir": True,
+                "size": format_size(sum(
+                    os.path.getsize(os.path.join(target, sd, ep["name"]))
+                    for sd in season_dirs
+                    for ep in all_episodes
+                    if os.path.isfile(os.path.join(target, sd, ep["name"]))
+                )),
+                "path": os.path.join(target, season_dirs[0]),
+                "is_series": True,
+                "clean_name": clean_title(key),
+                "episodes": all_episodes,
+            })
+
+    for d in standalone_dirs:
+        full = os.path.join(target, d)
+        sub_files = sorted(os.listdir(full))
+        videos = [f for f in sub_files if os.path.splitext(f)[1].lower() in VIDEO_EXTS
+                  and os.path.isfile(os.path.join(full, f))]
+        if len(videos) > 1:
+            episodes = []
+            for vf in videos:
+                vf_path = os.path.join(full, vf)
+                episodes.append({
+                    "name": vf,
+                    "size": format_size(os.path.getsize(vf_path)),
+                    "path": vf_path,
+                })
+            items.append({
+                "name": d,
+                "is_dir": True,
+                "size": format_size(_dir_size(full)),
+                "path": full,
+                "is_series": True,
+                "clean_name": clean_title(d),
+                "episodes": episodes,
+            })
+            continue
+        elif len(videos) == 1:
+            vf = videos[0]
+            vf_path = os.path.join(full, vf)
+            items.append({
+                "name": vf,
+                "is_dir": False,
+                "size": format_size(os.path.getsize(vf_path)),
+                "path": vf_path,
+                "is_series": False,
+                "clean_name": clean_title(vf),
+            })
+            continue
+
     for entry in sorted(os.listdir(target)):
         full = os.path.join(target, entry)
+        if os.path.isdir(full):
+            continue
         items.append({
             "name": entry,
-            "is_dir": os.path.isdir(full),
-            "size": format_size(_dir_size(full)) if os.path.isdir(full) else format_size(os.path.getsize(full)),
+            "is_dir": False,
+            "size": format_size(os.path.getsize(full)),
             "path": full,
+            "is_series": False,
+            "clean_name": clean_title(entry),
         })
     return {"files": items, "path": target, "parent": subpath}
 
 
-@app.get("/api/stream")
-async def stream(request: Request, path: str = ""):
+@router.get("/stream")
+async def stream(request: Request, path: str = "", user: Annotated[str, Depends(get_current_user)] = None):
     base = os.path.realpath(config["extract_path"])
     target = os.path.realpath(os.path.join(base, path))
     if not target.startswith(base + os.sep) and target != base:
         raise HTTPException(status_code=403, detail="Ruta no permitida")
     if not os.path.isfile(target):
         raise HTTPException(status_code=404, detail="Archivo no encontrado")
+
+    file_size = os.path.getsize(target)
     ext = path.lower().rsplit(".", 1)[-1] if "." in path else ""
     mime_map = {
         "mkv": "video/x-matroska", "mp4": "video/mp4", "avi": "video/x-msvideo",
@@ -397,62 +425,206 @@ async def stream(request: Request, path: str = ""):
     }
     content_type = mime_map.get(ext, "application/octet-stream")
 
+    range_header = request.headers.get("Range")
+    start = 0
+    end = file_size - 1
+
+    if range_header:
+        match = re.match(r"bytes=(\d+)-(\d*)", range_header)
+        if match:
+            start = int(match.group(1))
+            end_str = match.group(2)
+            end = int(end_str) if end_str else file_size - 1
+            if end >= file_size:
+                end = file_size - 1
+            if start > end:
+                raise HTTPException(status_code=416, detail="Range no valido")
+
     async with _stream_semaphore:
+        CHUNK = 1024 * 1024
+        content_length = end - start + 1
+
         async def chunked_stream():
-            CHUNK = 1024 * 1024
             with open(target, "rb") as f:
-                while True:
-                    chunk = f.read(CHUNK)
+                f.seek(start)
+                remaining = content_length
+                while remaining > 0:
+                    chunk = f.read(min(CHUNK, remaining))
                     if not chunk:
                         break
+                    remaining -= len(chunk)
                     yield chunk
-                    if await request.is_disconnected():
-                        return
+
+        headers = {
+            "Content-Disposition": "inline",
+            "Accept-Ranges": "bytes",
+            "Content-Length": str(content_length),
+        }
+
+        if range_header:
+            headers["Content-Range"] = f"bytes {start}-{end}/{file_size}"
+            return StreamingResponse(
+                chunked_stream(),
+                status_code=206,
+                media_type=content_type,
+                headers=headers,
+            )
 
         return StreamingResponse(
             chunked_stream(),
             media_type=content_type,
-            headers={
-                "Content-Disposition": "inline",
-                "Accept-Ranges": "bytes",
-            }
+            headers=headers,
         )
 
 
-@app.get("/dev", response_class=HTMLResponse)
-async def dev_page():
-    return FileResponse("templates/logs.html")
+@router.get("/channels")
+async def channels(user: Annotated[str, Depends(get_current_user)]):
+    from app.database.connection import get_active_channels
+    db_channels = await get_active_channels()
+    if db_channels:
+        return {"channels": db_channels}
+    return {"channels": [
+        {"id": ch["id"], "name": ch["name"]}
+        for ch in downloader.channel_ids
+    ]}
 
 
-@app.get("/settings", response_class=HTMLResponse)
-async def settings_page():
-    return FileResponse("templates/settings.html")
+@router.get("/dialogs")
+async def dialogs(user: Annotated[str, Depends(get_current_user)]):
+    try:
+        dialogs = await downloader.list_dialogs()
+    except Exception:
+        return {"dialogs": [], "error": "No se pudo conectar a Telegram"}
+
+    from app.database.connection import get_all_channels
+    db_all = await get_all_channels()
+    configured_ids = {ch["id"] for ch in (db_all or []) if ch.get("active")}
+
+    items = []
+    for d in dialogs:
+        items.append({
+            "id": d["id"],
+            "name": d["name"],
+            "is_channel": d["is_channel"],
+            "is_group": d["is_group"],
+            "is_megagroup": d.get("is_megagroup", False),
+            "active": d["id"] in configured_ids,
+        })
+    items.sort(key=lambda x: (not x["active"], not x["is_channel"], x["name"].lower()))
+    return {"dialogs": items}
 
 
-@app.get("/api/config")
-async def get_config():
-    sources = _get_env_sources()
-    return {"config": config, "sources": sources, "has_env": os.path.isfile(ENV_FILE)}
+class AddChannelRequest(BaseModel):
+    url: str
 
 
-@app.post("/api/config")
-async def save_config(req: ConfigRequest):
+@router.post("/channels/add")
+async def add_channel_by_url(req: AddChannelRequest, user: Annotated[str, Depends(get_current_user)]):
+    url = req.url.strip()
+    if not url:
+        return {"error": "URL vacia"}
+
+    match = re.match(r'(?:https?://)?t\.me/(c/)?(-?\d+)(?:/\d+)?', url)
+    if not match:
+        match = re.match(r'(?:https?://)?t\.me/([a-zA-Z][\w]+)', url)
+    if not match:
+        return {"error": "URL no valida. Formatos:\n- https://t.me/c/ID\n- https://t.me/username"}
+
+    if match.group(1) == "c/" or (match.group(2) and match.group(2).isdigit()):
+        num = match.group(2)
+        entity_input = int(f"-100{num}" if not num.startswith("-") else num)
+    else:
+        entity_input = match.group(1)
+        if not entity_input:
+            return {"error": "No se pudo extraer el ID/nombre del canal"}
+
+    try:
+        client = downloader.client
+        entity = await client.get_entity(entity_input)
+        name = getattr(entity, "title", None) or getattr(entity, "first_name", None) or "Sin nombre"
+        ch_id = entity.id
+    except Exception as e:
+        logger.error("Error resolviendo canal: %s", e)
+        return {"error": f"No se pudo resolver el canal: {e}"}
+
+    is_new = await downloader.add_channel(ch_id, name)
+
+    try:
+        from app.database.connection import upsert_channel, get_pool
+        if get_pool():
+            await upsert_channel(ch_id, name)
+    except Exception as e:
+        logger.warning("No se pudo guardar canal en Oracle: %s", e)
+
+    logger.info("Canal %s | ID=%d | name=%s", "anadido" if is_new else "actualizado", ch_id, name)
+    return {
+        "status": "added" if is_new else "updated",
+        "channel": {"id": ch_id, "name": name},
+    }
+
+
+class MetadataRequest(BaseModel):
+    names: list[str]
+
+
+@router.post("/metadata/batch")
+async def batch_metadata(req: MetadataRequest, user: Annotated[str, Depends(get_current_user)]):
+    api_key = config.get("tmdb_api_key", "")
+    if not api_key:
+        return {"metadata": {}}
+    from app.services.tmdb import batch_search, clean_title
+    cleaned = [clean_title(n) for n in req.names if n]
+    results = await batch_search(api_key, cleaned)
+    return {"metadata": {name: meta for name, meta in results.items()}}
+
+
+@router.get("/config")
+async def get_config(user: Annotated[str, Depends(get_current_user)]):
+    return {"config": {k: v for k, v in config.items() if k not in ("jwt_secret", "database_url")}}
+
+
+class ConfigUpdateRequest(BaseModel):
+    api_id: int | None = None
+    api_hash: str | None = None
+    phone: str | None = None
+    channels: list[dict] | None = None
+    download_path: str | None = None
+    extract_path: str | None = None
+    server_host: str | None = None
+    server_port: int | None = None
+    delete_archives_after_extract: bool | None = None
+    download_parallel: int | None = None
+    convert_dts_to_ac3: bool | None = None
+
+
+@router.post("/config")
+async def save_config_endpoint(req: ConfigUpdateRequest, user: Annotated[str, Depends(get_current_user)]):
     data = req.model_dump(exclude_none=True)
+
+    if "channels" in data:
+        try:
+            from app.database.connection import set_active_channels, get_active_channels
+            channel_ids = [ch["id"] for ch in data["channels"]]
+            await set_active_channels(channel_ids)
+            db_active = await get_active_channels()
+            if db_active:
+                await downloader.refresh_from_db(db_active)
+                config["channels"] = db_active
+        except Exception as e:
+            logger.warning("No se pudo actualizar canales en Oracle: %s", e)
+        data.pop("channels")
+
     for k, v in data.items():
         config[k] = v
-    if os.path.isfile(ENV_FILE):
-        _save_env_overrides(data, config)
-    with open("config.json", "w", encoding="utf-8") as f:
-        json.dump(config, f, indent=2)
-    if "channels" in data:
-        downloader.channel_ids = config["channels"]
-    if "download_path" in data:
-        downloader.download_path = config["download_path"]
-    return {"status": "saved"}
+
+    logger.info("Configuracion actualizada via API por %s: %s", user, list(data.keys()))
+    return {"status": "saved", "message": "Cambios aplicados en memoria. Para persistir, edita .env"}
 
 
-@app.get("/api/logs")
-async def logs(lines: int = 100):
+
+
+@router.get("/logs")
+async def logs(lines: int = 100, user: Annotated[str, Depends(get_current_user)] = None):
     try:
         result = subprocess.run(
             ["journalctl", "-u", "telegram-movie",
@@ -466,99 +638,22 @@ async def logs(lines: int = 100):
         return {"logs": [], "count": 0, "error": str(e)}
 
 
-@app.websocket("/ws/progress")
-async def ws_progress(ws: WebSocket):
-    await ws.accept()
-    active_ws.append(ws)
+@router.websocket("/ws/progress")
+async def ws_progress(websocket: WebSocket):
+    token = websocket.query_params.get("token")
+    username = await get_current_user_ws(websocket, token)
+    if not username:
+        await websocket.close(code=4001)
+        return
+
+    await websocket.accept()
+    active_ws.append(websocket)
     try:
         while True:
-            await ws.receive_text()
+            await websocket.receive_text()
     except WebSocketDisconnect:
-        if ws in active_ws:
-            active_ws.remove(ws)
-
-
-def _find_downloaded_files(base_dir):
-    found = set()
-    if not os.path.isdir(base_dir):
-        return found
-    for root, dirs, files in os.walk(base_dir):
-        for name in files:
-            found.add(_strip_filename(name).lower())
-        for name in dirs:
-            found.add(name.lower())
-    return found
-
-
-ENV_KEY_MAP = {
-    "api_id": "TMD_API_ID",
-    "api_hash": "TMD_API_HASH",
-    "phone": "TMD_PHONE",
-    "download_path": "TMD_DOWNLOAD_PATH",
-    "extract_path": "TMD_EXTRACT_PATH",
-    "server_host": "TMD_SERVER_HOST",
-    "server_port": "TMD_SERVER_PORT",
-    "download_parallel": "TMD_DOWNLOAD_PARALLEL",
-    "stream_max": "TMD_STREAM_MAX",
-    "delete_archives_after_extract": "TMD_DELETE_ARCHIVES",
-    "convert_dts_to_ac3": "TMD_CONVERT_DTS",
-}
-
-
-def _get_env_sources():
-    if not os.path.isfile(ENV_FILE):
-        return {}
-    sources = {}
-    with open(ENV_FILE, encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            key, _ = line.split("=", 1)
-            key = key.strip()
-            for cfg_key, env_key in ENV_KEY_MAP.items():
-                if env_key == key:
-                    sources[cfg_key] = "env"
-                    break
-    return sources
-
-
-def _save_env_overrides(data, config):
-    if not os.path.isfile(ENV_FILE):
-        return
-    with open(ENV_FILE, encoding="utf-8") as f:
-        lines = f.readlines()
-    updated = set()
-    for cfg_key, env_var in ENV_KEY_MAP.items():
-        if cfg_key not in data:
-            continue
-        val = config[cfg_key]
-        if isinstance(val, bool):
-            val = "true" if val else "false"
-        key = f"{env_var}="
-        found = False
-        for i, line in enumerate(lines):
-            if line.strip().startswith(key) or line.strip().startswith(f"# {key}") or line.strip().startswith(f"#{key}"):
-                lines[i] = f"{key}{val}\n"
-                found = True
-                updated.add(env_var)
-                break
-        if not found:
-            lines.append(f"{key}{val}\n")
-            updated.add(env_var)
-    with open(ENV_FILE, "w", encoding="utf-8") as f:
-        f.writelines(lines)
-
-
-def _strip_filename(name):
-    name = re.sub(r"\.part\d+", "", name, flags=re.IGNORECASE)
-    name = re.sub(r"\.\d{3,}$", "", name)
-    for ext in [".rar", ".zip", ".7z", ".tar.gz", ".tar.bz2", ".tar", ".tgz", ".tbz2",
-                ".mkv", ".mp4", ".avi", ".mov", ".wmv", ".flv", ".webm", ".m4v", ".ts"]:
-        if name.lower().endswith(ext):
-            name = name[:-len(ext)]
-            break
-    return name
+        if websocket in active_ws:
+            active_ws.remove(websocket)
 
 
 async def _broadcast_progress(data):
@@ -571,47 +666,6 @@ async def _broadcast_progress(data):
     for ws in disconnected:
         if ws in active_ws:
             active_ws.remove(ws)
-
-
-def _convert_dts_audio(file_list):
-    VIDEO_EXTS = ('.mkv', '.mp4', '.avi', '.ts', '.m4v', '.mov')
-    converted = []
-    for f in file_list:
-        if not f.lower().endswith(VIDEO_EXTS):
-            converted.append(f)
-            continue
-        try:
-            r = subprocess.run(
-                ["mediainfo", "--Inform=Audio;%Format%", f],
-                capture_output=True, text=True, timeout=10,
-            )
-            codec = r.stdout.strip()
-        except Exception:
-            codec = ""
-        if not codec or 'dts' not in codec.lower():
-            converted.append(f)
-            continue
-        out = os.path.splitext(f)[0] + "_ac3" + os.path.splitext(f)[1]
-        subprocess.run([
-            "ffmpeg", "-i", f, "-map", "0", "-c", "copy",
-            "-c:a", "ac3", "-b:a", "640k", out, "-y",
-            "-loglevel", "error",
-        ], check=True)
-        os.replace(out, f)
-        converted.append(f)
-    return converted
-
-
-def _flatten_single_subfolder(folder):
-    items = os.listdir(folder)
-    if len(items) != 1:
-        return
-    sub = os.path.join(folder, items[0])
-    if not os.path.isdir(sub):
-        return
-    for f in os.listdir(sub):
-        shutil.move(os.path.join(sub, f), os.path.join(folder, f))
-    os.rmdir(sub)
 
 
 async def _download_batch(batch_id):
@@ -764,7 +818,7 @@ async def _download_batch(batch_id):
             logger.info("Audio conversion starting | %s", batch.get("folder_name", ""))
             loop = asyncio.get_event_loop()
             convert_task = loop.run_in_executor(
-                None, _convert_dts_audio, all_extracted,
+                None, _convert_audio, all_extracted,
             )
             while not convert_task.done():
                 await _broadcast_progress({
@@ -822,6 +876,78 @@ async def _download_batch(batch_id):
 
     await asyncio.sleep(10)
     downloader.active_batches.pop(batch_id, None)
+
+
+def _find_downloaded_files(base_dir):
+    found = set()
+    if not os.path.isdir(base_dir):
+        return found
+    for root, dirs, files in os.walk(base_dir):
+        for name in files:
+            found.add(_strip_filename(name).lower())
+        for name in dirs:
+            found.add(name.lower())
+    return found
+
+
+def _strip_filename(name):
+    name = re.sub(r"\.part\d+", "", name, flags=re.IGNORECASE)
+    name = re.sub(r"\.\d{3,}$", "", name)
+    for ext in [".rar", ".zip", ".7z", ".tar.gz", ".tar.bz2", ".tar", ".tgz", ".tbz2",
+                ".mkv", ".mp4", ".avi", ".mov", ".wmv", ".flv", ".webm", ".m4v", ".ts"]:
+        if name.lower().endswith(ext):
+            name = name[:-len(ext)]
+            break
+    return name
+
+
+def _convert_audio(file_list):
+    VIDEO_EXTS = ('.mkv', '.mp4', '.avi', '.ts', '.m4v', '.mov')
+    INCOMPATIBLE = {'dts', 'dtshd', 'truehd', 'ac3', 'eac3', 'dolbydigital', 'dolbye', 'mlp'}
+    converted = []
+    for f in file_list:
+        if not f.lower().endswith(VIDEO_EXTS):
+            converted.append(f)
+            continue
+        try:
+            r = subprocess.run(
+                ["mediainfo", "--Inform=Audio;%Format%", f],
+                capture_output=True, text=True, timeout=10,
+            )
+            codec = r.stdout.strip().lower()
+        except Exception:
+            codec = ""
+        codec_norm = re.sub(r'[^a-z0-9]', '', codec)
+        if not codec_norm or not any(bad in codec_norm for bad in INCOMPATIBLE):
+            converted.append(f)
+            continue
+        logger.info("Audio conversion: %s -> AAC | codec=%s", os.path.basename(f), codec)
+        tmp = os.path.splitext(f)[0] + "_tmp" + os.path.splitext(f)[1]
+        try:
+            subprocess.run([
+                "ffmpeg", "-i", f, "-map", "0", "-c:v", "copy",
+                "-c:a", "aac", "-b:a", "256k", tmp, "-y",
+                "-loglevel", "error",
+            ], check=True)
+            os.replace(tmp, f)
+        except Exception as e:
+            logger.error("Audio conversion failed for %s: %s", f, e)
+            if os.path.isfile(tmp):
+                os.remove(tmp)
+        converted.append(f)
+    return converted
+
+
+def _flatten_single_subfolder(folder):
+    items = os.listdir(folder)
+    if len(items) != 1:
+        return
+    sub = os.path.join(folder, items[0])
+    if not os.path.isdir(sub):
+        return
+    for f in os.listdir(sub):
+        shutil.move(os.path.join(sub, f), os.path.join(folder, f))
+    os.rmdir(sub)
 
 
 def _cleanup_partial_files(folder, target_files=None):

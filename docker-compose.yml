@@ -1,0 +1,44 @@
+services:
+  backend:
+    build: ./backend
+    container_name: moviesandchill-backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./session:/app/session
+      - ./downloads:/app/downloads
+      - ./movies:/app/movies
+    env_file:
+      - .env
+    depends_on:
+      db:
+        condition: service_healthy
+
+  frontend:
+    build: ./frontend
+    container_name: moviesandchill-frontend
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+
+  db:
+    image: postgres:16-alpine
+    container_name: moviesandchill-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: moviesandchill
+      POSTGRES_USER: movieapp
+      POSTGRES_PASSWORD: movieapp123
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U movieapp -d moviesandchill"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  pgdata:
