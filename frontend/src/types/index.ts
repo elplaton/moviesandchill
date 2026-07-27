@@ -8,6 +8,18 @@ export interface SearchResult {
   channel_id: number;
   channel_name: string;
   downloaded: boolean;
+  clean_name?: string;
+  media_type?: string;
+  season?: number;
+  episode?: number;
+  tags?: string[];
+  tmdb_title?: string;
+  tmdb_year?: number;
+  tmdb_rating?: number;
+  tmdb_poster?: string;
+  tmdb_backdrop?: string;
+  tmdb_overview?: string;
+  tmdb_genres?: string[];
 }
 
 export interface Channel {
@@ -79,6 +91,7 @@ export interface TMDBMetadata {
   backdrop?: string;
   overview?: string;
   media_type?: string;
+  genres?: string[];
 }
 
 export interface AppConfig {
@@ -106,4 +119,35 @@ export interface DownloadState {
   speed?: string;
   _lastBytes?: number;
   _lastTime?: number;
+}
+
+export interface IndexChannelStatus {
+  channel_id: number;
+  channel_name: string;
+  total_indexed: number;
+  total_estimate: number;
+  total_scanned: number;
+  status: string;
+  phase: string;
+}
+
+export interface BrowseItem {
+  id: string;
+  title: string;
+  poster?: string;
+  backdrop?: string;
+  year?: number;
+  rating?: number;
+  overview?: string;
+  media_type: 'movie' | 'series';
+  episode_count?: number;
+  genres?: string[];
+  channel_id?: number;
+  channel_name?: string;
+  message_id?: number;
+}
+
+export interface BrowseRow {
+  genre: string;
+  items: BrowseItem[];
 }

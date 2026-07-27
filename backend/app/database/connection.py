@@ -34,6 +34,7 @@ async def _ensure_tables():
                 id          SERIAL PRIMARY KEY,
                 username    VARCHAR(100) NOT NULL UNIQUE,
                 password_hash VARCHAR(255) NOT NULL,
+                role        VARCHAR(20) DEFAULT 'user',
                 created_at  TIMESTAMP DEFAULT NOW()
             )
         """)
@@ -46,74 +47,76 @@ async def _ensure_tables():
                 added_at    TIMESTAMP DEFAULT NOW()
             )
         """)
-
-
-async def get_user_by_username(username: str):
-    if not _pool:
-        return None
-    async with _pool.acquire() as conn:
-        row = await conn.fetchrow(
-            "SELECT id, username, password_hash FROM users WHERE username = $1",
-            username,
-        )
-        if row:
-            return {"id": row["id"], "username": row["username"], "password_hash": row["password_hash"]}
-    return None
-
-
-async def create_user(username: str, password_hash: str):
-    if not _pool:
-        return
-    async with _pool.acquire() as conn:
-        await conn.execute(
-            "INSERT INTO users (username, password_hash) VALUES ($1, $2) ON CONFLICT DO NOTHING",
-            username, password_hash,
-        )
-
-
-async def get_all_channels():
-    if not _pool:
-        return []
-    async with _pool.acquire() as conn:
-        rows = await conn.fetch("SELECT channel_id, name, active FROM channels ORDER BY name")
-        return [{"id": r["channel_id"], "name": r["name"], "active": r["active"]} for r in rows]
-
-
-async def get_active_channels():
-    if not _pool:
-        return []
-    async with _pool.acquire() as conn:
-        rows = await conn.fetch("SELECT channel_id, name FROM channels WHERE active = TRUE ORDER BY name")
-        return [{"id": r["channel_id"], "name": r["name"]} for r in rows]
-
-
-async def upsert_channel(channel_id: int, name: str):
-    if not _pool:
-        return False
-    async with _pool.acquire() as conn:
-        existing = await conn.fetchval("SELECT id FROM channels WHERE channel_id = $1", channel_id)
-        if existing:
-            await conn.execute("UPDATE channels SET name = $1 WHERE channel_id = $2", name, channel_id)
-            return False
-        else:
-            await conn.execute(
-                "INSERT INTO channels (channel_id, name, active) VALUES ($1, $2, TRUE)",
-                channel_id, name,
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS media_items (
+                id              SERIAL PRIMARY KEY,
+                channel_id      BIGINT NOT NULL,
+                channel_name    VARCHAR(255),
+                message_id      INTEGER NOT NULL,
+                file_name       VARCHAR(500) NOT NULL,
+                file_size       BIGINT,
+                size_str        VARCHAR(50),
+                clean_title     VARCHAR(300),
+                media_type      VARCHAR(10),
+                season          INTEGER,
+                episode         INTEGER,
+                tags            TEXT[],
+                tmdb_id         INTEGER,
+                tmdb_valid      BOOLEAN,
+                tmdb_searched   BOOLEAN DEFAULT FALSE,
+                indexed_at      TIMESTAMP DEFAULT NOW(),
+                UNIQUE(channel_id, message_id)
             )
-            return True
+        """)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS tmdb_cache (
+                tmdb_id         INTEGER PRIMARY KEY,
+                media_type      VARCHAR(10) NOT NULL,
+                title           VARCHAR(300),
+                original_title  VARCHAR(300),
+                year            INTEGER,
+                rating          NUMERIC(4,2),
+                poster          VARCHAR(500),
+                backdrop        VARCHAR(500),
+                overview        TEXT,
+                genres          TEXT[],
+                runtime         INTEGER,
+                seasons_count   INTEGER,
+                cached_at       TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS index_progress (
+                channel_id      BIGINT PRIMARY KEY,
+                last_message_id INTEGER DEFAULT 0,
+                total_indexed   INTEGER DEFAULT 0,
+                total_scanned   INTEGER DEFAULT 0,
+                total_estimate  INTEGER DEFAULT 0,
+                status          VARCHAR(20) DEFAULT 'pending'
+            )
+        """)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS user_preferences (
+                user_id       INTEGER PRIMARY KEY REFERENCES users(id),
+                liked_movies  INTEGER[],
+                liked_series  INTEGER[],
+                genres        JSONB,
+                created_at    TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        try:
+            await conn.execute("ALTER TABLE index_progress ADD COLUMN IF NOT EXISTS total_scanned INTEGER DEFAULT 0")
+            await conn.execute("ALTER TABLE index_progress ADD COLUMN IF NOT EXISTS total_estimate INTEGER DEFAULT 0")
+            await conn.execute("ALTER TABLE index_progress ADD COLUMN IF NOT EXISTS phase VARCHAR(20) DEFAULT 'pending'")
+            await conn.execute("ALTER TABLE media_items ADD COLUMN IF NOT EXISTS tmdb_searched BOOLEAN DEFAULT FALSE")
+            await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS role VARCHAR(20) DEFAULT 'user'")
+            await conn.execute("ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS liked_years INTEGER[] DEFAULT '{}'")
+        except Exception:
+            pass
 
 
-async def set_active_channels(channel_ids: list[int]):
-    if not _pool:
-        return
-    async with _pool.acquire() as conn:
-        await conn.execute("UPDATE channels SET active = FALSE")
-        for cid in channel_ids:
-            await conn.execute("UPDATE channels SET active = TRUE WHERE channel_id = $1", cid)
-
-
-async def remove_channel(channel_id: int):
-    if not _pool:
-        return
-    async with _pool.acquire() as conn:
-        await conn.execute("DELETE FROM channels WHERE channel_id = $1", channel_id)
+from app.database.users import get_user_by_username, create_user
+from app.database.channels_db import get_all_channels, get_active_channels, upsert_channel, set_active_channels, remove_channel
+from app.database.media import insert_media_item, update_media_tmdb, search_media, get_media_without_tmdb, get_media_by_channel, mark_batch_tmdb_searched
+from app.database.tmdb_cache import get_tmdb_cached, upsert_tmdb_cache
+from app.database.index_progress import get_index_progress, upsert_index_progress, get_index_stats, set_index_phase, reset_all_index_progress, get_index_status

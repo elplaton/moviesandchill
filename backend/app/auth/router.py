@@ -52,4 +52,6 @@ async def refresh(req: RefreshRequest):
 
 @router.get("/me")
 async def me(user: Annotated[str, Depends(get_current_user)]):
-    return {"username": user}
+    from app.database.users import get_user_by_username
+    db_user = await get_user_by_username(user)
+    return {"username": user, "role": db_user.get("role", "user") if db_user else "user"}

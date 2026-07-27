@@ -40,6 +40,7 @@ def load_config() -> dict:
         "jwt_secret": os.getenv("TMD_JWT_SECRET", "default-secret-change-me"),
         "database_url": os.getenv("TMD_DATABASE_URL", "postgresql://movieapp:movieapp123@db:5432/moviesandchill"),
         "tmdb_api_key": os.getenv("TMD_TMBD_API_KEY", ""),
+        "tmdb_enabled": _env_bool("TMD_TMDB_ENABLED", False),
     }
 
     log_level = os.getenv("LOG_LEVEL")

@@ -1,6 +1,8 @@
 import { useEffect, useState, useMemo } from 'react';
 import DownloadRing, { type RingStatus } from './DownloadRing';
-import { cleanFileName } from './MovieCard';
+import { cleanFileName } from '../utils/text';
+import { formatBytes } from '../utils/format';
+import { RES_TAGS, MULTIPART } from '../utils/regex';
 import type { TMDBMetadata, SearchResult, DownloadState } from '../types';
 
 interface MovieDetailProps {
@@ -12,10 +14,6 @@ interface MovieDetailProps {
   onCancelDownload?: (batchId: string) => void;
   downloadStates?: Map<number, DownloadState>;
 }
-
-const RES_TAGS = /\b(2160p|4k|4K|1080p|720p|480p|hdr|hdrip|bdrip|bluray|web-dl|webrip|brrip|dvdrip|hdtv|remux|dv|dovi|dolby vision|hdr10|hdr10\+)\b/gi;
-
-const MULTIPART = /^(.+?)(?:\.part(\d+))?\.(?:rar|r(\d{2,})|(\d{3,})|zip\.(\d{3,})|7z\.(\d{3,})|z(\d{2,}))$/i;
 
 interface MultipartGroup {
   baseName: string;
@@ -54,17 +52,6 @@ function groupMultiparts(items: SearchResult[]): { groups: MultipartGroup[]; sin
   }
 
   return { groups, singles };
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes === 0) return '0 B';
-  const u = ['B', 'KB', 'MB', 'GB', 'TB'];
-  let v = bytes;
-  for (let i = 0; i < u.length; i++) {
-    if (v < 1024) return `${v.toFixed(1)} ${u[i]}`;
-    v /= 1024;
-  }
-  return `${v.toFixed(1)} PB`;
 }
 
 function extractRes(name: string): string {

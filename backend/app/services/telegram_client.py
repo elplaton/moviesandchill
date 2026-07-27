@@ -54,6 +54,21 @@ class TelegramDownloader:
             return int(f"-100{ch_id}")
         return ch_id
 
+    async def get_total_messages(self, channel_id: int):
+        ch_data = self.channels.get(channel_id)
+        if not ch_data:
+            return 0
+        try:
+            msgs = await self.client.get_messages(ch_data["entity"], limit=1)
+            if msgs:
+                if hasattr(msgs, 'id'):
+                    return msgs.id
+                if isinstance(msgs, (list, tuple)) and len(msgs) > 0:
+                    return msgs[0].id
+        except Exception as e:
+            logger.warning("No se pudo obtener total de mensajes del canal %d: %s", channel_id, e)
+        return 0
+
     async def start(self):
         session_file = self._session_path()
         os.makedirs(os.path.dirname(session_file), exist_ok=True)

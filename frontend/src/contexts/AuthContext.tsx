@@ -6,22 +6,38 @@ interface AuthContextType {
   isAuthenticated: boolean;
   isLoading: boolean;
   username: string | null;
+  isAdmin: boolean;
+  hasPreferences: boolean | null;
   login: (username: string, password: string) => Promise<string | null>;
   logout: () => void;
+  refreshPreferences: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType>({
   isAuthenticated: false,
   isLoading: true,
   username: null,
+  isAdmin: false,
+  hasPreferences: null,
   login: async () => null,
   logout: () => {},
+  refreshPreferences: async () => {},
 });
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [username, setUsername] = useState<string | null>(null);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [hasPreferences, setHasPreferences] = useState<boolean | null>(null);
+
+  const checkPreferences = async () => {
+    try {
+      const res = await apiFetch('/preferences');
+      const data = await res.json();
+      setHasPreferences(data.preferences !== null);
+    } catch { setHasPreferences(false); }
+  };
 
   useEffect(() => {
     const token = getAccessToken();
@@ -32,7 +48,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           if (data.username) {
             setIsAuthenticated(true);
             setUsername(data.username);
+            setIsAdmin(data.role === 'admin');
             connectProgressWs();
+            checkPreferences();
           } else {
             clearTokens();
           }
@@ -56,11 +74,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setTokens(data.access_token, data.refresh_token);
       setIsAuthenticated(true);
       setUsername(user);
+      apiFetch('/auth/me')
+        .then((res) => res.json())
+        .then((d) => setIsAdmin(d.role === 'admin'));
       connectProgressWs();
+      await checkPreferences();
       return null;
     } catch {
       return 'Error de conexión';
     }
+  };
+
+  const refreshPreferences = async () => {
+    await checkPreferences();
   };
 
   const logout = () => {
@@ -68,10 +94,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     disconnectProgressWs();
     setIsAuthenticated(false);
     setUsername(null);
+    setIsAdmin(false);
+    setHasPreferences(null);
   };
 
   return (
-    <AuthContext.Provider value={{ isAuthenticated, isLoading, username, login, logout }}>
+    <AuthContext.Provider value={{ isAuthenticated, isLoading, username, isAdmin, hasPreferences, login, logout, refreshPreferences }}>
       {children}
     </AuthContext.Provider>
   );

@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import DownloadRing, { type RingStatus } from './DownloadRing';
+import { cleanFileName } from '../utils/text';
 import type { DownloadState } from '../types';
 
 interface MovieCardProps {
@@ -9,6 +10,7 @@ interface MovieCardProps {
   posterUrl?: string;
   year?: number;
   rating?: number;
+  genres?: string[];
   onPlay?: () => void;
   onDownload?: () => void;
   onCancelDownload?: () => void;
@@ -35,22 +37,8 @@ function getGradient(name: string): string {
   return `linear-gradient(160deg, hsl(${h}, ${s}%, 38%), hsl(${(h + 50) % 360}, ${s - 5}%, 18%), hsl(${(h + 20) % 360}, ${s - 15}%, 12%))`;
 }
 
-export function cleanFileName(name: string): string {
-  return name
-    .replace(/\.(mkv|mp4|avi|mov|wmv|flv|webm|m4v|ts|rar|zip|7z|tar\.gz|tar\.bz2|tar|tgz|tbz2)$/i, '')
-    .replace(/\.part\d+/i, '')
-    .replace(/\.r\d{2,}$/i, '')
-    .replace(/\.\d{3,}$/, '')
-    .replace(/\s+\d{1,2}x\d{2,}\b.*$/i, '')
-    .replace(/\s+(1080p|720p|2160p|4k|zip|rar|7z)\s*$/i, '')
-    .replace(/\[.*?\]/g, '')
-    .replace(/[._]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
 export default function MovieCard({
-  name, subtitle, size, posterUrl, year, rating,
+  name, subtitle, size, posterUrl, year, rating, genres,
   onPlay, onDownload, onCancelDownload, onDelete, onClick,
   downloaded, downloadState, hoverLabel, actions = 'play',
 }: MovieCardProps) {
@@ -154,6 +142,9 @@ export default function MovieCard({
         <div className="relative z-10 w-full">
           <p className="text-white text-xs font-semibold leading-tight line-clamp-2 drop-shadow-md">{displayName}</p>
           {year && <p className="text-gray-300 text-[10px] mt-0.5">{year}</p>}
+          {genres && genres.length > 0 && (
+            <p className="text-gray-400 text-[9px] mt-0.5">{genres.slice(0, 2).join(' · ')}</p>
+          )}
           {subtitle && <p className="text-gray-300 text-[10px] mt-0.5 drop-shadow">{subtitle}</p>}
           {size && <p className="text-gray-400 text-[10px] mt-0.5">{size}</p>}
         </div>

@@ -38,6 +38,23 @@ async def get_current_user(
     return payload["sub"]
 
 
+async def get_current_admin(
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(security)] = None,
+    token: Annotated[str | None, Query()] = None,
+):
+    username = await get_current_user(credentials=credentials, token=token)
+
+    from app.database.users import get_user_by_username
+    user = await get_user_by_username(username)
+    if not user or user.get("role") != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Solo administradores",
+        )
+
+    return username
+
+
 async def get_current_user_ws(
     websocket: WebSocket,
     token: Annotated[str | None, Query()] = None,
