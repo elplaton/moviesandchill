@@ -221,9 +221,9 @@ async def _download_batch(batch_id):
 
         if config.get("convert_dts_to_ac3", False):
             batch["status"] = "converting"
-            logger.info("Audio conversion starting | %s", batch.get("folder_name", ""))
+            logger.info("TV compatibility conversion starting | %s", batch.get("folder_name", ""))
             loop = asyncio.get_event_loop()
-            convert_task = loop.run_in_executor(None, _convert_audio, all_extracted)
+            convert_task = loop.run_in_executor(None, _make_compatible, all_extracted)
             while not convert_task.done():
                 await broadcast_progress({"type": "batch_status", "batch_id": batch_id, "status": "converting", "overall_progress": 100})
                 await asyncio.sleep(0.5)
@@ -281,28 +281,58 @@ def _flatten_single_subfolder(folder):
     os.rmdir(sub)
 
 
-def _convert_audio(file_list):
-    VIDEO_EXTS = ('.mkv', '.mp4', '.avi', '.ts', '.m4v', '.mov')
-    INCOMPATIBLE = {'dts', 'dtshd', 'truehd', 'ac3', 'eac3', 'dolbydigital', 'dolbye', 'mlp'}
+def _make_compatible(file_list):
+    VIDEO_EXTS = ('.mkv', '.mp4', '.avi', '.ts', '.m4v', '.mov', '.wmv', '.flv', '.webm')
+    # Video codecs reproducible en Samsung TV 2018+ (H.264/AVC y H.265/HEVC)
+    COMPAT_VIDEO = ('avc', 'h264', 'x264', 'hevc', 'h265', 'x265')
+    # Audio compatible (solo AAC; el resto se transcodea)
+    COMPAT_AUDIO = ('aac', 'mp4a')
+    # Contenedores reproducibles
+    COMPAT_CONTAINER = ('matroska', 'mpeg4', 'mpeg-4')
+
+    def _info(fmt):
+        try:
+            r = subprocess.run(["mediainfo", f"--Inform={fmt}", f], capture_output=True, text=True, timeout=10)
+            return re.sub(r'[^a-z0-9]', '', r.stdout.strip().lower())
+        except Exception:
+            return ""
+
     converted = []
     for f in file_list:
         if not f.lower().endswith(VIDEO_EXTS):
             converted.append(f); continue
-        try:
-            r = subprocess.run(["mediainfo", "--Inform=Audio;%Format%", f], capture_output=True, text=True, timeout=10)
-            codec = r.stdout.strip().lower()
-        except Exception:
-            codec = ""
-        codec_norm = re.sub(r'[^a-z0-9]', '', codec)
-        if not codec_norm or not any(bad in codec_norm for bad in INCOMPATIBLE):
+
+        vnorm = _info("Video;%Format%")
+        anorm = _info("Audio;%Format%")
+        cnorm = _info("General;%Format%")
+
+        video_ok = (not vnorm) or any(c in vnorm for c in COMPAT_VIDEO)
+        audio_ok = (not anorm) or any(c in anorm for c in COMPAT_AUDIO)
+        container_ok = (not cnorm) or any(c in cnorm for c in COMPAT_CONTAINER)
+
+        if video_ok and audio_ok and container_ok:
             converted.append(f); continue
-        logger.info("Audio conversion: %s -> AAC | codec=%s", os.path.basename(f), codec)
-        tmp = os.path.splitext(f)[0] + "_tmp" + os.path.splitext(f)[1]
+
+        v_args = ["-c:v", "copy"] if video_ok else ["-c:v", "libx264", "-preset", "veryfast", "-crf", "20"]
+        a_args = ["-c:a", "copy"] if audio_ok else ["-c:a", "aac", "-b:a", "256k"]
+
+        reason = []
+        if not video_ok: reason.append(f"video={vnorm or '?'}")
+        if not audio_ok: reason.append(f"audio={anorm or '?'}")
+        if not container_ok: reason.append(f"container={cnorm or '?'}")
+        logger.info("TV conversion: %s -> H.264/AAC/MKV | %s", os.path.basename(f), ", ".join(reason))
+
+        new_name = os.path.splitext(f)[0] + ".mkv"
+        tmp = os.path.splitext(f)[0] + "_tv.mkv"
         try:
-            subprocess.run(["ffmpeg", "-i", f, "-map", "0", "-c:v", "copy", "-c:a", "aac", "-b:a", "256k", tmp, "-y", "-loglevel", "error"], check=True)
-            os.replace(tmp, f)
+            subprocess.run(["ffmpeg", "-i", f, "-map", "0", *v_args, *a_args, tmp, "-y", "-loglevel", "error"], check=True)
+            if new_name != f and os.path.isfile(f):
+                os.remove(f)
+            os.replace(tmp, new_name)
+            converted.append(new_name)
         except Exception as e:
-            logger.error("Audio conversion failed for %s: %s", f, e)
+            logger.error("TV conversion failed for %s: %s", f, e)
             if os.path.isfile(tmp): os.remove(tmp)
-        converted.append(f)
+            converted.append(f)
+
     return converted

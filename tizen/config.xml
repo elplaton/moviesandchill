@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<widget xmlns="http://www.w3.org/ns/widgets" xmlns:tizen="http://tizen.org/ns/widgets" id="http://moviesandchill.org/tv" version="1.0.0" viewmodes="maximized">
+    <tizen:application id="org.moviesandchill.tv" package="org.moviesandchill" required_version="2.3"/>
+    <content src="index.html"/>
+    <feature name="http://tizen.org/feature/network.internet"/>
+    <feature name="http://tizen.org/feature/tv.inputdevice"/>
+    <icon src="icons/icon-320.png"/>
+    <name>Movies &amp; Chill</name>
+    <tizen:profile name="tv"/>
+    <tizen:privilege name="http://tizen.org/privilege/internet"/>
+    <tizen:privilege name="http://tizen.org/privilege/tv.inputdevice"/>
+    <tizen:privilege name="http://tizen.org/privilege/tv.display"/>
+    <tizen:privilege name="http://tizen.org/privilege/fullscreen"/>
+</widget>

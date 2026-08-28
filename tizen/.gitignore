@@ -1,0 +1,4 @@
+node_modules/
+dist/
+MoviesChill.wgt
+.wgt-staging/
