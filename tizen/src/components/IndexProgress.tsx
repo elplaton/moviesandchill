@@ -100,7 +100,7 @@ export default function IndexProgress() {
 
   return (
     <div className="px-6 md:px-14 mb-8">
-      <div className="bg-white/5 backdrop-blur-sm border border-white/10 rounded-2xl overflow-hidden">
+      <div className="bg-white/5 border border-white/10 rounded-2xl overflow-hidden">
         <div className="px-5 py-4 flex items-center justify-between cursor-pointer" onClick={() => setExpanded(!expanded)}>
           <div className="flex items-center gap-3 min-w-0">
             {isActive && (

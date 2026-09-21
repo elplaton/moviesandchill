@@ -1,6 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <widget xmlns="http://www.w3.org/ns/widgets" xmlns:tizen="http://tizen.org/ns/widgets" id="http://moviesandchill.org/tv" version="1.0.0" viewmodes="maximized">
-    <tizen:application id="org.moviesandchill.tv" package="org.moviesandchill" required_version="2.3"/>
+    <!-- 6.5 es el suelo real: el paquete se compila para Chromium 85 y declararlo
+     como 6.0 (Chromium 76) hacia que se instalase en TVs donde arrancaba en negro. -->
+<tizen:application id="MCchill026.MoviesChill" package="MCchill026" required_version="6.5"/>
+    <author email="elplaton@example.com">ElPlaton</author>
     <content src="index.html"/>
     <feature name="http://tizen.org/feature/network.internet"/>
     <feature name="http://tizen.org/feature/tv.inputdevice"/>
@@ -10,5 +13,6 @@
     <tizen:privilege name="http://tizen.org/privilege/internet"/>
     <tizen:privilege name="http://tizen.org/privilege/tv.inputdevice"/>
     <tizen:privilege name="http://tizen.org/privilege/tv.display"/>
-    <tizen:privilege name="http://tizen.org/privilege/fullscreen"/>
+    <tizen:setting screen-orientation="landscape" context-menu="enable" background-support="disable" encryption="disable" install-location="auto" hwkey-event="enable"/>
+    <access origin="*" subdomains="true"/>
 </widget>

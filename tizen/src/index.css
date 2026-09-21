@@ -2,8 +2,22 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * Presupuesto de render para TV
+ * -----------------------------
+ * Solo se animan `transform` y `opacity`: son las dos unicas propiedades que
+ * el compositor resuelve sin pasar por layout ni paint. Nada de transiciones
+ * sobre box-shadow, ancho, color de fondo ni `transition-all`.
+ *
+ * `backdrop-filter` esta prohibido: en las GPU de Tizen cada capa con blur
+ * cuesta un pase completo sobre el fondo. Donde hacia falta se usa un fondo
+ * solido algo mas opaco, que a tres metros se ve igual.
+ */
+
 html {
-  scroll-behavior: smooth;
+  /* El desplazamiento lo hace el carril con translate3d, no el scroll del
+     navegador. Con scroll suave activo el foco iba por delante de la vista. */
+  scroll-behavior: auto;
 }
 
 body {
@@ -11,6 +25,7 @@ body {
   color: #ffffff;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  overflow-x: hidden;
 }
 
 ::-webkit-scrollbar {
@@ -23,9 +38,6 @@ body {
 ::-webkit-scrollbar-thumb {
   background: rgba(255,255,255,0.12);
   border-radius: 10px;
-}
-::-webkit-scrollbar-thumb:hover {
-  background: rgba(255,255,255,0.22);
 }
 
 .movie-row::-webkit-scrollbar {
@@ -49,4 +61,83 @@ body {
 @keyframes scaleIn {
   from { opacity: 0; transform: scale(0.96); }
   to { opacity: 1; transform: scale(1); }
+}
+
+/* ------------------------------------------------------------------ foco */
+
+/*
+ * El foco se aplica poniendo la clase `is-focused` en el nodo del DOM, sin
+ * pasar por el estado de React. Todo el aspecto de "seleccionado" se resuelve
+ * aqui en CSS, asi que moverse por la parrilla no re-renderiza ni un componente.
+ */
+
+.mc-card {
+  transition: transform 260ms cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
+
+.mc-card.is-focused {
+  transform: scale(1.1) translateY(-4px);
+  z-index: 20;
+}
+
+.mc-poster {
+  box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+}
+
+/* Mismo aro rojo de antes, pero con `outline` en vez de un box-shadow de
+   Tailwind: se pinta sin participar en el layout y no se anima. */
+.mc-card.is-focused .mc-poster {
+  box-shadow: 0 8px 40px rgba(0,0,0,0.6), 0 2px 12px rgba(229,9,20,0.15);
+  outline: 4px solid #E50914;
+  outline-offset: 2px;
+}
+
+/* Las acciones salian con :hover, asi que con un mando normal no aparecian
+   nunca. Ahora dependen del foco, que es lo que mueve el mando. */
+.mc-actions {
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 160ms ease-out;
+}
+.mc-card.is-focused .mc-actions {
+  opacity: 1;
+  visibility: visible;
+}
+
+/* Foco generico para botones, enlaces y campos. */
+.tv-focusable.is-focused {
+  outline: 3px solid #E50914;
+  outline-offset: 2px;
+}
+.tv-focusable {
+  transition: transform 160ms ease-out;
+}
+.tv-focusable.is-focused {
+  transform: scale(1.04);
+}
+
+/* El carril y la columna se desplazan con transform. `will-change` va solo
+   aqui (unas pocas pistas), no en las tarjetas: promover 80 capas agotaria
+   la memoria de video de la tele. */
+.rail-track {
+  transition: transform 300ms cubic-bezier(0.22, 0.61, 0.36, 1);
+  will-change: transform;
+}
+
+/*
+ * Mientras se mantiene pulsada una flecha se quitan las transiciones. Animar
+ * cada paso de una repeticion rapida encola trabajo y el foco acaba llegando
+ * despues de soltar la tecla.
+ */
+.nav-fast .mc-card,
+.nav-fast .rail-track,
+.nav-fast .tv-focusable,
+.nav-fast .mc-actions {
+  transition: none !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mc-card, .rail-track, .tv-focusable, .mc-actions {
+    transition: none !important;
+  }
 }

@@ -33,20 +33,20 @@ export default function Logs() {
             className="w-20 bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-white text-sm outline-none focus:border-white/25 transition-all" />
           <span className="text-gray-400 text-sm">lineas</span>
           <button onClick={() => setPaused(!paused)}
-            className="bg-white/5 border border-white/10 text-gray-300 hover:text-white hover:border-white/20 px-4 py-2.5 rounded-xl text-sm transition-all backdrop-blur-sm">
+ className="bg-white/5 border border-white/10 text-gray-300 hover:text-white hover:border-white/20 px-4 py-2.5 rounded-xl text-sm transition-all ">
             {paused ? 'Reanudar' : 'Pausar'}
           </button>
           <button onClick={() => setAutoScroll(!autoScroll)}
-            className="bg-white/5 border border-white/10 text-gray-300 hover:text-white hover:border-white/20 px-4 py-2.5 rounded-xl text-sm transition-all backdrop-blur-sm">
+ className="bg-white/5 border border-white/10 text-gray-300 hover:text-white hover:border-white/20 px-4 py-2.5 rounded-xl text-sm transition-all ">
             Auto: {autoScroll ? 'ON' : 'OFF'}
           </button>
           <button onClick={fetchLogs}
-            className="bg-netflix-red/20 border border-netflix-red/30 text-netflix-red hover:bg-netflix-red/30 px-4 py-2.5 rounded-xl text-sm transition-all backdrop-blur-sm font-medium">
+ className="bg-netflix-red/20 border border-netflix-red/30 text-netflix-red hover:bg-netflix-red/30 px-4 py-2.5 rounded-xl text-sm transition-all font-medium">
             Actualizar
           </button>
         </div>
 
-        <div className="bg-black/60 backdrop-blur-sm border border-white/10 rounded-2xl p-5 h-[calc(100vh-260px)] overflow-auto font-mono text-xs leading-relaxed shadow-inner">
+        <div className="bg-black/85 border border-white/10 rounded-2xl p-5 h-[calc(100vh-260px)] overflow-auto font-mono text-xs leading-relaxed shadow-inner">
           {logs.length === 0 ? (
             <span className="text-gray-600">No hay logs disponibles</span>
           ) : (

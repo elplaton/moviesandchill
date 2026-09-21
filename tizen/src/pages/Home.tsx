@@ -1,11 +1,13 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { setFocus } from '@noriginmedia/norigin-spatial-navigation';
+import { getElement } from '../focus/engine';
+import { FocusScope } from '../focus/react';
 import { apiFetch, streamUrl } from '../services/api';
 import Layout from '../components/Layout';
 import DownloadBar from '../components/DownloadBar';
 import MovieRow from '../components/MovieRow';
 import MovieCard from '../components/MovieCard';
+import FocusableButton from '../components/FocusableButton';
 import SeriesDetail from '../components/SeriesDetail';
 import MovieDetail from '../components/MovieDetail';
 import SearchView from './SearchView';
@@ -14,7 +16,7 @@ import { useDownloads } from '../hooks/useDownloads';
 import type { BrowseRow, BrowseItem, TMDBMetadata, IndexChannelStatus, SeriesEpisode, SearchResult } from '../types';
 
 export default function Home() {
-  const { username } = useAuth();
+  const { username, isAdmin } = useAuth();
   const [rows, setRows] = useState<BrowseRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedSeries, setSelectedSeries] = useState<{ title: string; metadata: TMDBMetadata; channelId?: number; episodes: SeriesEpisode[]; tmdbId?: number } | null>(null);
@@ -28,6 +30,52 @@ export default function Home() {
   const [movieGroups, setMovieGroups] = useState<Map<string, SearchResult[]>>(new Map());
 
   const { batches, pausedBatches, downloadStates, loadPaused, download, cancelBatch, pauseBatch, resumeBatch } = useDownloads();
+
+  const [focusRow, setFocusRow] = useState(0);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef(0);
+
+  /** Margen que se deja por encima de la fila enfocada (barra + cabecera). */
+  const TOP_PADDING = 200;
+
+  /**
+   * Se llama cuando el foco entra en un hijo de la columna. El hijo 0 es el
+   * bloque de busqueda; a partir del 1 son las filas del catalogo.
+   *
+   * Se leen offsetTop/offsetHeight de UN elemento, el que acaba de recibir el
+   * foco. El motor anterior medía los ~260 de la pantalla en cada pulsacion.
+   */
+  const handleVerticalFocus = useCallback((childIndex: number, childId: string) => {
+    setFocusRow(childIndex - 1);
+
+    const wrap = contentRef.current;
+    if (!wrap) return;
+
+    if (childIndex === 0) {
+      scrollRef.current = 0;
+      wrap.style.transform = 'translate3d(0,0,0)';
+      return;
+    }
+
+    const el = getElement(childId);
+    if (!el) return;
+
+    const top = el.offsetTop;
+    const height = el.offsetHeight;
+    const viewHeight = window.innerHeight;
+    let next = scrollRef.current;
+
+    if (top - next < TOP_PADDING) {
+      next = Math.max(0, top - TOP_PADDING);
+    } else if (top + height - next > viewHeight - 40) {
+      next = top + height - viewHeight + 40;
+    }
+
+    if (next !== scrollRef.current) {
+      scrollRef.current = next;
+      wrap.style.transform = `translate3d(0, ${-next}px, 0)`;
+    }
+  }, []);
 
   const doSearch = useCallback(async (query: string) => {
     if (!query.trim()) {
@@ -89,15 +137,18 @@ export default function Home() {
       const res = await apiFetch('/browse/home');
       const data = await res.json();
       setRows(data.rows || []);
-      if (data.rows && data.rows[0]?.items?.[0]) {
-        setTimeout(() => setFocus(`mc-${data.rows[0].items[0].id}`), 200);
-      }
     } catch {} finally { setLoading(false); }
   };
 
   useEffect(() => {
     loadHome();
     loadPaused();
+  }, []);
+
+  useEffect(() => {
+    // /index/progress solo lo sirve un admin: pollearlo como usuario normal
+    // provocaba un 403 cada 5 segundos.
+    if (!isAdmin) return;
     const fetchIndex = async () => {
       try {
         const res = await apiFetch('/index/progress');
@@ -108,7 +159,7 @@ export default function Home() {
     fetchIndex();
     const interval = setInterval(fetchIndex, 5000);
     return () => clearInterval(interval);
-  }, []);
+  }, [isAdmin]);
 
   const handleSeriesClick = async (item: BrowseItem) => {
     const meta: TMDBMetadata = {
@@ -168,62 +219,108 @@ export default function Home() {
   const hasSearchResults = searchSingles.length > 0 || searchGroups.length > 0 || movieGroups.size > 0;
   const showBrowse = !searchQuery && !hasSearchResults;
 
+  /*
+   * Ventana vertical: de las 12 filas que manda el backend solo montan sus
+   * tarjetas las cercanas al foco. Con margen de una fila arriba y dos abajo,
+   * el destino de cualquier pulsacion ya esta montado. El armazon de la fila
+   * (titulo y hueco con altura minima) se pinta siempre, asi que el layout no
+   * salta al entrar y salir de la ventana.
+   */
+  const ROWS_ABOVE = 1;
+  const ROWS_BELOW = 2;
+  const isRowMounted = (rowIdx: number) =>
+    rowIdx >= focusRow - ROWS_ABOVE && rowIdx <= focusRow + ROWS_BELOW;
+
   return (
     <Layout>
-      <div className="pt-20 pb-2 px-6 md:px-14">
-        <h1 className="text-white text-4xl md:text-5xl font-bold mb-2 tracking-tight animate-fade-in">Bienvenido, {username}</h1>
-        <p className="text-gray-400 text-base md:text-lg animate-fade-in">Explora peliculas y series en tus canales de Telegram</p>
-      </div>
+      <FocusScope orientation="vertical" index={1} onChildFocus={handleVerticalFocus} as="none">
+        {/* El desplazamiento vertical se hace con transform, no con el scroll
+            del navegador: es compositor puro y va sincronizado con el foco. */}
+        <div ref={contentRef} className="relative" style={{ transform: 'translate3d(0,0,0)' }}>
+          <div className="pt-20 pb-2 px-6 md:px-14">
+            <h1 className="text-white text-4xl md:text-5xl font-bold mb-2 tracking-tight">Bienvenido, {username}</h1>
+            <p className="text-gray-400 text-base md:text-lg">Explora peliculas y series en tus canales de Telegram</p>
+          </div>
 
-      <SearchView
-        searching={searching}
-        searchGroups={searchGroups}
-        searchSingles={searchSingles}
-        movieGroups={movieGroups}
-        downloadStates={downloadStates}
-        onSearch={(q) => doSearch(q)}
-        onDownload={handleDownload}
-        onCancelBatch={cancelBatch}
-        onOpenSeries={openSearchSeries}
-        onOpenMovie={(t, m, r) => setSelectedMovie({ title: t, metadata: m, results: r, channelId: r[0]?.channel_id })}
-        tmdbFromResult={tmdbFromResult}
-        streamUrl={streamUrl}
-        onQueryChange={handleQueryChange}
-        alwaysShowBar={true}
-      />
+          <SearchView
+            index={0}
+            searching={searching}
+            searchGroups={searchGroups}
+            searchSingles={searchSingles}
+            movieGroups={movieGroups}
+            downloadStates={downloadStates}
+            onSearch={(q) => doSearch(q)}
+            onDownload={handleDownload}
+            onCancelBatch={cancelBatch}
+            onOpenSeries={openSearchSeries}
+            onOpenMovie={(t, m, r) => setSelectedMovie({ title: t, metadata: m, results: r, channelId: r[0]?.channel_id })}
+            tmdbFromResult={tmdbFromResult}
+            streamUrl={streamUrl}
+            onQueryChange={handleQueryChange}
+            alwaysShowBar={true}
+          />
 
-      {showBrowse && (
-        <>
-          {loading && <div className="px-6 md:px-14 py-20 text-center text-gray-500">Cargando...</div>}
+          {showBrowse && (
+            <>
+              {loading && <div className="px-6 md:px-14 py-20 text-center text-gray-500">Cargando...</div>}
 
-          {rows.map(row => (
-            <MovieRow key={row.genre} title={row.genre}>
-              {row.items.map(item => (
-                <MovieCard
-                  key={item.id}
-                  focusKey={`mc-${item.id}`}
-                  name={item.title}
-                  posterUrl={item.poster}
-                  year={item.year}
-                  rating={item.rating}
-                  genres={item.genres}
-                  subtitle={item.media_type === 'series' && item.episode_count ? `${item.episode_count} episodios` : ''}
-                  onClick={() => item.media_type === 'series' ? handleSeriesClick(item) : handleMovieClick(item)}
-                  hoverLabel={item.media_type === 'series' ? 'Ver episodios' : 'Ver detalles'}
-                  actions="click"
-                />
+              {rows.map((row, rowIdx) => (
+                <MovieRow key={row.genre} index={rowIdx + 1} title={row.genre}>
+                  {isRowMounted(rowIdx)
+                    ? row.items.map((item, itemIdx) => (
+                        <MovieCard
+                          key={item.id}
+                          focusKey={`mc-${item.id}`}
+                          index={itemIdx}
+                          forceFocus={rowIdx === 0 && itemIdx === 0}
+                          name={item.title}
+                          posterUrl={item.poster}
+                          year={item.year}
+                          rating={item.rating}
+                          genres={item.genres}
+                          subtitle={item.media_type === 'series' && item.episode_count ? `${item.episode_count} episodios` : ''}
+                          onClick={() => item.media_type === 'series' ? handleSeriesClick(item) : handleMovieClick(item)}
+                          hoverLabel={item.media_type === 'series' ? 'Ver episodios' : 'Ver detalles'}
+                          actions="click"
+                        />
+                      ))
+                    : null}
+                </MovieRow>
               ))}
-            </MovieRow>
-          ))}
 
-          {!loading && rows.length === 0 && (
-            <div className="px-6 md:px-14 py-16 text-center">
-              <p className="text-gray-500 text-lg mb-2">No hay contenido indexado</p>
-              <p className="text-gray-600 text-sm">Añade canales en la seccion de administracion</p>
+              {!loading && rows.length === 0 && (
+                <div className="px-6 md:px-14 py-16 text-center">
+                  <p className="text-gray-500 text-lg mb-2">No hay contenido indexado</p>
+                  <p className="text-gray-600 text-sm">Añade canales en la seccion de administracion</p>
+                </div>
+              )}
+            </>
+          )}
+
+          {pausedBatches.length > 0 && (
+            <div className="px-6 md:px-14 mb-10">
+              <h2 className="text-white text-lg font-medium mb-3">Pausadas</h2>
+              <FocusScope orientation="horizontal" index={rows.length + 1}>
+                <div className="flex gap-3 flex-wrap">
+                  {pausedBatches.map((b: any, i: number) => (
+                    <div key={b.batch_id} className="bg-white/5 border border-white/10 rounded-xl px-5 py-4">
+                      <p className="text-white text-sm font-medium">{b.folder_name}</p>
+                      <p className="text-gray-500 text-xs mt-1 mb-3">{b.total_parts} partes · {b.total_size_str}</p>
+                      <FocusableButton
+                        index={i}
+                        onClick={() => resumeBatch(b.batch_id)}
+                        className="bg-netflix-red text-white text-xs px-4 py-2 rounded-lg font-medium"
+                      >
+                        Reanudar
+                      </FocusableButton>
+                    </div>
+                  ))}
+                </div>
+              </FocusScope>
             </div>
           )}
-        </>
-      )}
+        </div>
+      </FocusScope>
 
       {selectedSeries && (
         <SeriesDetail
@@ -248,21 +345,6 @@ export default function Home() {
           onCancelDownload={(id) => cancelBatch(id)}
           downloadStates={downloadStates}
         />
-      )}
-
-      {pausedBatches.length > 0 && (
-        <div className="px-6 md:px-14 mb-10">
-          <h2 className="text-white text-lg font-medium mb-3">Pausadas</h2>
-          <div className="flex gap-3 flex-wrap">
-            {pausedBatches.map((b: any) => (
-              <div key={b.batch_id} className="bg-white/5 backdrop-blur-sm border border-white/10 rounded-xl px-5 py-4 shadow-lg">
-                <p className="text-white text-sm font-medium">{b.folder_name}</p>
-                <p className="text-gray-500 text-xs mt-1 mb-3">{b.total_parts} partes · {b.total_size_str}</p>
-                <button onClick={() => resumeBatch(b.batch_id)} className="bg-netflix-red hover:bg-netflix-red-hover text-white text-xs px-4 py-2 rounded-lg transition-colors font-medium">Reanudar</button>
-              </div>
-            ))}
-          </div>
-        </div>
       )}
 
       <DownloadBar batches={batches} onPause={pauseBatch} onCancel={cancelBatch} downloadStates={downloadStates} indexChannels={indexChannels} />

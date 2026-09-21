@@ -1,19 +1,19 @@
-import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
-import { init } from '@noriginmedia/norigin-spatial-navigation';
 import App from './App';
 import { AuthProvider } from './contexts/AuthContext';
+import { FocusRoot } from './focus/react';
 import './index.css';
 
-init({ debug: false, visualDebug: false, shouldUseNativeEvents: true });
-
+// Sin StrictMode: en desarrollo monta y desmonta cada efecto dos veces, lo que
+// con un motor de foco imperativo confunde mas de lo que ayuda. En produccion
+// no hacia nada de todos modos.
 ReactDOM.createRoot(document.getElementById('root')!).render(
-  <React.StrictMode>
-    <BrowserRouter>
-      <AuthProvider>
+  <BrowserRouter>
+    <AuthProvider>
+      <FocusRoot>
         <App />
-      </AuthProvider>
-    </BrowserRouter>
-  </React.StrictMode>
+      </FocusRoot>
+    </AuthProvider>
+  </BrowserRouter>
 );

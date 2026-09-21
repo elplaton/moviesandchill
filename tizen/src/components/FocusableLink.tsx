@@ -1,29 +1,34 @@
-import type { ReactNode } from 'react';
-import { Link } from 'react-router-dom';
-import { useFocusable } from '@noriginmedia/norigin-spatial-navigation';
+import { type ReactNode } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
+import { useFocusItem } from '../focus/react';
 
 interface FocusableLinkProps {
   to: string;
   className?: string;
   children: ReactNode;
   onClick?: () => void;
+  focusKey?: string;
+  index?: number;
 }
 
-export default function FocusableLink({ to, className, children, onClick }: FocusableLinkProps) {
-  const { ref, focused } = useFocusable({
-    onEnterPress: () => onClick?.(),
+export default function FocusableLink({
+  to, className, children, onClick, focusKey, index,
+}: FocusableLinkProps) {
+  const navigate = useNavigate();
+  const { ref } = useFocusItem<HTMLAnchorElement>({
+    focusKey, index,
+    onEnter: () => {
+      onClick?.();
+      navigate(to);
+    },
   });
 
   return (
     <Link
-      ref={ref as any}
+      ref={ref}
       to={to}
       onClick={onClick}
-      className={className}
-      style={{
-        outline: focused ? '2px solid #E50914' : 'none',
-        outlineOffset: '2px',
-      }}
+      className={`tv-focusable ${className || ''}`}
     >
       {children}
     </Link>

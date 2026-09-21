@@ -1,9 +1,14 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { FocusScope, focusById as setFocus } from '../focus/react';
 import { apiFetch } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import Layout from '../components/Layout';
 import MovieCard from '../components/MovieCard';
+import FocusableButton from '../components/FocusableButton';
+
+/** A 1920 px se aplica `xl:grid-cols-6`, que es el maximo que define la rejilla. */
+const GRID_COLUMNS = 6;
 
 interface Pick {
   id: string;
@@ -33,6 +38,8 @@ export default function Onboarding() {
   const sentinelRef = useRef<HTMLDivElement>(null);
 
   const isMovies = step === 'movies';
+  const currentPicks = isMovies ? movies : series;
+  const selected = isMovies ? selectedMovies : selectedSeries;
 
   const loadPicks = useCallback(async (offset: number) => {
     try {
@@ -53,6 +60,19 @@ export default function Onboarding() {
     setHasMore(true);
     loadPicks(0);
   }, [step]);
+
+  useEffect(() => {
+    if (!loading && currentPicks.length > 0) {
+      const target = `ob-card-${currentPicks[0].id}`;
+      let attempts = 0;
+      const tryFocus = () => {
+        setFocus(target);
+        attempts++;
+        if (attempts < 5) setTimeout(tryFocus, 200);
+      };
+      setTimeout(tryFocus, 300);
+    }
+  }, [loading, currentPicks.length, step]);
 
   useEffect(() => {
     if (!hasMore || loading) return;
@@ -104,8 +124,6 @@ export default function Onboarding() {
     } catch {} finally { setSaving(false); }
   };
 
-  const currentPicks = isMovies ? movies : series;
-  const selected = isMovies ? selectedMovies : selectedSeries;
   const canAdvance = (isMovies ? selectedMovies : selectedSeries).size >= 3;
 
   return (
@@ -122,19 +140,19 @@ export default function Onboarding() {
         <div className="flex items-center justify-between">
           <p className="text-gray-500 text-sm">{selected.size}/10 seleccionadas (mín. 3)</p>
           {isMovies ? (
-            <button onClick={handleNext} disabled={!canAdvance}
+            <FocusableButton focusKey="ob-next" onClick={handleNext}
               className={`px-8 py-3 rounded-xl font-semibold transition-all ${
-                canAdvance ? 'bg-netflix-red hover:bg-netflix-red-hover text-white hover:scale-105 shadow-lg' : 'bg-white/10 text-gray-500 cursor-not-allowed'
+                canAdvance ? 'bg-netflix-red hover:bg-netflix-red-hover text-white shadow-lg' : 'bg-white/10 text-gray-500'
               }`}>
               Siguiente
-            </button>
+            </FocusableButton>
           ) : (
-            <button onClick={handleSave} disabled={!canAdvance || saving}
+            <FocusableButton focusKey="ob-save" onClick={handleSave}
               className={`px-8 py-3 rounded-xl font-semibold transition-all ${
-                canAdvance && !saving ? 'bg-netflix-red hover:bg-netflix-red-hover text-white hover:scale-105 shadow-lg' : 'bg-white/10 text-gray-500 cursor-not-allowed'
+                canAdvance && !saving ? 'bg-netflix-red hover:bg-netflix-red-hover text-white shadow-lg' : 'bg-white/10 text-gray-500'
               }`}>
               {saving ? 'Guardando...' : 'Guardar y empezar'}
-            </button>
+            </FocusableButton>
           )}
         </div>
       </div>
@@ -143,17 +161,20 @@ export default function Onboarding() {
         <div className="px-6 md:px-14 py-20 text-center text-gray-500">Cargando...</div>
       ) : (
         <div className="px-6 md:px-14 mb-8">
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 md:gap-4">
-            {currentPicks.map(item => (
+          <FocusScope orientation="grid" columns={GRID_COLUMNS} index={1} className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 md:gap-4">
+            {currentPicks.map((item, i) => (
               <div key={item.id} className="relative cursor-pointer [&>div]:!w-full" onClick={() => toggle(item.tmdb_id)}>
                 <MovieCard
+                  index={i}
                   name={item.title}
                   posterUrl={item.poster}
                   year={item.year}
                   rating={item.rating}
                   hoverLabel={selected.has(item.tmdb_id) ? 'Quitar' : 'Seleccionar'}
                   actions="click"
-                  onClick={() => {}}
+                  onClick={() => toggle(item.tmdb_id)}
+                  focusKey={`ob-card-${item.id}`}
+                  forceFocus={item.id === currentPicks[0]?.id}
                 />
                 {selected.has(item.tmdb_id) && (
                   <div className="absolute inset-0 flex items-center justify-center z-20 pointer-events-none">
@@ -166,7 +187,7 @@ export default function Onboarding() {
                 )}
               </div>
             ))}
-          </div>
+          </FocusScope>
 
           {hasMore && (
             <div ref={sentinelRef} className="py-8 text-center text-gray-600 text-sm">

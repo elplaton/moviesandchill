@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { useBackHandler } from '../focus/react';
 import type { TMDBMetadata } from '../types';
 import FocusableButton from './FocusableButton';
 
@@ -15,14 +16,13 @@ interface PlayDetailProps {
 export default function PlayDetail({ name, size, path, metadata, onClose, streamUrl, onDelete }: PlayDetailProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
 
+  // 10009 es un keyCode, no un e.key: la comprobacion anterior nunca se
+  // cumplia. Ahora la tecla Atras la resuelve el motor de entrada.
+  useBackHandler(() => { onClose(); });
+
   useEffect(() => {
-    const handleKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' || e.key === 'Backspace' || e.key === '10009') onClose();
-    };
-    document.addEventListener('keydown', handleKey);
     document.body.style.overflow = 'hidden';
     return () => {
-      document.removeEventListener('keydown', handleKey);
       document.body.style.overflow = '';
     };
   }, [onClose]);

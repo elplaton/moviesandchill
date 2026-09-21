@@ -16,7 +16,7 @@ import LibraryView from './LibraryView';
 import type { SearchResult, Channel, FileItem, TMDBMetadata, SeriesEpisode, IndexChannelStatus } from '../types';
 
 export default function Dashboard() {
-  const { username } = useAuth();
+  const { username, isAdmin } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const [channels, setChannels] = useState<Channel[]>([]);
   const [diskFree, setDiskFree] = useState('');
@@ -46,6 +46,12 @@ export default function Dashboard() {
     updateDisk(); loadPaused();
     const q = searchParams.get('q');
     if (q) { doSearch(q); setSearchParams({}, { replace: true }); }
+  }, []);
+
+  useEffect(() => {
+    // /index/progress solo lo sirve un admin: pollearlo como usuario normal
+    // provocaba un 403 cada 5 segundos.
+    if (!isAdmin) return;
     const fetchIndex = async () => {
       try {
         const res = await apiFetch('/index/progress');
@@ -56,7 +62,7 @@ export default function Dashboard() {
     fetchIndex();
     const interval = setInterval(fetchIndex, 5000);
     return () => clearInterval(interval);
-  }, []);
+  }, [isAdmin]);
 
   const deleteFile = async (path: string) => {
     await apiFetch('/files', { method: 'DELETE', body: JSON.stringify({ path }) });
@@ -100,7 +106,7 @@ export default function Dashboard() {
   return (
     <Layout>
       {toast && (
-        <div className={`fixed top-24 right-6 z-50 px-5 py-3 rounded-2xl shadow-2xl shadow-black/40 text-sm font-medium backdrop-blur-xl border animate-slide-up ${toastType === 'success' ? 'bg-green-600/90 border-green-400/20 text-white' : 'bg-netflix-red/90 border-netflix-red/20 text-white'}`}>{toast}</div>
+        <div className={`fixed top-24 right-6 z-50 px-5 py-3 rounded-2xl shadow-2xl shadow-black/40 text-sm font-medium border animate-slide-up ${toastType === 'success' ? 'bg-green-600/95 border-green-400/20 text-white' : 'bg-netflix-red/95 border-netflix-red/20 text-white'}`}>{toast}</div>
       )}
       {selectedSeries && <SeriesDetail series={selectedSeries.series} metadata={selectedSeries.metadata} onClose={() => setSelectedSeries(null)} streamUrl={streamUrl} onDownload={selectedSeries.isSearchResult ? handleDownload : undefined} onCancelDownload={selectedSeries.isSearchResult ? (id: string) => cancelBatch(id) : undefined} downloadStates={selectedSeries.isSearchResult ? downloadStates : undefined} />}
       {selectedMovie && <MovieDetail title={selectedMovie.title} metadata={selectedMovie.metadata} results={selectedMovie.results} onClose={() => setSelectedMovie(null)} onDownload={handleDownload} onCancelDownload={(id) => cancelBatch(id)} downloadStates={downloadStates} />}
@@ -141,7 +147,7 @@ export default function Dashboard() {
           <h2 className="text-white text-lg font-medium mb-3">Pausadas</h2>
           <div className="flex gap-3 flex-wrap">
             {pausedBatches.map((b: any) => (
-              <div key={b.batch_id} className="bg-white/5 backdrop-blur-sm border border-white/10 rounded-xl px-5 py-4 shadow-lg">
+              <div key={b.batch_id} className="bg-white/5 border border-white/10 rounded-xl px-5 py-4 shadow-lg">
                 <p className="text-white text-sm font-medium">{b.folder_name}</p>
                 <p className="text-gray-500 text-xs mt-1 mb-3">{b.total_parts} partes · {b.total_size_str}</p>
                 <button onClick={() => resumeBatch(b.batch_id)} className="bg-netflix-red hover:bg-netflix-red-hover text-white text-xs px-4 py-2 rounded-lg transition-colors font-medium">Reanudar</button>

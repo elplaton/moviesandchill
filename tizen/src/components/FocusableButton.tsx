@@ -1,28 +1,34 @@
-import type { ReactNode } from 'react';
-import { useFocusable } from '@noriginmedia/norigin-spatial-navigation';
+import { type ReactNode } from 'react';
+import { useFocusItem } from '../focus/react';
 
 interface FocusableButtonProps {
   onClick?: () => void;
   className?: string;
   children: ReactNode;
   focusKey?: string;
+  index?: number;
+  disabled?: boolean;
+  autoFocus?: boolean;
 }
 
-export default function FocusableButton({ onClick, className, children, focusKey }: FocusableButtonProps) {
-  const { ref, focused } = useFocusable({
-    focusKey,
-    onEnterPress: () => onClick?.(),
+/**
+ * El estado de foco no pasa por React: el motor pone la clase `is-focused` en
+ * el nodo y el aro rojo lo dibuja el CSS (.tv-focusable.is-focused).
+ */
+export default function FocusableButton({
+  onClick, className, children, focusKey, index, disabled, autoFocus,
+}: FocusableButtonProps) {
+  const { ref } = useFocusItem<HTMLButtonElement>({
+    focusKey, index, disabled, autoFocus,
+    onEnter: () => onClick?.(),
   });
 
   return (
     <button
       ref={ref}
       onClick={onClick}
-      className={className}
-      style={{
-        outline: focused ? '3px solid #E50914' : 'none',
-        outlineOffset: '2px',
-      }}
+      disabled={disabled}
+      className={`tv-focusable ${className || ''}`}
     >
       {children}
     </button>

@@ -1,9 +1,11 @@
 import { useEffect, useState, useMemo } from 'react';
+import { FocusScope, useBackHandler, useFocusOn } from '../focus/react';
 import DownloadRing, { type RingStatus } from './DownloadRing';
 import { cleanFileName } from '../utils/text';
 import { formatBytes } from '../utils/format';
 import { MULTIPART as MULTIPART_RE } from '../utils/regex';
 import { apiFetch } from '../services/api';
+import FocusableButton from './FocusableButton';
 import type { FileItem, TMDBMetadata, SeriesEpisode, DownloadState } from '../types';
 
 function parseEpisode(filename: string): { season: number; episode: number; label: string } | null {
@@ -73,10 +75,10 @@ function EpisodeRow({ ep, streamUrl, onDownload, onCancelDownload, downloadState
           <span className="text-white/60 text-[10px]">{ds.progress}%</span>
         </div>
       ) : ep.message_id ? (
-        <button onClick={(e) => { e.stopPropagation(); onDownload ? onDownload(ep.message_id!, ep.channel_id) : null; }}
-          className="bg-netflix-red hover:bg-netflix-red-hover text-white text-xs px-3 py-1.5 rounded-lg transition-all hover:scale-105 font-medium shrink-0">
+        <FocusableButton onClick={() => onDownload ? onDownload(ep.message_id!, ep.channel_id) : null}
+          className="bg-netflix-red hover:bg-netflix-red-hover text-white text-xs px-3 py-1.5 rounded-lg transition-all font-medium shrink-0">
           Descargar
-        </button>
+        </FocusableButton>
       ) : (
         <span className="text-gray-600 text-[10px] shrink-0">No disponible</span>
       )}
@@ -229,32 +231,31 @@ export default function SeriesDetail({ series, metadata, onClose, streamUrl, onD
     });
   };
 
+  useBackHandler(() => { onClose(); });
+  useFocusOn('sd-close', true);
+
   useEffect(() => {
-    const handleKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    document.addEventListener('keydown', handleKey);
     document.body.style.overflow = 'hidden';
     return () => {
-      document.removeEventListener('keydown', handleKey);
       document.body.style.overflow = '';
     };
   }, [onClose]);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 animate-fade-in" onClick={onClose}>
-      <div className="absolute inset-0 bg-black/80 backdrop-blur-md" />
+    <FocusScope trap orientation="vertical" className="fixed inset-0 z-50 flex items-center justify-center p-4 animate-fade-in">
+      <div className="absolute inset-0 bg-black/90" onClick={onClose} />
 
       <div
         className="relative bg-netflix-dark border border-white/10 rounded-3xl w-full max-w-2xl max-h-[90vh] overflow-hidden shadow-2xl shadow-black/50 animate-scale-in"
         onClick={(e) => e.stopPropagation()}
       >
-        <button
+        <FocusableButton
           onClick={onClose}
-          className="absolute top-4 right-4 z-20 w-8 h-8 rounded-full bg-black/60 backdrop-blur-sm flex items-center justify-center text-white hover:bg-white/10 transition-colors"
+          focusKey="sd-close"
+ className="absolute top-4 right-4 z-20 w-8 h-8 rounded-full bg-black/85 flex items-center justify-center text-white hover:bg-white/10 transition-colors"
         >
           ✕
-        </button>
+        </FocusableButton>
 
         <div className="relative h-56 md:h-72 overflow-hidden">
           {metadata.backdrop ? (
@@ -293,8 +294,9 @@ export default function SeriesDetail({ series, metadata, onClose, streamUrl, onD
           {seasons.length > 1 ? (
             seasons.map(([seasonNum, epGroups]) => (
               <div key={seasonNum} className="mb-3">
-                <button
+                <FocusableButton
                   onClick={() => toggleSeason(seasonNum)}
+                  focusKey={`sd-season-${seasonNum}`}
                   className="w-full flex items-center gap-2 text-white font-semibold text-sm mb-2 hover:bg-white/5 rounded-lg px-2 py-1.5 transition-colors"
                 >
                   <svg className={`w-3.5 h-3.5 text-gray-400 transition-transform ${collapsed.has(seasonNum) ? '' : 'rotate-90'}`}
@@ -303,7 +305,7 @@ export default function SeriesDetail({ series, metadata, onClose, streamUrl, onD
                   </svg>
                   Temporada {seasonNum}
                   <span className="text-gray-500 text-xs font-normal ml-1">({epGroups.length} episodios)</span>
-                </button>
+                </FocusableButton>
                 {!collapsed.has(seasonNum) && (
                   <div className="space-y-1.5 ml-4">
                     {epGroups.map(g => {
@@ -326,10 +328,10 @@ export default function SeriesDetail({ series, metadata, onClose, streamUrl, onD
                               <p className="text-gray-500 text-[11px]">{quality ? `${quality} · ` : ''}{info}</p>
                             </div>
                             {g.first.message_id ? (
-                              <button onClick={(e) => { e.stopPropagation(); onDownload ? onDownload(g.first.message_id!, g.first.channel_id) : null; }}
-                                className="bg-netflix-red hover:bg-netflix-red-hover text-white text-xs px-3 py-1.5 rounded-lg transition-all hover:scale-105 font-medium shrink-0">
+                              <FocusableButton onClick={() => onDownload ? onDownload(g.first.message_id!, g.first.channel_id) : null} focusKey={`sd-dl-${g.first.message_id}`}
+                                className="bg-netflix-red hover:bg-netflix-red-hover text-white text-xs px-3 py-1.5 rounded-lg transition-all font-medium shrink-0">
                                 Descargar{g.isMultipart ? ` (${g.episodes.length})` : ''}
-                              </button>
+                              </FocusableButton>
                             ) : (
                               <span className="text-gray-600 text-[10px] shrink-0">No disponible</span>
                             )}
@@ -343,7 +345,7 @@ export default function SeriesDetail({ series, metadata, onClose, streamUrl, onD
                       const isExpanded = expandedVariants.has(vKey);
                       return (
                         <div key={vKey}>
-                          <button onClick={() => toggleVariant(vKey)}
+                          <FocusableButton onClick={() => toggleVariant(vKey)} focusKey={`sd-v-${vKey}`}
                             className="flex items-center gap-3 bg-white/[0.03] border border-white/5 rounded-xl px-4 py-3 hover:bg-white/[0.06] transition-all w-full text-left group/ep">
                             <span className="text-gray-400 text-xs w-12 shrink-0 text-right font-mono tabular-nums">{label}</span>
                             <div className="flex-1 min-w-0">
@@ -354,7 +356,7 @@ export default function SeriesDetail({ series, metadata, onClose, streamUrl, onD
                               fill="none" stroke="currentColor" viewBox="0 0 24 24">
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 5l7 7-7 7" />
                             </svg>
-                          </button>
+                          </FocusableButton>
                           {isExpanded && (
                             <div className="ml-6 mt-1 space-y-1">
                               {g.variants.map(v => {
@@ -370,10 +372,10 @@ export default function SeriesDetail({ series, metadata, onClose, streamUrl, onD
                                       <p className="text-gray-500 text-[10px]">{info}</p>
                                     </div>
                                     {v.first.message_id ? (
-                                      <button onClick={(e) => { e.stopPropagation(); onDownload ? onDownload(v.first.message_id!, v.first.channel_id) : null; }}
-                                        className="bg-netflix-red hover:bg-netflix-red-hover text-white text-xs px-2.5 py-1 rounded-lg transition-all hover:scale-105 font-medium shrink-0">
+                                      <FocusableButton onClick={() => onDownload ? onDownload(v.first.message_id!, v.first.channel_id) : null} focusKey={`sd-dl-${v.first.message_id}`}
+                                        className="bg-netflix-red hover:bg-netflix-red-hover text-white text-xs px-2.5 py-1 rounded-lg transition-all font-medium shrink-0">
                                         Descargar{v.isMultipart ? ` (${v.episodes.length})` : ''}
-                                      </button>
+                                      </FocusableButton>
                                     ) : (
                                       <span className="text-gray-600 text-[10px] shrink-0">No disponible</span>
                                     )}
@@ -410,10 +412,10 @@ export default function SeriesDetail({ series, metadata, onClose, streamUrl, onD
                         <p className="text-gray-500 text-[11px]">{quality ? `${quality} · ` : ''}{info}</p>
                       </div>
                       {g.first.message_id ? (
-                        <button onClick={(e) => { e.stopPropagation(); onDownload ? onDownload(g.first.message_id!, g.first.channel_id) : null; }}
-                          className="bg-netflix-red hover:bg-netflix-red-hover text-white text-xs px-3 py-1.5 rounded-lg transition-all hover:scale-105 font-medium shrink-0">
+                        <FocusableButton onClick={() => onDownload ? onDownload(g.first.message_id!, g.first.channel_id) : null} focusKey={`sd-dl-${g.first.message_id}`}
+                          className="bg-netflix-red hover:bg-netflix-red-hover text-white text-xs px-3 py-1.5 rounded-lg transition-all font-medium shrink-0">
                           Descargar{g.isMultipart ? ` (${g.episodes.length})` : ''}
-                        </button>
+                        </FocusableButton>
                       ) : (
                         <span className="text-gray-600 text-[10px] shrink-0">No disponible</span>
                       )}
@@ -426,7 +428,7 @@ export default function SeriesDetail({ series, metadata, onClose, streamUrl, onD
                 const isExpanded = expandedVariants.has(vKey);
                 return (
                   <div key={vKey}>
-                    <button onClick={() => toggleVariant(vKey)}
+                    <FocusableButton onClick={() => toggleVariant(vKey)} focusKey={`sd-v-${vKey}`}
                       className="flex items-center gap-3 bg-white/[0.03] border border-white/5 rounded-xl px-4 py-3 hover:bg-white/[0.06] transition-all w-full text-left group/ep">
                       <span className="text-gray-400 text-xs w-12 shrink-0 text-right font-mono tabular-nums">{label}</span>
                       <div className="flex-1 min-w-0">
@@ -437,7 +439,7 @@ export default function SeriesDetail({ series, metadata, onClose, streamUrl, onD
                         fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 5l7 7-7 7" />
                       </svg>
-                    </button>
+                    </FocusableButton>
                     {isExpanded && (
                       <div className="ml-6 mt-1 space-y-1">
                         {g.variants.map(v => {
@@ -453,10 +455,10 @@ export default function SeriesDetail({ series, metadata, onClose, streamUrl, onD
                                 <p className="text-gray-500 text-[10px]">{info}</p>
                               </div>
                               {v.first.message_id ? (
-                                <button onClick={(e) => { e.stopPropagation(); onDownload ? onDownload(v.first.message_id!, v.first.channel_id) : null; }}
-                                  className="bg-netflix-red hover:bg-netflix-red-hover text-white text-xs px-2.5 py-1 rounded-lg transition-all hover:scale-105 font-medium shrink-0">
+                                <FocusableButton onClick={() => onDownload ? onDownload(v.first.message_id!, v.first.channel_id) : null} focusKey={`sd-dl-${v.first.message_id}`}
+                                  className="bg-netflix-red hover:bg-netflix-red-hover text-white text-xs px-2.5 py-1 rounded-lg transition-all font-medium shrink-0">
                                   Descargar{v.isMultipart ? ` (${v.episodes.length})` : ''}
-                                </button>
+                                </FocusableButton>
                               ) : (
                                 <span className="text-gray-600 text-[10px] shrink-0">No disponible</span>
                               )}
@@ -472,15 +474,16 @@ export default function SeriesDetail({ series, metadata, onClose, streamUrl, onD
           )}
 
           <div className="mt-4 flex justify-end gap-2">
-            <button
+            <FocusableButton
               onClick={onClose}
+              focusKey="sd-close-bottom"
               className="text-gray-400 hover:text-white text-sm px-4 py-2 rounded-xl hover:bg-white/5 transition-all"
             >
               Cerrar
-            </button>
+            </FocusableButton>
           </div>
         </div>
       </div>
-    </div>
+    </FocusScope>
   );
 }

@@ -1,8 +1,10 @@
 import { useEffect, useState, useMemo } from 'react';
+import { FocusScope, useBackHandler, useFocusOn } from '../focus/react';
 import DownloadRing, { type RingStatus } from './DownloadRing';
 import { cleanFileName } from '../utils/text';
 import { formatBytes } from '../utils/format';
 import { RES_TAGS, MULTIPART } from '../utils/regex';
+import FocusableButton from './FocusableButton';
 import type { TMDBMetadata, SearchResult, DownloadState } from '../types';
 
 interface MovieDetailProps {
@@ -93,7 +95,7 @@ export default function MovieDetail({ title, metadata, results, onClose, onDownl
     });
   };
 
-  const downloadBtn = (msgId: number, channelId?: number, label = 'Descargar', downloaded = false) => {
+  const downloadBtn = (msgId: number, channelId?: number, label = 'Descargar', downloaded = false, focusKey?: string) => {
     if (downloaded) {
       return (
         <span className="text-green-400 text-[10px] font-medium shrink-0 bg-green-400/10 px-2 py-1 rounded-full">
@@ -113,30 +115,33 @@ export default function MovieDetail({ title, metadata, results, onClose, onDownl
       );
     }
     return (
-      <button onClick={(e) => { e.stopPropagation(); onDownload(msgId, channelId); }}
-        className="bg-netflix-red hover:bg-netflix-red-hover text-white text-xs px-3 py-1.5 rounded-lg transition-all hover:scale-105 font-medium shrink-0">
+      <FocusableButton onClick={() => onDownload(msgId, channelId)} focusKey={focusKey}
+        className="bg-netflix-red hover:bg-netflix-red-hover text-white text-xs px-3 py-1.5 rounded-lg transition-all font-medium shrink-0">
         {label}
-      </button>
+      </FocusableButton>
     );
   };
 
+  // La tecla Atras del mando (10009) la gestiona el motor de entrada. Antes
+  // solo se escuchaba 'Escape', que no existe en un mando: al abrir la ficha
+  // no habia forma de cerrarla y Tizen acababa cerrando la aplicacion.
+  useBackHandler(() => { onClose(); });
+  useFocusOn('md-close', true);
+
   useEffect(() => {
-    const handleKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
-    document.addEventListener('keydown', handleKey);
     document.body.style.overflow = 'hidden';
     return () => {
-      document.removeEventListener('keydown', handleKey);
       document.body.style.overflow = '';
     };
   }, [onClose]);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 animate-fade-in" onClick={onClose}>
-      <div className="absolute inset-0 bg-black/80 backdrop-blur-md" />
+    <FocusScope trap orientation="vertical" className="fixed inset-0 z-50 flex items-center justify-center p-4 animate-fade-in">
+      <div className="absolute inset-0 bg-black/90" onClick={onClose} />
       <div className="relative bg-netflix-dark border border-white/10 rounded-3xl w-full max-w-2xl max-h-[90vh] overflow-hidden shadow-2xl shadow-black/50 animate-scale-in"
         onClick={(e) => e.stopPropagation()}>
-        <button onClick={onClose}
-          className="absolute top-4 right-4 z-20 w-8 h-8 rounded-full bg-black/60 backdrop-blur-sm flex items-center justify-center text-white hover:bg-white/10 transition-colors">✕</button>
+        <FocusableButton onClick={onClose} focusKey="md-close"
+ className="absolute top-4 right-4 z-20 w-8 h-8 rounded-full bg-black/85 flex items-center justify-center text-white hover:bg-white/10 transition-colors">✕</FocusableButton>
 
         <div className="relative h-48 md:h-56 overflow-hidden">
           {metadata.backdrop ? (
@@ -168,7 +173,7 @@ export default function MovieDetail({ title, metadata, results, onClose, onDownl
         <div className="p-5 overflow-y-auto max-h-[50vh]">
           {groups.map(({ res, mpGroups, mpSingles }) => (
             <div key={res} className="mb-3">
-              <button onClick={() => toggleRes(res)}
+              <FocusableButton onClick={() => toggleRes(res)} focusKey={`md-res-${res}`}
                 className="w-full flex items-center gap-2 text-white font-semibold text-sm mb-2 hover:bg-white/5 rounded-lg px-2 py-1.5 transition-colors">
                 <svg className={`w-3.5 h-3.5 text-gray-400 transition-transform ${collapsed.has(res) ? '' : 'rotate-90'}`}
                   fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -176,7 +181,7 @@ export default function MovieDetail({ title, metadata, results, onClose, onDownl
                 </svg>
                 {res}
                 <span className="text-gray-500 text-xs font-normal">({mpGroups.length + mpSingles.length})</span>
-              </button>
+              </FocusableButton>
               {!collapsed.has(res) && (
                 <div className="space-y-1.5 ml-4">
                   {mpGroups.map(g => (
@@ -186,7 +191,7 @@ export default function MovieDetail({ title, metadata, results, onClose, onDownl
                         <p className="text-white text-sm truncate">{cleanFileName(g.baseName)}</p>
                         <p className="text-gray-500 text-[11px]">{g.parts.length} partes · {formatBytes(g.totalSize)}</p>
                       </div>
-                      {downloadBtn(g.firstId, g.channelId, `Descargar (${g.parts.length})`, g.parts[0].downloaded)}
+                      {downloadBtn(g.firstId, g.channelId, `Descargar (${g.parts.length})`, g.parts[0].downloaded, `md-dl-${g.firstId}`)}
                     </div>
                   ))}
                   {mpSingles.map((r, idx) => (
@@ -196,7 +201,7 @@ export default function MovieDetail({ title, metadata, results, onClose, onDownl
                         <p className="text-white text-sm truncate">{cleanFileName(r.file_name)}</p>
                         <p className="text-gray-500 text-[11px]">{r.channel_name} · {r.size_str}</p>
                       </div>
-                      {downloadBtn(r.id, r.channel_id, 'Descargar', r.downloaded)}
+                      {downloadBtn(r.id, r.channel_id, 'Descargar', r.downloaded, `md-dl-${r.id}`)}
                     </div>
                   ))}
                 </div>
@@ -204,11 +209,11 @@ export default function MovieDetail({ title, metadata, results, onClose, onDownl
             </div>
           ))}
           <div className="mt-4 flex justify-end">
-            <button onClick={onClose}
-              className="text-gray-400 hover:text-white text-sm px-4 py-2 rounded-xl hover:bg-white/5 transition-all">Cerrar</button>
+            <FocusableButton onClick={onClose} focusKey="md-close-bottom"
+              className="text-gray-400 hover:text-white text-sm px-4 py-2 rounded-xl hover:bg-white/5 transition-all">Cerrar</FocusableButton>
           </div>
         </div>
       </div>
-    </div>
+    </FocusScope>
   );
 }

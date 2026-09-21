@@ -1,6 +1,8 @@
-import { useRef } from 'react';
+import { useState } from 'react';
 import MovieRow from '../components/MovieRow';
 import MovieCard from '../components/MovieCard';
+import OnScreenKeyboard from '../components/OnScreenKeyboard';
+import { FocusScope, useFocusItem } from '../focus/react';
 import { cleanTitle } from '../utils/text';
 import type { SearchResult, TMDBMetadata } from '../types';
 
@@ -27,66 +29,70 @@ interface Props {
   streamUrl: (path: string) => string;
   onQueryChange?: (query: string) => void;
   alwaysShowBar?: boolean;
+  /** Posicion de todo el bloque dentro de la pantalla. */
+  index?: number;
 }
 
-const DEBOUNCE_MS = 300;
+function SearchField({ value, onOpen }: { value: string; onOpen: () => void }) {
+  const { ref } = useFocusItem<HTMLDivElement>({ focusKey: 'search-input', index: 0 });
+  return (
+    <div
+      ref={ref}
+      onClick={onOpen}
+      className="tv-focusable relative flex-1 min-w-[280px] max-w-xl rounded-xl bg-white/10 border border-white/10 cursor-pointer"
+    >
+      <svg className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+      </svg>
+      <div className="w-full pl-11 pr-5 py-3 text-sm">
+        {value
+          ? <span className="text-white">{value}</span>
+          : <span className="text-gray-500">Buscar pelicula o serie...</span>}
+      </div>
+    </div>
+  );
+}
 
 export default function SearchView({
   searching, searchGroups, searchSingles, movieGroups,
   downloadStates, onSearch, onDownload, onCancelBatch,
   onOpenSeries, onOpenMovie, tmdbFromResult, streamUrl,
-  onQueryChange, alwaysShowBar,
+  onQueryChange, alwaysShowBar, index,
 }: Props) {
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const [query, setQuery] = useState('');
+  const [keyboardOpen, setKeyboardOpen] = useState(false);
 
-  const handleChange = (value: string) => {
-    if (onQueryChange) {
-      if (timerRef.current) clearTimeout(timerRef.current);
-      timerRef.current = setTimeout(() => onQueryChange(value), DEBOUNCE_MS);
-    }
-  };
-
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter') {
-      if (timerRef.current) clearTimeout(timerRef.current);
-      onSearch((e.target as HTMLInputElement).value);
-    }
+  const handleChange = (next: string) => {
+    setQuery(next);
+    // Escribir con el mando es lento de por si, asi que cada tecla puede
+    // disparar la busqueda sin saturar el backend.
+    if (onQueryChange) onQueryChange(next);
+    else onSearch(next);
   };
 
   const hasResults = searchGroups.length > 0 || movieGroups.size > 0 || searchSingles.length > 0;
 
-  const searchBar = (
-    <div className="relative flex-1 min-w-[280px] max-w-xl">
-      <svg className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-      </svg>
-      <input
-        ref={inputRef}
-        placeholder="Buscar pelicula o serie..."
-        className="w-full bg-white/5 backdrop-blur-sm border border-white/10 rounded-xl pl-11 pr-5 py-3 text-white text-sm outline-none focus:border-white/25 focus:bg-white/8 transition-all duration-300 placeholder-gray-500"
-        onChange={onQueryChange ? (e) => handleChange(e.target.value) : undefined}
-        onKeyDown={onQueryChange ? handleKeyDown : (e) => { if (e.key === 'Enter') onSearch((e.target as HTMLInputElement).value); }}
-      />
-    </div>
-  );
+  // Las filas se numeran segun cuales se estan mostrando: el orden de
+  // navegacion tiene que ser explicito, no depender del orden de montaje.
+  let rowIndex = 0;
+  const nextRow = () => ++rowIndex;
 
   return (
-    <>
+    <FocusScope orientation="vertical" index={index} as="none">
       {(alwaysShowBar || hasResults) && (
         <div className="px-6 md:px-14 mb-8">
           <div className="flex gap-3 items-center flex-wrap">
-            {searchBar}
+            <SearchField value={query} onOpen={() => setKeyboardOpen(true)} />
           </div>
         </div>
       )}
 
       {searchGroups.length > 0 && (
-        <MovieRow title={searching ? 'Buscando...' : 'Series encontradas'}>
-          {searchGroups.map(g => {
+        <MovieRow index={nextRow()} title={searching ? 'Buscando...' : 'Series encontradas'}>
+          {searchGroups.map((g, i) => {
             const meta = tmdbFromResult(g.episodes[0]);
             return (
-              <MovieCard key={g.groupKey || g.seriesName} name={g.groupKey || g.seriesName}
+              <MovieCard key={g.groupKey || g.seriesName} index={i} name={g.groupKey || g.seriesName}
                 subtitle={`${g.episodes.length} episodios`}
                 posterUrl={meta.poster} year={meta.year} rating={meta.rating}
                 onClick={() => onOpenSeries(g)} hoverLabel="Ver episodios" actions="click" />
@@ -96,12 +102,12 @@ export default function SearchView({
       )}
 
       {movieGroups.size > 0 && (
-        <MovieRow title="Peliculas encontradas">
-          {Array.from(movieGroups.entries()).map(([rawName, items]) => {
+        <MovieRow index={nextRow()} title="Peliculas encontradas">
+          {Array.from(movieGroups.entries()).map(([rawName, items], i) => {
             const key = cleanTitle(rawName);
             const meta = tmdbFromResult(items[0]);
             return (
-              <MovieCard key={key} name={key}
+              <MovieCard key={key} index={i} name={key}
                 subtitle={`${items.length} versiones`}
                 posterUrl={meta.poster} year={meta.year} rating={meta.rating}
                 onClick={() => onOpenMovie(key, meta, items)}
@@ -112,11 +118,11 @@ export default function SearchView({
       )}
 
       {searchSingles.length > 0 && (
-        <MovieRow title={searchGroups.length > 0 || movieGroups.size > 0 ? 'Otros resultados' : 'Resultados'}>
-          {searchSingles.map(r => {
+        <MovieRow index={nextRow()} title={searchGroups.length > 0 || movieGroups.size > 0 ? 'Otros resultados' : 'Resultados'}>
+          {searchSingles.map((r, i) => {
             const meta = tmdbFromResult(r);
             return (
-              <MovieCard key={r.id} name={r.file_name} subtitle={r.channel_name} size={r.size_str}
+              <MovieCard key={r.id} index={i} name={r.file_name} subtitle={r.channel_name} size={r.size_str}
                 posterUrl={meta.poster} year={meta.year} rating={meta.rating}
                 onPlay={r.downloaded ? () => window.open(streamUrl(''), '_blank') : undefined}
                 onDownload={r.downloaded ? undefined : () => onDownload(r.id, r.channel_id)}
@@ -131,6 +137,14 @@ export default function SearchView({
       {searching && !hasResults && (
         <div className="px-6 md:px-14 py-8 text-center text-gray-500">Buscando...</div>
       )}
-    </>
+
+      {keyboardOpen && (
+        <OnScreenKeyboard
+          value={query}
+          onChange={handleChange}
+          onClose={() => setKeyboardOpen(false)}
+        />
+      )}
+    </FocusScope>
   );
 }

@@ -41,7 +41,7 @@ export default function DownloadBar({ batches, onPause, onCancel, downloadStates
     <div className="fixed bottom-4 right-4 z-40 w-80">
       <button
         onClick={() => setExpanded(!expanded)}
-        className="w-full bg-netflix-dark/90 backdrop-blur-xl border border-white/10 rounded-2xl px-5 py-3 flex items-center justify-between hover:bg-netflix-card/90 transition-all shadow-2xl shadow-black/40"
+ className="w-full bg-netflix-dark/95 border border-white/10 rounded-2xl px-5 py-3 flex items-center justify-between hover:bg-netflix-card/95 transition-all shadow-2xl shadow-black/40"
       >
         <span className="text-sm text-white font-medium flex items-center gap-2.5">
           <span className="relative flex h-2.5 w-2.5">
@@ -56,7 +56,7 @@ export default function DownloadBar({ batches, onPause, onCancel, downloadStates
       </button>
 
       {expanded && (
-        <div className="bg-netflix-dark/95 backdrop-blur-xl border-x border-b border-white/10 rounded-b-2xl max-h-80 overflow-y-auto shadow-2xl shadow-black/40 animate-scale-in">
+        <div className="bg-netflix-dark/95 border-x border-b border-white/10 rounded-b-2xl max-h-80 overflow-y-auto shadow-2xl shadow-black/40 animate-scale-in">
           {/* Index progress */}
           {visibleIndexChannels.map(ch => {
             const pct = (ch.total_estimate || 0) > 0

@@ -6,7 +6,24 @@ App para Samsung TV que usa el backend de `moviesandchill` como servidor de stre
 
 - Samsung TV con Tizen (2018+ recomendado)
 - El Docker de `moviesandchill` corriendo en un ordenador en la misma red local
-- [Tizen Studio](https://developer.tizen.org/) instalado (para el `sdb`)
+- `sdb` (Samsung Device Bridge) instalado en tu ordenador
+
+## Instalar sdb (solo la primera vez)
+
+En macOS Apple Silicon, el binario standalone es la opción más simple (sin Tizen Studio completo):
+
+```bash
+curl -sL -o /opt/homebrew/bin/sdb "https://github.com/PatrickSt1991/tizen-sdb/releases/download/v1.1.3/TizenSdb_v1.1.3_macos-arm64"
+chmod +x /opt/homebrew/bin/sdb
+```
+
+Verifica:
+
+```bash
+sdb
+```
+
+> Este es un cliente ligero: los comandos llevan la IP de la TV como argumento (`sdb install <IP_TV> <app.wgt>`), a diferencia del `sdb` oficial de Samsung.
 
 ## Configurar la IP del servidor
 
@@ -28,13 +45,22 @@ Genera `MoviesChill.wgt`.
 
 ## Instalar en la TV
 
-1. En la TV: **Configuración → Apps → Modo desarrollador** → activar y anotar la IP de la TV.
-2. Desde el ordenador:
+1. En la TV: **Configuración → Apps → Modo desarrollador** → activar y poner la IP de **tu ordenador** (el que corre `sdb`).
+2. Reinicia la TV y anota su IP (Ajustes → Red → Estado de red).
+3. Desde el ordenador:
+
    ```bash
+   # conectar
    sdb connect <IP_DE_LA_TV>
-   sdb install MoviesChill.wgt
+
+   # instalar la app
+   sdb install <IP_DE_LA_TV> MoviesChill.wgt
+
+   # arrancar la app (id = org.moviesandchill.tv)
+   sdb launch <IP_DE_LA_TV> org.moviesandchill.tv
    ```
-3. La app aparece en el menú de Apps de la TV.
+
+4. La app aparece en el menú de Apps de la TV.
 
 ## Cómo funciona
 

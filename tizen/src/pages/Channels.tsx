@@ -162,7 +162,7 @@ export default function Channels() {
     <Layout>
       <div className="px-6 md:px-14 pt-24 pb-20 max-w-4xl mx-auto">
         {toast && (
-          <div className="fixed top-24 right-6 z-50 bg-green-600/90 backdrop-blur-xl border border-green-400/20 text-white px-5 py-3 rounded-2xl shadow-2xl text-sm font-medium animate-slide-up">
+          <div className="fixed top-24 right-6 z-50 bg-green-600/95 border border-green-400/20 text-white px-5 py-3 rounded-2xl shadow-2xl text-sm font-medium animate-slide-up">
             {toast}
           </div>
         )}
@@ -172,7 +172,7 @@ export default function Channels() {
 
         {/* Index Stats */}
         {stats && (
-          <div className="bg-white/5 backdrop-blur-md border border-white/10 rounded-2xl p-6 mb-6 shadow-xl">
+          <div className="bg-white/5 border border-white/10 rounded-2xl p-6 mb-6 shadow-xl">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-white text-lg font-medium">
                 Contenido indexado
@@ -304,7 +304,7 @@ export default function Channels() {
           </div>
         )}
 
-        <div className="bg-white/5 backdrop-blur-md border border-white/10 rounded-2xl p-6 mb-8 shadow-xl">
+        <div className="bg-white/5 border border-white/10 rounded-2xl p-6 mb-8 shadow-xl">
           <h2 className="text-white text-lg font-medium mb-4">Anadir canal por URL</h2>
           <div className="flex gap-3">
             <input value={url} onChange={e => setUrl(e.target.value)} onKeyDown={e => e.key === 'Enter' && addByUrl()}
@@ -323,7 +323,7 @@ export default function Channels() {
         </div>
 
         {active.length > 0 && (
-          <div className="bg-white/5 backdrop-blur-md border border-white/10 rounded-2xl p-6 mb-6 shadow-xl">
+          <div className="bg-white/5 border border-white/10 rounded-2xl p-6 mb-6 shadow-xl">
             <h2 className="text-white text-lg font-medium mb-4">Activos ({active.length})</h2>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
               {active.map(c => (
@@ -338,7 +338,7 @@ export default function Channels() {
         )}
 
         {inactive.length > 0 && (
-          <div className="bg-white/5 backdrop-blur-md border border-white/10 rounded-2xl p-6 mb-8 shadow-xl">
+          <div className="bg-white/5 border border-white/10 rounded-2xl p-6 mb-8 shadow-xl">
             <h2 className="text-white text-lg font-medium mb-4">Inactivos ({inactive.length})</h2>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
               {inactive.map(c => (
