@@ -1,0 +1,9 @@
+# El contexto de build del backend es ./backend, asi que el .dockerignore raiz
+# no aplica aqui: sin este fichero el .env acababa dentro de la imagen.
+.env
+*.env
+__pycache__/
+**/__pycache__/
+*.pyc
+channels.json
+paused_batches.json

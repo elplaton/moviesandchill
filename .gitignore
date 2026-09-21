@@ -7,6 +7,10 @@ downloads/
 movies/
 oracle-data/
 paused_batches.json
+state/*
+!state/.gitkeep
+tizen/node_modules/
+tizen/dist/
 frontend/node_modules/
 frontend/dist/
 backend/app/**/__pycache__/

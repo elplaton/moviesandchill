@@ -1,0 +1,17 @@
+.git
+.gitignore
+venv/
+**/node_modules/
+**/__pycache__/
+**/*.pyc
+# Nunca empaquetar secretos ni la sesion de Telegram en la imagen
+.env
+**/.env
+session/
+downloads/
+movies/
+state/
+paused_batches.json
+frontend/dist/
+tizen/dist/
+tizen/*.wgt
