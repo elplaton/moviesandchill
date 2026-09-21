@@ -13,7 +13,7 @@ import { useDownloads } from '../hooks/useDownloads';
 import type { BrowseRow, BrowseItem, TMDBMetadata, IndexChannelStatus, SeriesEpisode, SearchResult } from '../types';
 
 export default function Home() {
-  const { username } = useAuth();
+  const { username, isAdmin } = useAuth();
   const [rows, setRows] = useState<BrowseRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedSeries, setSelectedSeries] = useState<{ title: string; metadata: TMDBMetadata; channelId?: number; episodes: SeriesEpisode[]; tmdbId?: number } | null>(null);
@@ -94,6 +94,12 @@ export default function Home() {
   useEffect(() => {
     loadHome();
     loadPaused();
+  }, []);
+
+  useEffect(() => {
+    // /index/progress solo lo sirve un admin: pollearlo como usuario normal
+    // provocaba un 403 cada 5 segundos.
+    if (!isAdmin) return;
     const fetchIndex = async () => {
       try {
         const res = await apiFetch('/index/progress');
@@ -104,7 +110,7 @@ export default function Home() {
     fetchIndex();
     const interval = setInterval(fetchIndex, 5000);
     return () => clearInterval(interval);
-  }, []);
+  }, [isAdmin]);
 
   const handleSeriesClick = async (item: BrowseItem) => {
     const meta: TMDBMetadata = {

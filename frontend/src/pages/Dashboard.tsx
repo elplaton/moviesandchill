@@ -16,7 +16,7 @@ import LibraryView from './LibraryView';
 import type { SearchResult, Channel, FileItem, TMDBMetadata, SeriesEpisode, IndexChannelStatus } from '../types';
 
 export default function Dashboard() {
-  const { username } = useAuth();
+  const { username, isAdmin } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const [channels, setChannels] = useState<Channel[]>([]);
   const [diskFree, setDiskFree] = useState('');
@@ -46,6 +46,12 @@ export default function Dashboard() {
     updateDisk(); loadPaused();
     const q = searchParams.get('q');
     if (q) { doSearch(q); setSearchParams({}, { replace: true }); }
+  }, []);
+
+  useEffect(() => {
+    // /index/progress solo lo sirve un admin: pollearlo como usuario normal
+    // provocaba un 403 cada 5 segundos.
+    if (!isAdmin) return;
     const fetchIndex = async () => {
       try {
         const res = await apiFetch('/index/progress');
@@ -56,7 +62,7 @@ export default function Dashboard() {
     fetchIndex();
     const interval = setInterval(fetchIndex, 5000);
     return () => clearInterval(interval);
-  }, []);
+  }, [isAdmin]);
 
   const deleteFile = async (path: string) => {
     await apiFetch('/files', { method: 'DELETE', body: JSON.stringify({ path }) });
