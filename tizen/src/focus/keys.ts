@@ -109,6 +109,18 @@ function onKeyDown(event: KeyboardEvent) {
 
   const dir = DIR_BY_CODE[code] || DIR_BY_KEY[event.key];
   if (dir) {
+    const target = event.target as HTMLElement | null;
+    const typing = !!target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA');
+
+    if (typing) {
+      // Escribiendo, izquierda y derecha mueven el cursor del texto.
+      if (dir === 'left' || dir === 'right') return;
+      // Arriba y abajo salen del campo. Sin esto el motor se quedaba en pausa
+      // (la pausa es lo que deja funcionar el cursor) y no habia forma de
+      // bajar del usuario a la contrasena en el login.
+      target.blur();
+    }
+
     event.preventDefault();
     pendingDir = dir;
     if (!frame) frame = requestAnimationFrame(flush);

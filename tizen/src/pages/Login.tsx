@@ -70,6 +70,7 @@ export default function Login() {
           )}
 
           <FocusableInput
+            index={0}
             focusKey="login-username"
             type="text"
             value={username}
@@ -78,6 +79,7 @@ export default function Login() {
           />
 
           <FocusableInput
+            index={1}
             focusKey="login-password"
             type="password"
             value={password}
@@ -86,6 +88,7 @@ export default function Login() {
           />
 
           <FocusableButton
+            index={2}
             focusKey="login-remember"
             onClick={() => setRemember(!remember)}
             className="flex items-center gap-2 mb-6 text-sm text-gray-400"
@@ -101,6 +104,7 @@ export default function Login() {
           </FocusableButton>
 
           <FocusableButton
+            index={3}
             focusKey="login-submit"
             onClick={handleSubmit}
             className="w-full bg-netflix-red hover:bg-netflix-red-hover text-white font-semibold rounded-xl py-3.5 transition-all duration-200 disabled:opacity-50 text-sm shadow-lg shadow-netflix-red/20 hover:shadow-netflix-red/30"
