@@ -186,6 +186,23 @@ export function registerItem(init: {
 }): void {
   const existing = nodes.get(init.id);
   if (existing && existing.kind === 'item') {
+    if (
+      existing.parentId &&
+      init.parentId &&
+      existing.parentId !== init.parentId &&
+      existing.el &&
+      init.el &&
+      existing.el !== init.el
+    ) {
+      // Dos elementos distintos vivos compartiendo focusKey. El segundo roba
+      // el nodo y el primero queda huerfano: navegar desde el salta a otra
+      // parte de la pantalla. Paso exactamente esto en la portada, donde
+      // /browse/home devuelve la misma pelicula en varias filas de genero.
+      console.warn(
+        `[focus] focusKey duplicado: "${init.id}". Cada elemento enfocable ` +
+        'necesita una clave unica en la pantalla, o la navegacion salta.',
+      );
+    }
     existing.parentId = init.parentId;
     existing.index = init.index ?? 0;
     existing.el = init.el ?? existing.el;
@@ -507,6 +524,50 @@ export function getElement(id: string): HTMLElement | null {
 
 export function setPaused(value: boolean): void {
   paused = value;
+}
+
+/**
+ * Radiografia del arbol de foco, para leerla desde el inspector de la TV.
+ *
+ * Senala los dos fallos que ya se han dado: contenedores sin hijos (enlace
+ * padre-hijo roto) y nodos que dicen tener un padre que no existe.
+ */
+export function debugTree() {
+  const lines: string[] = [];
+  const problems: string[] = [];
+
+  const walk = (id: string, depth: number) => {
+    const node = nodes.get(id);
+    if (!node) return;
+    const pad = '  '.repeat(depth);
+    const here = node.id === currentId ? '  <== FOCO' : '';
+    if (node.kind === 'container') {
+      lines.push(`${pad}[${node.orientation}] ${node.id} (${node.childIds.length} hijos)${here}`);
+      if (node.childIds.length === 0) problems.push(`contenedor sin hijos: ${node.id}`);
+      node.childIds.forEach((c) => walk(c, depth + 1));
+    } else {
+      lines.push(`${pad}- ${node.id}${node.disabled ? ' (deshabilitado)' : ''}${here}`);
+    }
+  };
+
+  const roots: string[] = [];
+  nodes.forEach((node) => {
+    if (!node.parentId) roots.push(node.id);
+    else if (!nodes.has(node.parentId)) problems.push(`padre inexistente: ${node.id} -> ${node.parentId}`);
+  });
+  roots.forEach((r) => walk(r, 0));
+
+  const marked = document.querySelectorAll('.' + FOCUS_CLASS).length;
+  if (marked > 1) problems.push(`${marked} elementos con la clase de foco a la vez`);
+
+  return {
+    total: nodes.size,
+    foco: currentId,
+    raizActiva: activeRoot(),
+    pilaDeRaices: [...rootStack],
+    problemas: problems,
+    arbol: lines.join('\n'),
+  };
 }
 
 /** Solo para depurar desde la consola de la TV. */

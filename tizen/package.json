@@ -7,7 +7,11 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
-    "test": "sh test/run.sh"
+    "test": "sh test/run.sh",
+    "deploy": "./deploy.sh",
+    "deploy:debug": "./deploy.sh --debug",
+    "tv:console": "../venv/bin/python tools/tv-debug.py",
+    "tv:focus": "../venv/bin/python tools/tv-debug.py --eval \"__focus().arbol\""
   },
   "dependencies": {
     "preact": "^10.29.8",

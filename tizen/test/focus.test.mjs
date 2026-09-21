@@ -119,5 +119,30 @@ const elAntes = E.getElement(antes);
 E.unregister(antes);
 check('al desmontar se limpia la clase', elAntes.classList.contains('is-focused'), false);
 
+
+// --- La misma pelicula en varias filas ------------------------------------
+// /browse/home devuelve el mismo item en cada genero al que pertenece. Si dos
+// tarjetas comparten focusKey, la segunda le roba el nodo a la primera y al
+// moverte saltas de fila. Cada tarjeta tiene que tener su propia clave.
+console.log('\nMisma pelicula repetida en varias filas:');
+E.registerContainer({ id: 'dup-root', parentId: null, orientation: 'vertical' });
+E.pushRoot('dup-root');
+const PELI = 'm42';   // el mismo item aparece en las dos filas
+for (let r = 0; r < 2; r++) {
+  for (let c = 0; c < 3; c++) {
+    const item = c === 1 ? PELI : `otra${r}${c}`;
+    E.registerItem({ id: `fila${r}/${item}`, parentId: `drow${r}`, index: c, el: mk() });
+  }
+  E.registerContainer({ id: `drow${r}`, parentId: 'dup-root', index: r, orientation: 'horizontal', el: mk() });
+}
+E.setFocus(`fila0/otra00`);
+E.move('right');
+check('llega a la peli repetida sin saltar', E.getCurrentFocusId(), `fila0/${PELI}`);
+E.move('right');
+check('sigue en su fila al avanzar', E.getCurrentFocusId(), 'fila0/otra02');
+E.setFocus(`fila1/${PELI}`);
+E.move('right');
+check('la copia de la otra fila tampoco salta', E.getCurrentFocusId(), 'fila1/otra12');
+
 console.log(`\n${pass} correctas, ${fail} fallidas`);
 process.exit(fail ? 1 : 0);

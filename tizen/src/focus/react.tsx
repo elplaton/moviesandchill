@@ -11,7 +11,7 @@ import {
   type ReactNode,
 } from 'react';
 import {
-  applyFocus, getCurrentFocusId, popRoot, pushRoot, registerContainer,
+  applyFocus, debugTree, getCurrentFocusId, popRoot, pushRoot, registerContainer,
   registerItem, setFocus, subscribe, unregister,
   type Orientation,
 } from './engine';
@@ -148,7 +148,12 @@ export function useIsFocused(id: string): boolean {
 // ------------------------------------------------------------------- root
 
 export function FocusRoot({ children }: { children: ReactNode }) {
-  useEffect(() => { installKeyHandling(); }, []);
+  useEffect(() => {
+    installKeyHandling();
+    // Se expone para poder inspeccionarlo desde el inspector de la TV:
+    //   ./tools/tv-debug.py --eval "__focus().arbol"
+    (window as unknown as { __focus?: unknown }).__focus = debugTree;
+  }, []);
   return (
     <FocusScope id="app-root" orientation="vertical" trap as="none">
       {children}

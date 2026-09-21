@@ -270,7 +270,6 @@ export default function Home() {
                     ? row.items.map((item, itemIdx) => (
                         <MovieCard
                           key={item.id}
-                          focusKey={`mc-${item.id}`}
                           index={itemIdx}
                           forceFocus={rowIdx === 0 && itemIdx === 0}
                           name={item.title}
