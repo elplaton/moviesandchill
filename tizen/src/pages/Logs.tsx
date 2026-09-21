@@ -1,6 +1,11 @@
 import { useState, useEffect } from 'react';
 import Layout from '../components/Layout';
+import FocusableButton from '../components/FocusableButton';
+import { FocusScope } from '../focus/react';
 import { apiFetch } from '../services/api';
+
+/** Un campo numerico no se puede teclear con el mando: se cicla entre valores. */
+const LINE_OPTIONS = [100, 250, 500, 1000];
 
 export default function Logs() {
   const [logs, setLogs] = useState<string[]>([]);
@@ -28,23 +33,27 @@ export default function Logs() {
         <h1 className="text-white text-4xl font-bold mb-2 tracking-tight">Logs</h1>
         <p className="text-gray-400 text-sm mb-8">Salida de journalctl -u telegram-movie</p>
 
-        <div className="flex gap-3 items-center mb-5 flex-wrap">
-          <input type="number" value={lines} onChange={e => setLines(parseInt(e.target.value) || 100)}
-            className="w-20 bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-white text-sm outline-none focus:border-white/25 transition-all" />
-          <span className="text-gray-400 text-sm">lineas</span>
-          <button onClick={() => setPaused(!paused)}
- className="bg-white/5 border border-white/10 text-gray-300 hover:text-white hover:border-white/20 px-4 py-2.5 rounded-xl text-sm transition-all ">
+        <FocusScope orientation="horizontal" index={1} className="flex gap-3 items-center mb-5 flex-wrap">
+          <FocusableButton
+            index={0}
+            onClick={() => setLines(LINE_OPTIONS[(LINE_OPTIONS.indexOf(lines) + 1) % LINE_OPTIONS.length] ?? 100)}
+            className="bg-white/5 border border-white/10 text-gray-300 px-4 py-2.5 rounded-xl text-sm"
+          >
+            {lines} lineas
+          </FocusableButton>
+          <FocusableButton index={1} onClick={() => setPaused(!paused)}
+            className="bg-white/5 border border-white/10 text-gray-300 px-4 py-2.5 rounded-xl text-sm">
             {paused ? 'Reanudar' : 'Pausar'}
-          </button>
-          <button onClick={() => setAutoScroll(!autoScroll)}
- className="bg-white/5 border border-white/10 text-gray-300 hover:text-white hover:border-white/20 px-4 py-2.5 rounded-xl text-sm transition-all ">
+          </FocusableButton>
+          <FocusableButton index={2} onClick={() => setAutoScroll(!autoScroll)}
+            className="bg-white/5 border border-white/10 text-gray-300 px-4 py-2.5 rounded-xl text-sm">
             Auto: {autoScroll ? 'ON' : 'OFF'}
-          </button>
-          <button onClick={fetchLogs}
- className="bg-netflix-red/20 border border-netflix-red/30 text-netflix-red hover:bg-netflix-red/30 px-4 py-2.5 rounded-xl text-sm transition-all font-medium">
+          </FocusableButton>
+          <FocusableButton index={3} onClick={fetchLogs} autoFocus
+            className="bg-netflix-red/20 border border-netflix-red/30 text-netflix-red px-4 py-2.5 rounded-xl text-sm font-medium">
             Actualizar
-          </button>
-        </div>
+          </FocusableButton>
+        </FocusScope>
 
         <div className="bg-black/85 border border-white/10 rounded-2xl p-5 h-[calc(100vh-260px)] overflow-auto font-mono text-xs leading-relaxed shadow-inner">
           {logs.length === 0 ? (

@@ -1,4 +1,6 @@
 import { useState, useEffect } from 'react';
+import FocusableButton from './FocusableButton';
+import { FocusScope } from '../focus/react';
 import type { Batch, DownloadState, IndexChannelStatus } from '../types';
 
 interface DownloadBarProps {
@@ -38,10 +40,11 @@ export default function DownloadBar({ batches, onPause, onCancel, downloadStates
   const totalItems = visibleBatches.length + visibleIndexChannels.length;
 
   return (
-    <div className="fixed bottom-4 right-4 z-40 w-80">
-      <button
+    <FocusScope orientation="vertical" index={9} className="fixed bottom-4 right-4 z-40 w-80">
+      <FocusableButton
+        index={0}
         onClick={() => setExpanded(!expanded)}
- className="w-full bg-netflix-dark/95 border border-white/10 rounded-2xl px-5 py-3 flex items-center justify-between hover:bg-netflix-card/95 transition-all shadow-2xl shadow-black/40"
+        className="w-full bg-netflix-dark/95 border border-white/10 rounded-2xl px-5 py-3 flex items-center justify-between shadow-2xl shadow-black/40"
       >
         <span className="text-sm text-white font-medium flex items-center gap-2.5">
           <span className="relative flex h-2.5 w-2.5">
@@ -53,7 +56,7 @@ export default function DownloadBar({ batches, onPause, onCancel, downloadStates
         <svg className={`w-4 h-4 text-gray-400 transition-transform duration-300 ${expanded ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
         </svg>
-      </button>
+      </FocusableButton>
 
       {expanded && (
         <div className="bg-netflix-dark/95 border-x border-b border-white/10 rounded-b-2xl max-h-80 overflow-y-auto shadow-2xl shadow-black/40 animate-scale-in">
@@ -72,7 +75,7 @@ export default function DownloadBar({ batches, onPause, onCancel, downloadStates
                       {isScanning ? `${pct}%` : ch.status === 'done' ? 'Indexado' : 'Pendiente'}
                     </span>
                     {(ch.status === 'done' || ch.status === 'pending') && (
-                      <button onClick={() => dismissChannel(ch.channel_id)} className="text-gray-500 hover:text-white text-xs leading-none ml-1" title="Ocultar">✕</button>
+                      <FocusableButton index={0} onClick={() => dismissChannel(ch.channel_id)} className="text-gray-500 text-xs leading-none ml-1">✕</FocusableButton>
                     )}
                   </div>
                 </div>
@@ -98,7 +101,7 @@ export default function DownloadBar({ batches, onPause, onCancel, downloadStates
           })}
 
           {/* Downloads */}
-          {visibleBatches.map(b => {
+          {visibleBatches.map((b, idx) => {
             const batchDs: DownloadState[] = [];
             if (downloadStates) {
               for (const [, ds] of downloadStates) {
@@ -123,7 +126,7 @@ export default function DownloadBar({ batches, onPause, onCancel, downloadStates
                       : `${b.progress}%`}
                   </span>
                   {(isDone || isCancelled) && (
-                    <button onClick={() => dismissBatch(b.batch_id)} className="text-gray-500 hover:text-white text-xs leading-none ml-1" title="Ocultar">✕</button>
+                    <FocusableButton index={2} onClick={() => dismissBatch(b.batch_id)} className="text-gray-500 text-xs leading-none ml-1">✕</FocusableButton>
                   )}
                 </div>
               </div>
@@ -147,25 +150,25 @@ export default function DownloadBar({ batches, onPause, onCancel, downloadStates
                     ? `${dsFirst.downloadedStr} / ${dsFirst.totalStr}`
                     : b.total_size_str || `${b.downloaded_parts}/${b.total_parts} partes`}
                 </span>
-                <div className="flex gap-3">
+                <FocusScope orientation="horizontal" index={idx + 1} className="flex gap-3">
                   {b.status === 'downloading' && (
                     <>
-                      <button onClick={() => onPause(b.batch_id)} className="text-gray-400 hover:text-white text-[11px] transition-colors font-medium">
+                      <FocusableButton index={0} onClick={() => onPause(b.batch_id)} className="text-gray-400 text-[11px] font-medium">
                         Pausar
-                      </button>
-                      <button onClick={() => onCancel(b.batch_id)} className="text-red-400/80 hover:text-red-300 text-[11px] transition-colors font-medium">
+                      </FocusableButton>
+                      <FocusableButton index={1} onClick={() => onCancel(b.batch_id)} className="text-red-400/80 text-[11px] font-medium">
                         Cancelar
-                      </button>
+                      </FocusableButton>
                     </>
                   )}
                   <span className="text-gray-500 text-[10px]">{b.downloaded_parts}/{b.total_parts}</span>
-                </div>
+                </FocusScope>
               </div>
             </div>
             );
           })}
         </div>
       )}
-    </div>
+    </FocusScope>
   );
 }

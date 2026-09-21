@@ -83,5 +83,41 @@ E.setFocus('k35');
 E.unregister('k35');
 check('reubica el foco en algo vivo', E.getCurrentFocusId() !== null && E.getCurrentFocusId() !== 'k35', true);
 
+
+// --- Orden de registro de React: los efectos van de hijo a padre ----------
+// Este es el caso que se escapo: la tarjeta se registra diciendo que su padre
+// es la fila, pero la fila todavia no ha llamado a registerContainer().
+console.log('\nRegistro en orden de React (hijos antes que padres):');
+E.registerContainer({ id: 'r2root', parentId: null, orientation: 'vertical' });
+E.pushRoot('r2root');
+for (let r = 0; r < 2; r++) {
+  // primero los hijos...
+  for (let c = 0; c < 3; c++) {
+    E.registerItem({ id: `x${r}-${c}`, parentId: `xrow${r}`, index: c, el: mk() });
+  }
+  // ...y despues el contenedor que los agrupa
+  E.registerContainer({ id: `xrow${r}`, parentId: 'r2root', index: r, orientation: 'horizontal', el: mk() });
+}
+E.setFocus('x0-0');
+check('el foco entra en la primera tarjeta', E.getCurrentFocusId(), 'x0-0');
+E.move('right'); check('derecha funciona pese al orden', E.getCurrentFocusId(), 'x0-1');
+E.move('right'); check('sigue avanzando', E.getCurrentFocusId(), 'x0-2');
+E.move('down');  check('baja de fila conservando columna', E.getCurrentFocusId(), 'x1-2');
+E.move('left');  check('izquierda en la fila de abajo', E.getCurrentFocusId(), 'x1-1');
+
+console.log('\nNunca puede haber dos elementos enfocados:');
+const conFoco = () => ['x0-0','x0-1','x0-2','x1-0','x1-1','x1-2']
+  .filter((id) => { const e = E.getElement(id); return e && e.classList.contains('is-focused'); });
+check('solo uno tras varios movimientos', conFoco().length, 1);
+check('y es el actual', conFoco()[0], E.getCurrentFocusId());
+E.move('up'); E.move('left'); E.move('right');
+check('sigue siendo uno solo', conFoco().length, 1);
+
+// Desmontar el enfocado no debe dejar la clase pegada en ningun sitio
+const antes = E.getCurrentFocusId();
+const elAntes = E.getElement(antes);
+E.unregister(antes);
+check('al desmontar se limpia la clase', elAntes.classList.contains('is-focused'), false);
+
 console.log(`\n${pass} correctas, ${fail} fallidas`);
 process.exit(fail ? 1 : 0);

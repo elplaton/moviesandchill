@@ -3,6 +3,7 @@ import { apiFetch, streamUrl } from '../services/api';
 import Layout from '../components/Layout';
 import MovieRow from '../components/MovieRow';
 import MovieCard from '../components/MovieCard';
+import { FocusScope } from '../focus/react';
 import SeriesDetail from '../components/SeriesDetail';
 import MovieDetail from '../components/MovieDetail';
 import type { BrowseRow, BrowseItem, TMDBMetadata, SearchResult, SeriesEpisode } from '../types';
@@ -73,11 +74,14 @@ export default function Series() {
 
       {loading && <div className="px-6 md:px-14 py-20 text-center text-gray-500">Cargando...</div>}
 
-      {rows.map(row => (
-        <MovieRow key={row.genre} title={row.genre}>
-          {row.items.map(item => (
+      <FocusScope orientation="vertical" index={1} as="none">
+      {rows.map((row, rowIdx) => (
+        <MovieRow key={row.genre} index={rowIdx} title={row.genre}>
+          {row.items.map((item, itemIdx) => (
             <MovieCard
               key={item.id}
+              index={itemIdx}
+              forceFocus={rowIdx === 0 && itemIdx === 0}
               name={item.title}
               posterUrl={item.poster}
               year={item.year}
@@ -91,6 +95,7 @@ export default function Series() {
           ))}
         </MovieRow>
       ))}
+      </FocusScope>
 
       {!loading && rows.length === 0 && (
         <div className="px-6 md:px-14 py-16 text-center"><p className="text-gray-500 text-lg">No hay series indexadas</p></div>

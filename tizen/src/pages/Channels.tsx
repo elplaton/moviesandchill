@@ -1,6 +1,9 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Layout from '../components/Layout';
+import FocusableButton from '../components/FocusableButton';
+import { setPaused } from '../focus/engine';
+import { FocusScope, useFocusItem } from '../focus/react';
 import { apiFetch } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import type { Channel } from '../types';
@@ -23,6 +26,32 @@ interface ChannelProgress {
   total_estimate?: number;
   status: string;
   phase?: string;
+}
+
+/** Campo de URL navegable: Enter abre el teclado de Tizen sobre el input. */
+function UrlField({ index, value, onChange, onSubmit }: {
+  index: number; value: string; onChange: (v: string) => void; onSubmit: () => void;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const { ref } = useFocusItem<HTMLDivElement>({
+    index,
+    onEnter: () => inputRef.current?.focus(),
+    onBlur: () => inputRef.current?.blur(),
+  });
+  return (
+    <div ref={ref} className="tv-focusable flex-1 rounded-xl">
+      <input
+        ref={inputRef}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        onFocus={() => setPaused(true)}
+        onBlur={() => setPaused(false)}
+        onKeyDown={(e) => { if (e.key === 'Enter') { e.currentTarget.blur(); onSubmit(); } }}
+        placeholder="https://t.me/c/123456789 o https://t.me/NombreCanal"
+        className="w-full bg-black/30 border border-white/10 rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-white/25 placeholder-gray-500"
+      />
+    </div>
+  );
 }
 
 export default function Channels() {
@@ -161,6 +190,7 @@ export default function Channels() {
   return (
     <Layout>
       <div className="px-6 md:px-14 pt-24 pb-20 max-w-4xl mx-auto">
+      <FocusScope orientation="vertical" index={1} as="none">
         {toast && (
           <div className="fixed top-24 right-6 z-50 bg-green-600/95 border border-green-400/20 text-white px-5 py-3 rounded-2xl shadow-2xl text-sm font-medium animate-slide-up">
             {toast}
@@ -187,9 +217,9 @@ export default function Channels() {
                 )}
               </h2>
               <div className="flex gap-2">
-                <button onClick={scanAll} className="text-xs bg-netflix-red hover:bg-netflix-red-hover text-white px-4 py-2 rounded-lg transition-all font-medium">
+                <FocusableButton index={0} onClick={scanAll} className="text-xs bg-netflix-red text-white px-4 py-2 rounded-lg font-medium">
                   Reescanear todo
-                </button>
+                </FocusableButton>
               </div>
             </div>
             <div className="grid grid-cols-4 gap-3 mb-4">
@@ -292,10 +322,10 @@ export default function Channels() {
             <div className="flex items-center justify-between py-3 border-t border-white/5 mt-4">
               <div className="flex items-center gap-3">
                 <span className="text-gray-300 text-sm">TMDB</span>
-                <button onClick={toggleTmdb}
-                  className={`w-11 h-6 rounded-full transition-colors duration-200 flex items-center px-0.5 ${tmdbEnabled ? 'bg-green-500 justify-end' : 'bg-white/20 justify-start'}`}>
-                  <span className="w-5 h-5 rounded-full bg-white shadow transition-all duration-200" />
-                </button>
+                <FocusableButton index={1} onClick={toggleTmdb}
+                  className={`w-11 h-6 rounded-full flex items-center px-0.5 ${tmdbEnabled ? 'bg-green-500 justify-end' : 'bg-white/20 justify-start'}`}>
+                  <span className="w-5 h-5 rounded-full bg-white shadow" />
+                </FocusableButton>
                 <span className={`text-xs ${tmdbEnabled ? 'text-green-400' : 'text-gray-500'}`}>
                   {tmdbEnabled ? 'Activado' : 'Desactivado'}
                 </span>
@@ -306,15 +336,13 @@ export default function Channels() {
 
         <div className="bg-white/5 border border-white/10 rounded-2xl p-6 mb-8 shadow-xl">
           <h2 className="text-white text-lg font-medium mb-4">Anadir canal por URL</h2>
-          <div className="flex gap-3">
-            <input value={url} onChange={e => setUrl(e.target.value)} onKeyDown={e => e.key === 'Enter' && addByUrl()}
-              placeholder="https://t.me/c/123456789 o https://t.me/NombreCanal"
-              className="flex-1 bg-black/30 border border-white/10 rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-white/25 transition-all placeholder-gray-500" />
-            <button onClick={addByUrl}
-              className="bg-netflix-red hover:bg-netflix-red-hover text-white px-6 py-3 rounded-xl font-medium text-sm transition-all hover:scale-105 shadow-lg shadow-netflix-red/20">
+          <FocusScope orientation="horizontal" index={2} className="flex gap-3">
+            <UrlField index={0} value={url} onChange={setUrl} onSubmit={addByUrl} />
+            <FocusableButton index={1} onClick={addByUrl}
+              className="bg-netflix-red text-white px-6 py-3 rounded-xl font-medium text-sm shadow-lg shadow-netflix-red/20">
               Anadir
-            </button>
-          </div>
+            </FocusableButton>
+          </FocusScope>
           {urlFeedback && (
             <p className={`mt-3 text-xs ${urlFeedback.includes('Error') || urlFeedback.includes('URL') ? 'text-red-400' : 'text-green-400'}`}>
               {urlFeedback}
@@ -325,37 +353,38 @@ export default function Channels() {
         {active.length > 0 && (
           <div className="bg-white/5 border border-white/10 rounded-2xl p-6 mb-6 shadow-xl">
             <h2 className="text-white text-lg font-medium mb-4">Activos ({active.length})</h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
-              {active.map(c => (
-                <button key={c.id} onClick={() => toggle(c.id)}
-                  className="flex items-center gap-3 bg-netflix-red/10 border border-netflix-red/20 rounded-xl px-4 py-3 hover:bg-netflix-red/15 transition-all text-left">
+            <FocusScope orientation="grid" columns={2} index={3} className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+              {active.map((c, i) => (
+                <FocusableButton key={c.id} index={i} onClick={() => toggle(c.id)}
+                  className="flex items-center gap-3 bg-netflix-red/10 border border-netflix-red/20 rounded-xl px-4 py-3 text-left">
                   <span className="text-white text-sm truncate font-medium">{c.name}</span>
                   <span className="text-gray-400 text-[10px] shrink-0 ml-auto">{c.id}</span>
-                </button>
+                </FocusableButton>
               ))}
-            </div>
+            </FocusScope>
           </div>
         )}
 
         {inactive.length > 0 && (
           <div className="bg-white/5 border border-white/10 rounded-2xl p-6 mb-8 shadow-xl">
             <h2 className="text-white text-lg font-medium mb-4">Inactivos ({inactive.length})</h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
-              {inactive.map(c => (
-                <button key={c.id} onClick={() => toggle(c.id)}
-                  className="flex items-center gap-3 bg-white/[0.03] border border-white/5 rounded-xl px-4 py-3 hover:bg-white/[0.06] transition-all text-left">
+            <FocusScope orientation="grid" columns={2} index={4} className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+              {inactive.map((c, i) => (
+                <FocusableButton key={c.id} index={i} onClick={() => toggle(c.id)}
+                  className="flex items-center gap-3 bg-white/[0.03] border border-white/5 rounded-xl px-4 py-3 text-left">
                   <span className="text-gray-400 text-sm truncate">{c.name}</span>
                   <span className="text-gray-500 text-[10px] shrink-0 ml-auto">{c.id}</span>
-                </button>
+                </FocusableButton>
               ))}
-            </div>
+            </FocusScope>
           </div>
         )}
 
-        <button onClick={saveChannels}
-          className="bg-netflix-red hover:bg-netflix-red-hover text-white px-8 py-3.5 rounded-xl font-semibold transition-all hover:scale-105 shadow-lg shadow-netflix-red/20">
+        <FocusableButton index={5} onClick={saveChannels}
+          className="bg-netflix-red text-white px-8 py-3.5 rounded-xl font-semibold shadow-lg shadow-netflix-red/20">
           Guardar
-        </button>
+        </FocusableButton>
+      </FocusScope>
       </div>
     </Layout>
   );

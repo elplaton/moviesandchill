@@ -54,6 +54,15 @@ const rootStack: string[] = [];
 const savedFocus: (string | null)[] = [];
 
 let currentId: string | null = null;
+/**
+ * Elemento que lleva puesta la clase de foco ahora mismo.
+ *
+ * Se guarda la referencia directa en vez de buscarla por id: si el nodo se
+ * desregistra o se vuelve a registrar entre dos movimientos, buscarlo por id
+ * podia fallar y la clase se quedaba pegada, con lo que se veian dos focos
+ * a la vez en pantalla.
+ */
+let focusedEl: HTMLElement | null = null;
 let paused = false;
 
 type Listener = (id: string | null) => void;
@@ -97,15 +106,38 @@ function sortChildren(parent: ContainerNode) {
   });
 }
 
+function linkToParent(node: FocusNode) {
+  if (!node.parentId) return;
+  const parent = nodes.get(node.parentId);
+  if (!parent || parent.kind !== 'container') return;
+  if (!parent.childIds.includes(node.id)) parent.childIds.push(node.id);
+  sortChildren(parent);
+}
+
+/**
+ * Recoge los nodos que ya se habian registrado declarando a este contenedor
+ * como padre cuando el contenedor todavia no existia.
+ *
+ * Hace falta porque React ejecuta los efectos de hijo a padre: la tarjeta
+ * llama a registerItem() con el id de su fila antes de que la fila haya
+ * llamado a registerContainer(). Sin esto las filas se quedaban con la lista
+ * de hijos vacia y no se podia navegar en horizontal.
+ */
+function adoptOrphans(container: ContainerNode) {
+  let found = false;
+  nodes.forEach((node) => {
+    if (node.parentId === container.id && !container.childIds.includes(node.id)) {
+      container.childIds.push(node.id);
+      found = true;
+    }
+  });
+  if (found) sortChildren(container);
+}
+
 function attach(node: FocusNode) {
   nodes.set(node.id, node);
-  if (node.parentId) {
-    const parent = nodes.get(node.parentId);
-    if (parent && parent.kind === 'container') {
-      if (!parent.childIds.includes(node.id)) parent.childIds.push(node.id);
-      sortChildren(parent);
-    }
-  }
+  linkToParent(node);
+  if (node.kind === 'container') adoptOrphans(node);
 }
 
 export function registerContainer(init: {
@@ -162,7 +194,11 @@ export function registerItem(init: {
     existing.onBlur = init.onBlur;
     existing.disabled = init.disabled ?? false;
     if (init.parentId) attach(existing);
-    if (currentId === init.id && existing.el) existing.el.classList.add(FOCUS_CLASS);
+    if (currentId === init.id && existing.el) {
+      if (focusedEl && focusedEl !== existing.el) focusedEl.classList.remove(FOCUS_CLASS);
+      existing.el.classList.add(FOCUS_CLASS);
+      focusedEl = existing.el;
+    }
     return;
   }
   attach({
@@ -178,7 +214,11 @@ export function registerItem(init: {
   });
   if (currentId === init.id) {
     const n = nodes.get(init.id) as ItemNode;
-    n.el?.classList.add(FOCUS_CLASS);
+    if (n.el) {
+      if (focusedEl && focusedEl !== n.el) focusedEl.classList.remove(FOCUS_CLASS);
+      n.el.classList.add(FOCUS_CLASS);
+      focusedEl = n.el;
+    }
   }
 }
 
@@ -191,6 +231,10 @@ export function unregister(id: string): void {
       parent.childIds = parent.childIds.filter((c) => c !== id);
       if (parent.lastChildId === id) parent.lastChildId = null;
     }
+  }
+  if (node.kind === 'item' && node.el && node.el === focusedEl) {
+    focusedEl.classList.remove(FOCUS_CLASS);
+    focusedEl = null;
   }
   nodes.delete(id);
   if (currentId === id) {
@@ -418,16 +462,20 @@ export function applyFocus(id: string): void {
     return;
   }
   const prev = currentId ? nodes.get(currentId) : undefined;
-  if (isItem(prev)) {
-    prev.el?.classList.remove(FOCUS_CLASS);
-    prev.onBlur?.();
+  if (focusedEl) {
+    focusedEl.classList.remove(FOCUS_CLASS);
+    focusedEl = null;
   }
+  if (isItem(prev)) prev.onBlur?.();
 
   currentId = id;
 
   const next = nodes.get(id);
   if (isItem(next)) {
-    next.el?.classList.add(FOCUS_CLASS);
+    if (next.el) {
+      next.el.classList.add(FOCUS_CLASS);
+      focusedEl = next.el;
+    }
     next.onFocus?.();
   }
   markPath(id);
