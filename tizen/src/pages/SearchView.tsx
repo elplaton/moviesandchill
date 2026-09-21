@@ -34,7 +34,11 @@ interface Props {
 }
 
 function SearchField({ value, onOpen }: { value: string; onOpen: () => void }) {
-  const { ref } = useFocusItem<HTMLDivElement>({ focusKey: 'search-input', index: 0 });
+  // onEnter es lo que ejecuta el mando; onClick solo cubre el puntero. Sin el
+  // primero, el teclado en pantalla no se abria nunca desde el mando.
+  const { ref } = useFocusItem<HTMLDivElement>({
+    focusKey: 'search-input', index: 0, onEnter: onOpen,
+  });
   return (
     <div
       ref={ref}

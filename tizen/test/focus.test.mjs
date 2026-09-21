@@ -59,7 +59,9 @@ E.registerContainer({ id: 'modal', parentId: null, orientation: 'vertical' });
 E.registerItem({ id: 'm-close', parentId: 'modal', index: 0, el: mk() });
 E.registerItem({ id: 'm-ok', parentId: 'modal', index: 1, el: mk() });
 E.pushRoot('modal');
-E.setFocus('m-close');
+// Al apilar la raiz el foco debe entrar solo: si se queda fuera, las flechas
+// no hacen nada porque lo enfocado ya no pertenece a la raiz activa.
+check('el foco entra solo en el modal', E.getCurrentFocusId(), 'm-close');
 E.move('down'); check('se mueve dentro del modal', E.getCurrentFocusId(), 'm-ok');
 E.move('down'); check('no se escapa por abajo', E.getCurrentFocusId(), 'm-ok');
 E.move('up'); E.move('up');
@@ -81,7 +83,11 @@ E.move('left');  check('borde izquierdo', E.getCurrentFocusId(), 'k0');
 console.log('\nDesmontar lo enfocado (virtualizacion):');
 E.setFocus('k35');
 E.unregister('k35');
-check('reubica el foco en algo vivo', E.getCurrentFocusId() !== null && E.getCurrentFocusId() !== 'k35', true);
+// La recolocacion va diferida (un frame), porque al cambiar de pantalla el
+// arbol nuevo aun no existe en el instante del desmontaje.
+check('deja de apuntar al desmontado', E.getCurrentFocusId(), null);
+E.move('left');
+check('la siguiente flecha recoloca el foco', E.getCurrentFocusId() !== null, true);
 
 
 // --- Orden de registro de React: los efectos van de hijo a padre ----------
@@ -143,6 +149,32 @@ check('sigue en su fila al avanzar', E.getCurrentFocusId(), 'fila0/otra02');
 E.setFocus(`fila1/${PELI}`);
 E.move('right');
 check('la copia de la otra fila tampoco salta', E.getCurrentFocusId(), 'fila1/otra12');
+
+
+// --- Cambio de pantalla ----------------------------------------------------
+// Al navegar, React desmonta la pantalla vieja antes de montar la nueva. Si el
+// foco no se recoloca, el mando se queda muerto en la pantalla nueva.
+console.log('\nCambio de pantalla:');
+E.registerContainer({ id: 'nav-root', parentId: null, orientation: 'vertical' });
+E.pushRoot('nav-root');
+E.registerContainer({ id: 'barra', parentId: 'nav-root', index: 0, orientation: 'horizontal', el: mk() });
+E.registerItem({ id: 'nav-inicio', parentId: 'barra', index: 0, el: mk() });
+E.registerContainer({ id: 'pagina-a', parentId: 'nav-root', index: 1, orientation: 'vertical', el: mk() });
+E.registerItem({ id: 'a-1', parentId: 'pagina-a', index: 0, el: mk() });
+E.setFocus('a-1');
+check('foco en la pantalla A', E.getCurrentFocusId(), 'a-1');
+
+// Se desmonta la pantalla A y monta la B, como hace el router
+E.unregister('a-1');
+E.unregister('pagina-a');
+check('tras desmontar no queda foco valido', E.getCurrentFocusId(), null);
+E.registerItem({ id: 'b-1', parentId: 'pagina-b', index: 0, el: mk() });
+E.registerContainer({ id: 'pagina-b', parentId: 'nav-root', index: 1, orientation: 'vertical', el: mk() });
+
+// Una flecha sin foco no puede quedarse sin efecto
+const movido = E.move('down');
+check('la flecha recoloca el foco', movido, true);
+check('y cae en la pantalla nueva', E.getCurrentFocusId() !== null, true);
 
 console.log(`\n${pass} correctas, ${fail} fallidas`);
 process.exit(fail ? 1 : 0);

@@ -12,7 +12,30 @@ export function useDownloads() {
     try {
       const res = await apiFetch('/status');
       const data = await res.json();
-      setBatches(data.active_batches || []);
+      const activos: Batch[] = data.active_batches || [];
+      setBatches(activos);
+
+      // Se siembra el estado por elemento con lo que ya esta en curso. Los
+      // mensajes de progreso del WebSocket solo actualizan entradas que ya
+      // existen, asi que sin esto una descarga arrancada antes de recargar la
+      // app no mostraba su anillo en ninguna parte.
+      setDownloadStates(prev => {
+        const next = new Map(prev);
+        for (const b of activos) {
+          for (const p of b.parts || []) {
+            const actual = next.get(p.message_id);
+            if (actual && actual.status === 'done') continue;
+            next.set(p.message_id, {
+              ...actual,
+              messageId: p.message_id,
+              batchId: b.batch_id,
+              progress: p.progress ?? b.progress ?? 0,
+              status: (b.status === 'downloading' ? 'downloading' : b.status) as DownloadState['status'],
+            });
+          }
+        }
+        return next;
+      });
       return data.disk_free || '';
     } catch {}
     return '';

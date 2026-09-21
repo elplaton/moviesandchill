@@ -255,15 +255,33 @@ export function unregister(id: string): void {
   }
   nodes.delete(id);
   if (currentId === id) {
-    // El elemento enfocado se ha desmontado (p. ej. al virtualizar la fila).
-    // Se reubica el foco en lo mas cercano que siga vivo.
     currentId = null;
-    const root = activeRoot();
-    if (root) {
-      const fallback = descend(root);
-      if (fallback) applyFocus(fallback);
-    }
+    scheduleRecovery();
   }
+}
+
+let recoveryScheduled = false;
+
+/**
+ * Recoloca el foco cuando el elemento enfocado desaparece.
+ *
+ * Va diferido a proposito: al cambiar de pantalla React desmonta el arbol
+ * viejo antes de montar el nuevo, y recolocar en ese instante dejaba el foco
+ * en la barra superior o en ninguna parte. Un frame despues la pantalla nueva
+ * ya se ha registrado.
+ */
+function scheduleRecovery() {
+  if (recoveryScheduled) return;
+  recoveryScheduled = true;
+  const run = () => {
+    recoveryScheduled = false;
+    if (currentId && nodes.has(currentId)) return;
+    const root = activeRoot();
+    const fallback = root ? descend(root) : null;
+    if (fallback) applyFocus(fallback);
+  };
+  if (typeof requestAnimationFrame === 'function') requestAnimationFrame(run);
+  else setTimeout(run, 0);
 }
 
 // ------------------------------------------------------------------ raices
@@ -275,9 +293,26 @@ function activeRoot(): string | null {
   return null;
 }
 
+/** ¿Este nodo cuelga de esa raiz? */
+function isInside(id: string, rootId: string): boolean {
+  let node: FocusNode | undefined = nodes.get(id);
+  while (node) {
+    if (node.id === rootId) return true;
+    if (!node.parentId) return false;
+    node = nodes.get(node.parentId);
+  }
+  return false;
+}
+
 export function pushRoot(id: string): void {
   savedFocus.push(currentId);
   rootStack.push(id);
+  // El foco tiene que entrar en el modal. Si se queda fuera, las flechas no
+  // hacen nada: el elemento enfocado ya no pertenece a la raiz activa, asi que
+  // la navegacion no encuentra por donde moverse. Antes cada modal tenia que
+  // acordarse de llamar a setFocus, y el teclado en pantalla no lo hacia.
+  const first = descend(id);
+  if (first) applyFocus(first);
 }
 
 export function popRoot(id: string): void {
@@ -401,8 +436,21 @@ function gridNeighbour(parent: ContainerNode, fromIndex: number, dir: Direction)
 }
 
 export function move(dir: Direction): boolean {
-  if (paused || !currentId) return false;
+  if (paused) return false;
+
   const root = activeRoot();
+
+  // Sin foco valido, o con el foco fuera de la raiz activa, el mando quedaria
+  // muerto. Se entra en la raiz y se consume la pulsacion.
+  if (!currentId || !nodes.has(currentId) || (root && !isInside(currentId, root))) {
+    const first = root ? descend(root) : null;
+    if (first) {
+      applyFocus(first);
+      return true;
+    }
+    return false;
+  }
+
   let node = nodes.get(currentId);
   if (!node) return false;
 
@@ -535,6 +583,7 @@ export function setPaused(value: boolean): void {
 export function debugTree() {
   const lines: string[] = [];
   const problems: string[] = [];
+  const empty: string[] = [];
 
   const walk = (id: string, depth: number) => {
     const node = nodes.get(id);
@@ -543,7 +592,10 @@ export function debugTree() {
     const here = node.id === currentId ? '  <== FOCO' : '';
     if (node.kind === 'container') {
       lines.push(`${pad}[${node.orientation}] ${node.id} (${node.childIds.length} hijos)${here}`);
-      if (node.childIds.length === 0) problems.push(`contenedor sin hijos: ${node.id}`);
+      // Un contenedor vacio es normal: las filas fuera de la ventana vertical
+      // montan su armazon sin tarjetas. Se cuentan aparte para no confundirlo
+      // con un enlace padre-hijo roto, que si es un fallo.
+      if (node.childIds.length === 0) empty.push(node.id);
       node.childIds.forEach((c) => walk(c, depth + 1));
     } else {
       lines.push(`${pad}- ${node.id}${node.disabled ? ' (deshabilitado)' : ''}${here}`);
@@ -566,6 +618,7 @@ export function debugTree() {
     raizActiva: activeRoot(),
     pilaDeRaices: [...rootStack],
     problemas: problems,
+    contenedoresVacios: empty.length,
     arbol: lines.join('\n'),
   };
 }

@@ -39,6 +39,62 @@ interface EpGroup {
   variants?: EpGroup[];
 }
 
+/**
+ * Accion de descarga de una fila.
+ *
+ * Antes era un boton fijo que siempre decia "Descargar": no miraba
+ * downloadStates, asi que al pulsarlo la descarga arrancaba pero la ficha no
+ * mostraba ningun progreso. Ahora el mismo elemento cambia de estado y, con la
+ * descarga en curso, Enter la cancela. Conserva el focusKey para que el foco
+ * no se pierda al cambiar de estado.
+ */
+function DownloadAction({ messageId, channelId, partes, downloadStates, onDownload, onCancelDownload }: {
+  messageId?: number;
+  channelId?: number;
+  partes: number;
+  downloadStates?: Map<number, DownloadState>;
+  onDownload?: (msgId: number, channelId?: number) => void;
+  onCancelDownload?: (batchId: string) => void;
+}) {
+  if (!messageId) {
+    return <span className="text-gray-600 text-[10px] shrink-0">No disponible</span>;
+  }
+
+  const ds = downloadStates?.get(messageId);
+  const enCurso = ds && ds.status !== 'done' && ds.status !== 'error';
+  const focusKey = `sd-dl-${messageId}`;
+
+  if (enCurso && ds) {
+    const etiqueta = ds.status === 'extracting' ? 'Extrayendo'
+      : ds.status === 'converting' ? 'Convirtiendo'
+      : `${ds.progress}%`;
+    return (
+      <FocusableButton
+        focusKey={focusKey}
+        onClick={() => ds.batchId && onCancelDownload?.(ds.batchId)}
+        className="flex items-center gap-2 bg-white/10 text-white text-xs px-3 py-1.5 rounded-lg font-medium shrink-0"
+      >
+        <DownloadRing progress={ds.progress} status={ds.status as RingStatus} />
+        {etiqueta}
+      </FocusableButton>
+    );
+  }
+
+  if (ds?.status === 'done') {
+    return <span className="text-green-400 text-[11px] shrink-0">Descargado</span>;
+  }
+
+  return (
+    <FocusableButton
+      focusKey={focusKey}
+      onClick={() => onDownload?.(messageId, channelId)}
+      className="bg-netflix-red text-white text-xs px-3 py-1.5 rounded-lg font-medium shrink-0"
+    >
+      Descargar{partes ? ` (${partes})` : ''}
+    </FocusableButton>
+  );
+}
+
 function EpisodeRow({ ep, streamUrl, onDownload, onCancelDownload, downloadStates, tmdbName }: {
   ep: SeriesEpisode;
   streamUrl: (path: string) => string;
@@ -327,14 +383,14 @@ export default function SeriesDetail({ series, metadata, onClose, streamUrl, onD
                               <p className="text-white text-sm truncate">{cleanFileName(g.baseName)}</p>
                               <p className="text-gray-500 text-[11px]">{quality ? `${quality} · ` : ''}{info}</p>
                             </div>
-                            {g.first.message_id ? (
-                              <FocusableButton onClick={() => onDownload ? onDownload(g.first.message_id!, g.first.channel_id) : null} focusKey={`sd-dl-${g.first.message_id}`}
-                                className="bg-netflix-red hover:bg-netflix-red-hover text-white text-xs px-3 py-1.5 rounded-lg transition-all font-medium shrink-0">
-                                Descargar{g.isMultipart ? ` (${g.episodes.length})` : ''}
-                              </FocusableButton>
-                            ) : (
-                              <span className="text-gray-600 text-[10px] shrink-0">No disponible</span>
-                            )}
+                            <DownloadAction
+                              messageId={g.first.message_id}
+                              channelId={g.first.channel_id}
+                              partes={g.isMultipart ? g.episodes.length : 0}
+                              downloadStates={downloadStates}
+                              onDownload={onDownload}
+                              onCancelDownload={onCancelDownload}
+                            />
                           </div>
                         );
                       }
@@ -371,14 +427,14 @@ export default function SeriesDetail({ series, metadata, onClose, streamUrl, onD
                                       <p className="text-gray-300 text-xs truncate">{quality || cleanFileName(v.first.name)}</p>
                                       <p className="text-gray-500 text-[10px]">{info}</p>
                                     </div>
-                                    {v.first.message_id ? (
-                                      <FocusableButton onClick={() => onDownload ? onDownload(v.first.message_id!, v.first.channel_id) : null} focusKey={`sd-dl-${v.first.message_id}`}
-                                        className="bg-netflix-red hover:bg-netflix-red-hover text-white text-xs px-2.5 py-1 rounded-lg transition-all font-medium shrink-0">
-                                        Descargar{v.isMultipart ? ` (${v.episodes.length})` : ''}
-                                      </FocusableButton>
-                                    ) : (
-                                      <span className="text-gray-600 text-[10px] shrink-0">No disponible</span>
-                                    )}
+                                    <DownloadAction
+                              messageId={v.first.message_id}
+                              channelId={v.first.channel_id}
+                              partes={v.isMultipart ? v.episodes.length : 0}
+                              downloadStates={downloadStates}
+                              onDownload={onDownload}
+                              onCancelDownload={onCancelDownload}
+                            />
                                   </div>
                                 );
                               })}
@@ -411,14 +467,14 @@ export default function SeriesDetail({ series, metadata, onClose, streamUrl, onD
                         <p className="text-white text-sm truncate">{cleanFileName(g.baseName)}</p>
                         <p className="text-gray-500 text-[11px]">{quality ? `${quality} · ` : ''}{info}</p>
                       </div>
-                      {g.first.message_id ? (
-                        <FocusableButton onClick={() => onDownload ? onDownload(g.first.message_id!, g.first.channel_id) : null} focusKey={`sd-dl-${g.first.message_id}`}
-                          className="bg-netflix-red hover:bg-netflix-red-hover text-white text-xs px-3 py-1.5 rounded-lg transition-all font-medium shrink-0">
-                          Descargar{g.isMultipart ? ` (${g.episodes.length})` : ''}
-                        </FocusableButton>
-                      ) : (
-                        <span className="text-gray-600 text-[10px] shrink-0">No disponible</span>
-                      )}
+                      <DownloadAction
+                              messageId={g.first.message_id}
+                              channelId={g.first.channel_id}
+                              partes={g.isMultipart ? g.episodes.length : 0}
+                              downloadStates={downloadStates}
+                              onDownload={onDownload}
+                              onCancelDownload={onCancelDownload}
+                            />
                     </div>
                   );
                 }
@@ -454,14 +510,14 @@ export default function SeriesDetail({ series, metadata, onClose, streamUrl, onD
                                 <p className="text-gray-300 text-xs truncate">{quality || cleanFileName(v.first.name)}</p>
                                 <p className="text-gray-500 text-[10px]">{info}</p>
                               </div>
-                              {v.first.message_id ? (
-                                <FocusableButton onClick={() => onDownload ? onDownload(v.first.message_id!, v.first.channel_id) : null} focusKey={`sd-dl-${v.first.message_id}`}
-                                  className="bg-netflix-red hover:bg-netflix-red-hover text-white text-xs px-2.5 py-1 rounded-lg transition-all font-medium shrink-0">
-                                  Descargar{v.isMultipart ? ` (${v.episodes.length})` : ''}
-                                </FocusableButton>
-                              ) : (
-                                <span className="text-gray-600 text-[10px] shrink-0">No disponible</span>
-                              )}
+                              <DownloadAction
+                              messageId={v.first.message_id}
+                              channelId={v.first.channel_id}
+                              partes={v.isMultipart ? v.episodes.length : 0}
+                              downloadStates={downloadStates}
+                              onDownload={onDownload}
+                              onCancelDownload={onCancelDownload}
+                            />
                             </div>
                           );
                         })}

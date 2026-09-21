@@ -221,13 +221,16 @@ export default function Home() {
 
   /*
    * Ventana vertical: de las 12 filas que manda el backend solo montan sus
-   * tarjetas las cercanas al foco. Con margen de una fila arriba y dos abajo,
-   * el destino de cualquier pulsacion ya esta montado. El armazon de la fila
-   * (titulo y hueco con altura minima) se pinta siempre, asi que el layout no
-   * salta al entrar y salir de la ventana.
+   * tarjetas las cercanas al foco. El armazon de la fila (titulo y hueco con
+   * altura minima) se pinta siempre, asi que el layout no salta.
+   *
+   * El margen tiene que cubrir todo lo que se ve, no solo lo alcanzable en una
+   * pulsacion: en 1080p caben tres o cuatro filas a la vez y el desplazamiento
+   * deja varias por encima de la enfocada. Con margenes mas cortos las filas
+   * de arriba se vaciaban estando aun en pantalla y parecia que desaparecian.
    */
-  const ROWS_ABOVE = 1;
-  const ROWS_BELOW = 2;
+  const ROWS_ABOVE = 3;
+  const ROWS_BELOW = 3;
   const isRowMounted = (rowIdx: number) =>
     rowIdx >= focusRow - ROWS_ABOVE && rowIdx <= focusRow + ROWS_BELOW;
 
