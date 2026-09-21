@@ -10,8 +10,8 @@
     "test": "sh test/run.sh",
     "deploy": "./deploy.sh",
     "deploy:debug": "./deploy.sh --debug",
-    "tv:console": "../venv/bin/python tools/tv-debug.py",
-    "tv:focus": "../venv/bin/python tools/tv-debug.py --eval \"__focus().arbol\""
+    "tv:console": "../venv/bin/python tools/debug-server.py",
+    "tv:focus": "../venv/bin/python tools/debug-server.py --eval \"__focus().arbol\""
   },
   "dependencies": {
     "preact": "^10.29.8",

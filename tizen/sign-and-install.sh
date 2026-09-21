@@ -7,7 +7,7 @@
 set -euo pipefail
 
 TIZEN="$HOME/tizen-studio/tools/ide/bin/tizen"
-TV_IP="${TV_IP:-192.168.1.44}"       # IP de la TV (cambia con: TV_IP=xxx ./sign-and-install.sh)
+TV_IP="${TV_IP:-192.168.1.46}"       # IP de la TV (cambia con: TV_IP=xxx ./sign-and-install.sh)
 DUID="${DUID:-XTCIFS3M7IBOA}"        # DUID de tu TV
 PROFILE="MoviesChill"
 

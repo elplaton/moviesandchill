@@ -73,7 +73,10 @@ export async function apiFetch(
 
   if (res.status === 401) {
     clearTokens();
-    window.location.href = '/login';
+    // Con hash: dentro del .wgt la app vive en file:///, y asignar una ruta
+    // absoluta a location.href intenta cargar file:///login, que la webview
+    // rechaza con ERR_ACCESS_DENIED.
+    window.location.hash = '#/login';
   }
 
   return res;

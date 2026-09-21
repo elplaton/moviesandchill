@@ -4,12 +4,13 @@
 #   ./deploy.sh                 despliegue completo
 #   TV_IP=192.168.1.50 ./deploy.sh
 #   ./deploy.sh --no-launch     instala pero no arranca
-#   ./deploy.sh --debug         arranca con el inspector y deja el puerto listo
+#   ./deploy.sh --debug         compila con consola remota y la abre
+#   ./deploy.sh --debug --no-console   igual, pero sin arrancar el servidor
 #
 set -euo pipefail
 cd "$(dirname "$0")"
 
-TV_IP="${TV_IP:-192.168.1.44}"
+TV_IP="${TV_IP:-192.168.1.46}"
 APP_ID="MCchill026.MoviesChill"
 PROFILE="MoviesChill"
 TIZEN="$HOME/tizen-studio/tools/ide/bin/tizen"
@@ -18,10 +19,12 @@ CERT_DIR="$HOME/tizen-studio-data/SamsungCertificate/$PROFILE"
 
 LAUNCH=1
 DEBUG=0
+CONSOLE=1
 for arg in "$@"; do
   case "$arg" in
     --no-launch) LAUNCH=0 ;;
     --debug) DEBUG=1 ;;
+    --no-console) CONSOLE=0 ;;
     *) echo "Opcion desconocida: $arg"; exit 2 ;;
   esac
 done
@@ -51,7 +54,14 @@ if ! curl -s -m 3 -o /dev/null "$BACKEND/health"; then
 fi
 
 echo "==> Compilando..."
-npm run build -- --mode tizen >/dev/null
+if [ "$DEBUG" = "1" ]; then
+  HOST_IP="$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null)"
+  [ -n "$HOST_IP" ] || die "no he podido averiguar la IP de este equipo"
+  echo "    con consola remota hacia ws://$HOST_IP:9333"
+  VITE_DEBUG_HOST="ws://$HOST_IP:9333" npm run build -- --mode tizen >/dev/null
+else
+  npm run build -- --mode tizen >/dev/null
+fi
 
 echo "==> Empaquetando..."
 rm -rf .wgt-staging MoviesChill.wgt
@@ -84,8 +94,14 @@ echo "==> Instalando..."
   || die "la instalacion ha fallado"
 
 if [ "$DEBUG" = "1" ]; then
-  echo "==> Arrancando con el inspector..."
-  exec ./tools/tv-debug.py --tv "$TV_IP"
+  echo "==> Arrancando la app..."
+  "$TIZEN" run -p "$APP_ID" -s "$TV_IP:26101" >/dev/null 2>&1 || true
+  if [ "$CONSOLE" = "1" ]; then
+    echo "==> Consola remota (Ctrl-C para salir):"
+    exec ../venv/bin/python tools/debug-server.py
+  fi
+  echo "OK. Desplegada con consola remota; arranca el servidor cuando quieras."
+  exit 0
 elif [ "$LAUNCH" = "1" ]; then
   echo "==> Arrancando..."
   "$TIZEN" run -p "$APP_ID" -s "$TV_IP:26101" 2>&1 | grep -qi "successfully launched" \

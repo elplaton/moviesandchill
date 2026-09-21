@@ -17,25 +17,35 @@ cd tizen && /tmp/imgvenv/bin/python tools/make-icon.py
 Pillow solo hace falta para regenerar los iconos; no es dependencia de la app
 ni del backend, por eso va en un entorno aparte.
 
-## tv-debug.py
+## debug-server.py
 
-Consola remota de la app en la television. Tizen expone el mismo protocolo de
-depuracion que Chrome, asi que se puede leer la consola y evaluar expresiones
-sin abrir un navegador.
+Consola remota de la app en la television.
+
+**Por que no el inspector de Tizen:** esta TV lleva `secure_protocol:enabled`,
+que bloquea `sdb shell`. Sin shell no se puede lanzar la app en modo depuracion,
+y sin eso la television no abre ningun puerto de inspector (comprobados 7011,
+9222, 9998 y 9999: cerrados). Asi que el canal va al reves: la app se conecta a
+este servidor y le manda lo que pasa.
 
 ```sh
-npm run tv:console                  # sigue la consola y los errores
-npm run tv:focus                    # imprime el arbol de foco de la TV
-../venv/bin/python tools/tv-debug.py --eval "location.href"
-../venv/bin/python tools/tv-debug.py --attach   # sin relanzar la app
+./deploy.sh --debug                 # despliega con el canal y abre la consola
+./deploy.sh --debug --no-console    # despliega pero no arranca el servidor
+npm run tv:console                  # consola en directo
+npm run tv:focus                    # arbol de foco de la TV
+../venv/bin/python tools/debug-server.py --eval "location.href"
 ```
 
-`__focus()` lo expone la propia app (`src/focus/react.tsx`) y devuelve el arbol
-de foco, el elemento enfocado y una lista de problemas detectados: contenedores
-sin hijos, nodos con un padre inexistente o varios elementos con la clase de
-foco a la vez.
+`__focus()` lo expone la app (`src/focus/react.tsx`) y devuelve el arbol de
+foco, el elemento enfocado y los problemas detectados: contenedores sin hijos,
+nodos con padre inexistente o varios elementos con la clase de foco a la vez.
 
-Usa `websockets`, que ya esta en el venv del backend, por eso se invoca con
+El canal **solo existe en compilaciones hechas con `--debug`**: define
+`VITE_DEBUG_HOST`, y sin esa variable la condicion de `main.tsx` es
+constante-falsa y Vite elimina el modulo entero, incluida la evaluacion de
+expresiones. Comprobado sobre el paquete: cero ocurrencias en una compilacion
+normal.
+
+Usa `websockets`, que ya esta en el venv del backend, de ahi el
 `../venv/bin/python`.
 
 ## deploy.sh
