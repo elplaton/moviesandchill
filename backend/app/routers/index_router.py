@@ -4,6 +4,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends
 
 from app.auth.dependencies import get_current_admin
+from app.tasks import spawn
 
 router = APIRouter(prefix="/api", tags=["index"])
 
@@ -53,7 +54,7 @@ async def _do_start(force: bool = False):
         finally:
             _index_running = False
 
-    asyncio.create_task(_task())
+    spawn(_task(), "indexacion_completa")
     return {"status": "started", "tmdb_enabled": config.get("tmdb_enabled", False)}
 
 
@@ -97,7 +98,7 @@ async def index_channel(channel_id: int, user: Annotated[str, Depends(get_curren
                 await scan_channel(downloader, channel_id, ch["name"], api_key=api_key,
                                    broadcast=_broadcast_index, total_estimate=total)
 
-            asyncio.create_task(_task())
+            spawn(_task(), f"index_channel:{channel_id}")
             return {"status": "started", "channel": ch["name"], "total_estimate": total,
                     "tmdb_enabled": config.get("tmdb_enabled", False)}
 
@@ -117,5 +118,5 @@ async def index_enrich(user: Annotated[str, Depends(get_current_admin)]):
     async def _task():
         await enrich_all_missing_tmdb(api_key, broadcast=_broadcast_index)
 
-    asyncio.create_task(_task())
+    spawn(_task(), "enrich_tmdb")
     return {"status": "started", "tmdb_enabled": True}

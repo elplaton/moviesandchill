@@ -9,6 +9,11 @@ services:
       - ./session:/app/session
       - ./downloads:/app/downloads
       - ./movies:/app/movies
+      # Estado de descargas pausadas: sin este volumen se perdia al recrear
+      # el contenedor, aunque la doc decia que sobrevivia a los reinicios.
+      - ./state:/app/state
+    environment:
+      TMD_STATE_DIR: /app/state
     env_file:
       - .env
     depends_on:

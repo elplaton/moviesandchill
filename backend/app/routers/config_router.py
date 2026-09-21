@@ -27,16 +27,33 @@ class ConfigUpdateRequest(BaseModel):
     tmdb_enabled: bool | None = None
 
 
+SECRET_KEYS = ("jwt_secret", "database_url")
+MASKED_KEYS = ("api_hash", "tmdb_api_key")
+
+
 @router.get("/config")
 async def get_config(user: Annotated[str, Depends(get_current_admin)]):
     from app.routers.download import config
-    return {"config": {k: v for k, v in config.items() if k not in ("jwt_secret", "database_url")}}
+    safe = {}
+    for k, v in config.items():
+        if k in SECRET_KEYS:
+            continue
+        # Se enmascaran en vez de ocultarse para que la UI sepa si estan puestos.
+        safe[k] = (f"{'*' * 8}{str(v)[-4:]}" if v else "") if k in MASKED_KEYS else v
+    return {"config": safe}
 
 
 @router.post("/config")
 async def save_config(req: ConfigUpdateRequest, user: Annotated[str, Depends(get_current_admin)]):
     from app.routers.download import config, downloader
     data = req.model_dump(exclude_none=True)
+
+    # La pagina de ajustes reenvia la config entera, incluidos los campos que
+    # se sirven enmascarados. Sin esto se guardaria "********1234" como secreto.
+    for key in MASKED_KEYS:
+        val = data.get(key)
+        if isinstance(val, str) and val.startswith("****"):
+            data.pop(key)
 
     if "channels" in data:
         try:

@@ -13,7 +13,11 @@ router = APIRouter(prefix="/api", tags=["search"])
 class SearchRequest(BaseModel):
     query: str
     page_size: int = 8
+    # offset_id es un ID de mensaje de Telegram (paginacion de Telethon).
+    # offset son filas a saltar en PostgreSQL: son cosas distintas y usar el
+    # primero como OFFSET de SQL saltaba miles de filas y devolvia vacio.
     offset_id: int = 0
+    offset: int = 0
     sort_asc: bool = False
     channel_ids: list[int] | None = None
 
@@ -30,7 +34,7 @@ async def search(req: SearchRequest, user: Annotated[str, Depends(get_current_us
 
     from app.database.connection import search_media, get_pool
     if get_pool():
-        rows = await search_media(req.query.strip(), 100, req.offset_id)
+        rows = await search_media(req.query.strip(), 100, req.offset)
         for r in rows:
             results.append({
                 "id": r["message_id"], "date": str(r.get("indexed_at", "")), "text": "",
@@ -84,6 +88,7 @@ async def search(req: SearchRequest, user: Annotated[str, Depends(get_current_us
         "count": len(results),
         "has_more": has_more,
         "last_message_id": results[-1]["id"] if results else 0,
+        "next_offset": req.offset + len(results),
     }
 
 

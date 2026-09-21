@@ -16,10 +16,16 @@ logger = logging.getLogger("tmd")
 
 app = FastAPI(title="Telegram Movie Downloader")
 
+from app.config import load_config as _load_config
+
+_cors_origins = _load_config().get("cors_origins", ["*"])
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=_cors_origins,
+    # El navegador rechaza allow_credentials=True junto a allow_origins=["*"].
+    # La autenticacion va por cabecera Bearer, no por cookie, asi que no hacen falta.
+    allow_credentials="*" not in _cors_origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -32,8 +38,12 @@ config = {}
 async def startup():
     global downloader, config
 
-    from app.config import load_config
+    from app.config import load_config, get_jwt_secret
     config = load_config()
+
+    # Se valida aqui para fallar al arrancar con un mensaje claro, en vez de
+    # dar error 500 en el primer login.
+    get_jwt_secret()
 
     from app.database.connection import init_pool, create_user, get_active_channels
 
@@ -45,16 +55,27 @@ async def startup():
             logger.warning("PostgreSQL no disponible (intento %d/10): %s", attempt + 1, e)
             if attempt < 9:
                 await asyncio.sleep(3)
+    else:
+        # Sin este raise el servidor seguia arrancando con el pool a None y
+        # todos los endpoints devolvian listas vacias sin explicar por que.
+        raise RuntimeError(
+            f"No se pudo conectar a PostgreSQL tras 10 intentos ({config['database_url'].rsplit('@', 1)[-1]})"
+        )
 
     from app.auth.service import hash_password
+    admin_password = os.getenv("TMD_ADMIN_PASSWORD", "admin")
     try:
-        await create_user("admin", hash_password("admin"), role="admin")
+        await create_user("admin", hash_password(admin_password), role="admin")
         from app.database.connection import get_pool
         pool = get_pool()
         if pool:
             async with pool.acquire() as conn:
                 await conn.execute("UPDATE users SET role = 'admin' WHERE username = 'admin' AND role != 'admin'")
-        logger.info("Usuario admin creado (password: admin). Cambialo.")
+        if admin_password == "admin":
+            logger.warning("Usuario admin con password por defecto 'admin'. "
+                           "Cambialo o define TMD_ADMIN_PASSWORD.")
+        else:
+            logger.info("Usuario admin asegurado (password desde TMD_ADMIN_PASSWORD)")
     except Exception:
         pass
 
@@ -92,16 +113,16 @@ async def startup():
                 len(config.get("channels", [])))
 
     if config.get("channels"):
-        import asyncio as aio
         from app.services.indexer import run_full_index
         from app.routers import index_router
+        from app.tasks import spawn
         async def _bg_index():
             index_router._index_running = True
             try:
                 await run_full_index(downloader, config)
             finally:
                 index_router._index_running = False
-        aio.create_task(_bg_index())
+        spawn(_bg_index(), "indexacion_inicial")
         logger.info("Indexacion iniciada en background (TMDB=%s)", "ON" if config.get("tmdb_enabled") else "OFF")
 
 

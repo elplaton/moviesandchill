@@ -15,6 +15,17 @@ async def get_user_by_username(username: str):
     return None
 
 
+async def update_password_hash(username: str, password_hash: str):
+    pool = get_pool()
+    if not pool:
+        return
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE users SET password_hash = $1 WHERE username = $2",
+            password_hash, username,
+        )
+
+
 async def create_user(username: str, password_hash: str, role: str = "user"):
     pool = get_pool()
     if not pool:

@@ -117,6 +117,6 @@ async def _ensure_tables():
 
 from app.database.users import get_user_by_username, create_user
 from app.database.channels_db import get_all_channels, get_active_channels, upsert_channel, set_active_channels, remove_channel
-from app.database.media import insert_media_item, update_media_tmdb, search_media, get_media_without_tmdb, get_media_by_channel, mark_batch_tmdb_searched
+from app.database.media import insert_media_item, insert_media_items, update_media_tmdb, search_media, get_media_without_tmdb, get_media_by_channel, mark_batch_tmdb_searched
 from app.database.tmdb_cache import get_tmdb_cached, upsert_tmdb_cache
 from app.database.index_progress import get_index_progress, upsert_index_progress, get_index_stats, set_index_phase, reset_all_index_progress, get_index_status

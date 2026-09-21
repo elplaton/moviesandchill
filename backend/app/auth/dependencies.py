@@ -5,7 +5,7 @@ from fastapi import Depends, HTTPException, Query, WebSocket, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app.auth.service import decode_token
-from app.config import load_config
+from app.config import get_jwt_secret
 
 logger = logging.getLogger("tmd")
 
@@ -13,7 +13,7 @@ security = HTTPBearer(auto_error=False)
 
 
 def _get_secret() -> str:
-    return load_config().get("jwt_secret", "default-secret-change-me")
+    return get_jwt_secret()
 
 
 async def get_current_user(

@@ -8,6 +8,19 @@ import rarfile
 import py7zr
 
 
+def _assert_safe_names(names, output_dir):
+    """Rechaza rutas que escaparian del directorio de destino (zip-slip).
+
+    El contenido viene de canales de Telegram: un .zip con nombres tipo
+    "../../etc/cron.d/x" podria escribir donde le diera la gana.
+    """
+    base = os.path.realpath(output_dir)
+    for name in names:
+        dest = os.path.realpath(os.path.join(base, name))
+        if dest != base and not dest.startswith(base + os.sep):
+            raise ValueError(f"Ruta insegura dentro del archivo comprimido: {name!r}")
+
+
 def extract_archive(file_path, output_dir, delete_after=True):
     fname = file_path.lower()
     os.makedirs(output_dir, exist_ok=True)
@@ -47,6 +60,7 @@ def _extract_rar(file_path, output_dir, delete_after):
                     file_path = alt
 
     with rarfile.RarFile(file_path) as rf:
+        _assert_safe_names(rf.namelist(), output_dir)
         rf.extractall(output_dir)
         extracted = [os.path.join(output_dir, f) for f in rf.namelist()]
 
@@ -106,6 +120,7 @@ def _extract_split_7z(file_path, output_dir, delete_after):
 
 def _extract_7z(file_path, output_dir, delete_after):
     with py7zr.SevenZipFile(file_path, "r") as sz:
+        _assert_safe_names(sz.getnames(), output_dir)
         sz.extractall(output_dir)
         extracted = [os.path.join(output_dir, f) for f in sz.getnames()]
     if delete_after:
@@ -154,6 +169,7 @@ def _extract_split_zip(file_path, output_dir, delete_after):
                 outfile.write(infile.read())
 
     with zipfile.ZipFile(combined_zip, "r") as zf:
+        _assert_safe_names(zf.namelist(), output_dir)
         zf.extractall(output_dir)
         extracted = [os.path.join(output_dir, f) for f in zf.namelist()]
 
@@ -170,6 +186,7 @@ def _extract_split_zip(file_path, output_dir, delete_after):
 
 def _extract_zip(file_path, output_dir, delete_after):
     with zipfile.ZipFile(file_path, "r") as zf:
+        _assert_safe_names(zf.namelist(), output_dir)
         zf.extractall(output_dir)
         extracted = [os.path.join(output_dir, f) for f in zf.namelist()]
     if delete_after:
@@ -187,7 +204,12 @@ def _extract_tar(file_path, output_dir, delete_after):
         mode = "r"
 
     with tarfile.open(file_path, mode) as tf:
-        tf.extractall(output_dir)
+        _assert_safe_names(tf.getnames(), output_dir)
+        # filter="data" bloquea ademas enlaces simbolicos y permisos peligrosos
+        try:
+            tf.extractall(output_dir, filter="data")
+        except TypeError:  # Python < 3.11.4
+            tf.extractall(output_dir)
         extracted = [os.path.join(output_dir, f) for f in tf.getnames()]
 
     if delete_after:

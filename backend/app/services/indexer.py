@@ -6,7 +6,7 @@ import time
 from app.services.tmdb import clean_title
 from app.database.connection import (
     get_pool, get_active_channels,
-    insert_media_item, update_media_tmdb,
+    insert_media_item, insert_media_items, update_media_tmdb,
     upsert_tmdb_cache, upsert_index_progress, get_index_progress,
 )
 
@@ -238,9 +238,7 @@ async def scan_channel(downloader, channel_id: int, channel_name: str, api_key: 
         total_scanned += msg_count
 
         if batch_items:
-            for item in batch_items:
-                await insert_media_item(item)
-
+            await insert_media_items(batch_items)
             total_indexed += len(batch_items)
 
             if api_key:

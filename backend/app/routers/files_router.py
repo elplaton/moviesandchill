@@ -5,6 +5,8 @@ import re
 import shutil
 from typing import Annotated
 
+import aiofiles
+
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -140,26 +142,45 @@ async def stream(request: Request, path: str = "", user: Annotated[str, Depends(
             if start > end:
                 raise HTTPException(status_code=416, detail="Range no valido")
 
-    async with _stream_semaphore:
+    if _stream_semaphore is None:
+        init_files_semaphore()
+
+    # El semaforo se adquiere aqui y se suelta en el finally del generador.
+    # Con "async with" envolviendo el return se liberaba al construir la
+    # respuesta, antes de enviar un solo byte, asi que no limitaba nada.
+    await _stream_semaphore.acquire()
+    released = False
+    try:
         CHUNK = 1024 * 1024
         content_length = end - start + 1
 
         async def chunked_stream():
-            with open(target, "rb") as f:
-                f.seek(start)
-                remaining = content_length
-                while remaining > 0:
-                    chunk = f.read(min(CHUNK, remaining))
-                    if not chunk:
-                        break
-                    remaining -= len(chunk)
-                    yield chunk
+            try:
+                # Lectura asincrona: con open()/read() sincronos cada chunk de 1MB
+                # bloqueaba el event loop y frenaba al resto de peticiones.
+                async with aiofiles.open(target, "rb") as f:
+                    await f.seek(start)
+                    remaining = content_length
+                    while remaining > 0:
+                        chunk = await f.read(min(CHUNK, remaining))
+                        if not chunk:
+                            break
+                        remaining -= len(chunk)
+                        yield chunk
+            finally:
+                _stream_semaphore.release()
 
         headers = {"Content-Disposition": "inline", "Accept-Ranges": "bytes", "Content-Length": str(content_length)}
         if range_header:
             headers["Content-Range"] = f"bytes {start}-{end}/{file_size}"
-            return StreamingResponse(chunked_stream(), status_code=206, media_type=content_type, headers=headers)
-        return StreamingResponse(chunked_stream(), media_type=content_type, headers=headers)
+            response = StreamingResponse(chunked_stream(), status_code=206, media_type=content_type, headers=headers)
+        else:
+            response = StreamingResponse(chunked_stream(), media_type=content_type, headers=headers)
+        released = True  # a partir de aqui lo libera el generador
+        return response
+    finally:
+        if not released:
+            _stream_semaphore.release()
 
 
 def _dir_size(path):

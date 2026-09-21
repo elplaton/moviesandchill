@@ -11,7 +11,7 @@ from app.auth.service import (
     create_refresh_token,
     decode_token,
 )
-from app.config import load_config
+from app.config import get_jwt_secret
 
 logger = logging.getLogger("tmd")
 
@@ -26,8 +26,7 @@ async def login(req: LoginRequest):
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Usuario o contrasena incorrectos",
         )
-    cfg = load_config()
-    secret = cfg.get("jwt_secret", "default-secret-change-me")
+    secret = get_jwt_secret()
     access_token = create_access_token(username, secret)
     refresh_token = create_refresh_token(username, secret)
     logger.info("Login exitoso | user=%s", username)
@@ -36,10 +35,9 @@ async def login(req: LoginRequest):
 
 @router.post("/refresh", response_model=TokenResponse)
 async def refresh(req: RefreshRequest):
-    cfg = load_config()
-    secret = cfg.get("jwt_secret", "default-secret-change-me")
-    payload = decode_token(req.refresh_token, secret)
-    if not payload or payload.get("type") != "refresh":
+    secret = get_jwt_secret()
+    payload = decode_token(req.refresh_token, secret, expected_type="refresh")
+    if not payload:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Refresh token invalido o expirado",

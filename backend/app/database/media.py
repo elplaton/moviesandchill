@@ -16,6 +16,29 @@ async def insert_media_item(data: dict):
             data.get("clean_title"), data.get("media_type"), data.get("season"), data.get("episode"))
 
 
+async def insert_media_items(items: list[dict]):
+    """Inserta un lote con una sola conexion.
+
+    Antes se llamaba a insert_media_item() por elemento: 500 acquire() por lote
+    sobre un pool de 5 conexiones.
+    """
+    pool = get_pool()
+    if not pool or not items:
+        return
+    rows = [(
+        i.get("channel_id"), i.get("channel_name"), i.get("message_id"),
+        i.get("file_name"), i.get("file_size"), i.get("size_str"),
+        i.get("clean_title"), i.get("media_type"), i.get("season"), i.get("episode"),
+    ) for i in items]
+    async with pool.acquire() as conn:
+        await conn.executemany("""
+            INSERT INTO media_items (channel_id, channel_name, message_id, file_name,
+                file_size, size_str, clean_title, media_type, season, episode)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+            ON CONFLICT (channel_id, message_id) DO NOTHING
+        """, rows)
+
+
 async def update_media_tmdb(channel_id: int, message_id: int, tmdb_id: int, tmdb_valid: bool):
     pool = get_pool()
     if not pool:
@@ -31,12 +54,12 @@ async def mark_batch_tmdb_searched(items: list[dict]):
     pool = get_pool()
     if not pool or not items:
         return
+    rows = [(i["channel_id"], i["message_id"]) for i in items]
     async with pool.acquire() as conn:
-        for item in items:
-            await conn.execute("""
-                UPDATE media_items SET tmdb_searched = TRUE
-                WHERE channel_id = $1 AND message_id = $2
-            """, item["channel_id"], item["message_id"])
+        await conn.executemany("""
+            UPDATE media_items SET tmdb_searched = TRUE
+            WHERE channel_id = $1 AND message_id = $2
+        """, rows)
 
 
 async def search_media(query: str, limit: int = 50, offset: int = 0):

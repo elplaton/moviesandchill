@@ -93,7 +93,22 @@ def _sanitize_name(name):
     return re.sub(r'[<>:"/\\|?*]', "", name).strip()
 
 
-PAUSED_FILE = "paused_batches.json"
+def _paused_file() -> str:
+    """Ruta del estado de descargas pausadas.
+
+    Antes era relativa al directorio de trabajo, asi que cambiaba segun desde
+    donde se arrancara el servidor y se perdia al recrear el contenedor.
+    """
+    state_dir = os.getenv("TMD_STATE_DIR") or os.getcwd()
+    try:
+        os.makedirs(state_dir, exist_ok=True)
+    except OSError:
+        state_dir = os.getcwd()
+    return os.path.join(state_dir, "paused_batches.json")
+
+
+# Se mantiene el nombre por compatibilidad; _paused_file() es la fuente real.
+PAUSED_FILE = _paused_file()
 
 
 def save_paused_batch(batch_id, batch_data):

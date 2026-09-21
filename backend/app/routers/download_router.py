@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+import re
 import shutil
 import subprocess
 import time
@@ -59,7 +60,9 @@ async def download(req: DownloadRequest, background_tasks: BackgroundTasks, user
 
     folder_path = create_movie_folder(config["extract_path"], folder_name or "descarga")
     total_size = sum(p.get("size", 0) for p in parts)
-    batch_id = str(req.message_id)
+    # El message_id solo es unico dentro de un canal: sin el prefijo, dos canales
+    # distintos con el mismo id pisarian el batch del otro.
+    batch_id = f"{req.channel_id or 0}_{req.message_id}"
 
     dl.active_batches[batch_id] = {
         "batch_id": batch_id, "base_name": base_name or folder_name or "",
@@ -95,6 +98,7 @@ async def pause(req: PauseRequest, user: Annotated[str, Depends(get_current_user
     batch = downloader.active_batches.get(req.batch_id)
     if not task or not batch or batch["status"] != "downloading":
         return {"error": "La descarga no se puede pausar en su estado actual"}
+    batch["_paused"] = True
     batch["_cancelled"] = True
     task.cancel()
     for p in batch["parts"]:
@@ -148,6 +152,9 @@ async def _download_batch(batch_id):
     try:
         folder = batch["folder_path"]
         os.makedirs(folder, exist_ok=True)
+        # Se recuenta desde cero: cada parte (incluidas las ya hechas) suma abajo,
+        # y al reanudar el valor guardado las contaria por duplicado.
+        batch["downloaded_parts"] = 0
         logger.info("Download batch %s started | %s | %d parts", batch_id, batch.get("folder_name", ""), batch["total_parts"])
 
         parallel = config.get("download_parallel", 3)
@@ -235,11 +242,21 @@ async def _download_batch(batch_id):
         await broadcast_progress({"type": "batch_status", "batch_id": batch_id, "status": "done", "folder_name": batch["folder_name"], "folder_path": batch["folder_path"], "extracted_files": [os.path.basename(f) for f in all_extracted]})
 
     except asyncio.CancelledError:
-        batch["status"] = "cancelled"
-        logger.info("Batch cancelled | %s", batch.get("folder_name", ""))
-        _cleanup_partial_files(batch.get("folder_path", ""), {p["file_name"] for p in batch["parts"]})
         batch.pop("_last_broadcast", None); batch.pop("_cancelled", None)
-        await broadcast_progress({"type": "batch_status", "batch_id": batch_id, "status": "cancelled", "folder_name": batch.get("folder_name", "")})
+        if batch.pop("_paused", False):
+            # Pausa: se borran solo las descargas a medias. Si se borrasen todas
+            # las partes (como hacia antes) el "reanudar" quedaria inservible,
+            # porque el estado guardado las da por completas y se las salta.
+            incomplete = {p["file_name"] for p in batch["parts"] if p.get("status") != "done"}
+            kept = len(batch["parts"]) - len(incomplete)
+            _cleanup_partial_files(batch.get("folder_path", ""), incomplete, remove_empty_dir=False)
+            batch["status"] = "paused"
+            logger.info("Batch pausado | %s | %d partes conservadas", batch.get("folder_name", ""), kept)
+        else:
+            batch["status"] = "cancelled"
+            logger.info("Batch cancelled | %s", batch.get("folder_name", ""))
+            _cleanup_partial_files(batch.get("folder_path", ""), {p["file_name"] for p in batch["parts"]})
+            await broadcast_progress({"type": "batch_status", "batch_id": batch_id, "status": "cancelled", "folder_name": batch.get("folder_name", "")})
     except Exception as e:
         batch["status"] = "error"; batch["error"] = str(e)
         logger.error("Batch failed | %s | %s", batch.get("folder_name", ""), e)
@@ -249,7 +266,7 @@ async def _download_batch(batch_id):
     downloader.active_batches.pop(batch_id, None)
 
 
-def _cleanup_partial_files(folder, target_files=None):
+def _cleanup_partial_files(folder, target_files=None, remove_empty_dir=True):
     if not folder or not os.path.isdir(folder):
         return
     for f in os.listdir(folder):
@@ -261,7 +278,7 @@ def _cleanup_partial_files(folder, target_files=None):
             elif os.path.isdir(fpath): shutil.rmtree(fpath)
         except OSError:
             pass
-    if not os.listdir(folder):
+    if remove_empty_dir and not os.listdir(folder):
         try: os.rmdir(folder)
         except OSError: pass
 
@@ -290,11 +307,15 @@ def _make_compatible(file_list):
     # Contenedores reproducibles
     COMPAT_CONTAINER = ('matroska', 'mpeg4', 'mpeg-4')
 
-    def _info(fmt):
+    def _info(path, fmt):
         try:
-            r = subprocess.run(["mediainfo", f"--Inform={fmt}", f], capture_output=True, text=True, timeout=10)
+            r = subprocess.run(["mediainfo", f"--Inform={fmt}", path], capture_output=True, text=True, timeout=10)
             return re.sub(r'[^a-z0-9]', '', r.stdout.strip().lower())
-        except Exception:
+        except FileNotFoundError:
+            logger.warning("mediainfo no esta instalado: no se puede comprobar la compatibilidad")
+            return ""
+        except Exception as e:
+            logger.warning("mediainfo fallo sobre %s: %s", os.path.basename(path), e)
             return ""
 
     converted = []
@@ -302,9 +323,9 @@ def _make_compatible(file_list):
         if not f.lower().endswith(VIDEO_EXTS):
             converted.append(f); continue
 
-        vnorm = _info("Video;%Format%")
-        anorm = _info("Audio;%Format%")
-        cnorm = _info("General;%Format%")
+        vnorm = _info(f, "Video;%Format%")
+        anorm = _info(f, "Audio;%Format%")
+        cnorm = _info(f, "General;%Format%")
 
         video_ok = (not vnorm) or any(c in vnorm for c in COMPAT_VIDEO)
         audio_ok = (not anorm) or any(c in anorm for c in COMPAT_AUDIO)
