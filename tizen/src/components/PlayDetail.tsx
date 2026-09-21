@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { useBackHandler } from '../focus/react';
+import { FocusScope, useBackHandler } from '../focus/react';
 import type { TMDBMetadata } from '../types';
 import FocusableButton from './FocusableButton';
 
@@ -38,26 +38,28 @@ export default function PlayDetail({ name, size, path, metadata, onClose, stream
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black flex flex-col">
-      <div className="flex items-center justify-between px-4 py-2 bg-netflix-dark/90">
+    // trap: mientras se reproduce, las flechas no deben salirse a la parrilla
+    // de detras. Al cerrar, el foco vuelve solo a donde estaba.
+    <FocusScope trap orientation="vertical" className="fixed inset-0 z-50 bg-black flex flex-col">
+      <FocusScope orientation="horizontal" index={0} className="flex items-center justify-between px-4 py-2 bg-netflix-dark/90">
         <span className="text-white text-sm font-medium truncate">{metadata.title || name}</span>
         <div className="flex items-center gap-2">
-          <FocusableButton onClick={toggleFullscreen}
+          <FocusableButton index={0} onClick={toggleFullscreen}
             className="bg-white/10 hover:bg-white/20 text-white text-sm rounded-lg px-3 py-1.5 transition-colors">
             Pantalla completa
           </FocusableButton>
           {onDelete && (
-            <FocusableButton onClick={onDelete}
+            <FocusableButton index={1} onClick={onDelete}
               className="bg-white/10 hover:bg-white/20 text-white text-sm rounded-lg px-3 py-1.5 transition-colors">
               Eliminar
             </FocusableButton>
           )}
-          <FocusableButton onClick={onClose}
+          <FocusableButton index={2} onClick={onClose}
             className="bg-netflix-red hover:bg-netflix-red-hover text-white text-sm rounded-lg px-3 py-1.5 transition-colors">
             Cerrar
           </FocusableButton>
         </div>
-      </div>
+      </FocusScope>
 
       <video
         ref={videoRef}
@@ -68,6 +70,6 @@ export default function PlayDetail({ name, size, path, metadata, onClose, stream
       >
         Tu navegador no soporta reproduccion de video.
       </video>
-    </div>
+    </FocusScope>
   );
 }

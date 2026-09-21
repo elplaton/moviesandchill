@@ -32,12 +32,15 @@ export default function NavBar() {
         <FocusableLink index={2} to="/series" className={`px-3 py-1 text-sm rounded-lg ${
           location.pathname === '/series' ? 'text-white font-medium' : 'text-gray-400 hover:text-gray-200'
         }`}>Series</FocusableLink>
+        <FocusableLink index={3} to="/descargas" className={`px-3 py-1 text-sm rounded-lg ${
+          location.pathname === '/descargas' ? 'text-white font-medium' : 'text-gray-400 hover:text-gray-200'
+        }`}>Descargas</FocusableLink>
         {isAdmin && (
-          <FocusableLink index={3} to="/channels" className={`px-3 py-1 text-sm rounded-lg ${
+          <FocusableLink index={4} to="/channels" className={`px-3 py-1 text-sm rounded-lg ${
             location.pathname === '/channels' ? 'text-white font-medium' : 'text-gray-400 hover:text-gray-200'
           }`}>Canales</FocusableLink>
         )}
-        <FocusableLink index={4} to="/settings" className={`px-3 py-1 text-sm rounded-lg ${
+        <FocusableLink index={5} to="/settings" className={`px-3 py-1 text-sm rounded-lg ${
           location.pathname === '/settings' ? 'text-white font-medium' : 'text-gray-400 hover:text-gray-200'
         }`}>Ajustes</FocusableLink>
       </div>
@@ -46,7 +49,7 @@ export default function NavBar() {
 
       <div className="relative">
         <FocusableButton
-          index={5}
+          index={6}
           onClick={() => setMenuOpen(!menuOpen)}
           className="flex items-center gap-2 text-sm text-gray-300"
         >

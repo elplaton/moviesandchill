@@ -1,6 +1,8 @@
-import { useEffect, useState, useMemo } from 'react';
+import { useCallback, useEffect, useState, useMemo } from 'react';
 import { FocusScope, useBackHandler, useFocusOn } from '../focus/react';
 import DownloadRing, { type RingStatus } from './DownloadRing';
+import PlayDetail from './PlayDetail';
+import { useLibrary } from '../hooks/useLibrary';
 import { cleanFileName } from '../utils/text';
 import { formatBytes } from '../utils/format';
 import { MULTIPART as MULTIPART_RE } from '../utils/regex';
@@ -48,16 +50,33 @@ interface EpGroup {
  * descarga en curso, Enter la cancela. Conserva el focusKey para que el foco
  * no se pierda al cambiar de estado.
  */
-function DownloadAction({ messageId, channelId, partes, downloadStates, onDownload, onCancelDownload }: {
+function DownloadAction({ messageId, channelId, partes, downloadStates, onDownload, onCancelDownload, rutaLocal, onPlay }: {
   messageId?: number;
   channelId?: number;
   partes: number;
   downloadStates?: Map<number, DownloadState>;
   onDownload?: (msgId: number, channelId?: number) => void;
   onCancelDownload?: (batchId: string) => void;
+  /** Ruta en disco si ya esta descargado. */
+  rutaLocal?: string;
+  onPlay?: (ruta: string) => void;
 }) {
   if (!messageId) {
     return <span className="text-gray-600 text-[10px] shrink-0">No disponible</span>;
+  }
+
+  // Si ya esta en disco lo que procede es verlo, no volver a bajarlo.
+  if (rutaLocal) {
+    return (
+      <FocusableButton
+        focusKey={`sd-play-${messageId}`}
+        onClick={() => onPlay?.(rutaLocal)}
+        className="flex items-center gap-1.5 bg-white text-black text-xs px-3 py-1.5 rounded-lg font-semibold shrink-0"
+      >
+        <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg>
+        Reproducir
+      </FocusableButton>
+    );
   }
 
   const ds = downloadStates?.get(messageId);
@@ -154,6 +173,16 @@ interface SeriesDetailProps {
 }
 
 export default function SeriesDetail({ series, metadata, onClose, streamUrl, onDownload, onCancelDownload, downloadStates, tmdbId }: SeriesDetailProps) {
+  const { rutaDe, recargar } = useLibrary();
+  const [reproduciendo, setReproduciendo] = useState<string | null>(null);
+  const reproducir = useCallback((ruta: string) => setReproduciendo(ruta), []);
+
+  // Al terminar una descarga el fichero aparece en disco: hay que releer la
+  // biblioteca para que el boton pase de "Descargar" a "Reproducir".
+  useEffect(() => {
+    const hayTerminada = [...(downloadStates?.values() || [])].some(d => d.status === 'done');
+    if (hayTerminada) recargar();
+  }, [downloadStates, recargar]);
   const [collapsed, setCollapsed] = useState<Set<number>>(new Set());
   const [expandedVariants, setExpandedVariants] = useState<Set<string>>(new Set());
   const [episodeNames, setEpisodeNames] = useState<Map<number, string>>(new Map());
@@ -385,6 +414,8 @@ export default function SeriesDetail({ series, metadata, onClose, streamUrl, onD
                             </div>
                             <DownloadAction
                               messageId={g.first.message_id}
+                              rutaLocal={rutaDe(g.first.name)}
+                              onPlay={reproducir}
                               channelId={g.first.channel_id}
                               partes={g.isMultipart ? g.episodes.length : 0}
                               downloadStates={downloadStates}
@@ -429,6 +460,8 @@ export default function SeriesDetail({ series, metadata, onClose, streamUrl, onD
                                     </div>
                                     <DownloadAction
                               messageId={v.first.message_id}
+                              rutaLocal={rutaDe(v.first.name)}
+                              onPlay={reproducir}
                               channelId={v.first.channel_id}
                               partes={v.isMultipart ? v.episodes.length : 0}
                               downloadStates={downloadStates}
@@ -469,6 +502,8 @@ export default function SeriesDetail({ series, metadata, onClose, streamUrl, onD
                       </div>
                       <DownloadAction
                               messageId={g.first.message_id}
+                              rutaLocal={rutaDe(g.first.name)}
+                              onPlay={reproducir}
                               channelId={g.first.channel_id}
                               partes={g.isMultipart ? g.episodes.length : 0}
                               downloadStates={downloadStates}
@@ -512,6 +547,8 @@ export default function SeriesDetail({ series, metadata, onClose, streamUrl, onD
                               </div>
                               <DownloadAction
                               messageId={v.first.message_id}
+                              rutaLocal={rutaDe(v.first.name)}
+                              onPlay={reproducir}
                               channelId={v.first.channel_id}
                               partes={v.isMultipart ? v.episodes.length : 0}
                               downloadStates={downloadStates}
@@ -540,6 +577,16 @@ export default function SeriesDetail({ series, metadata, onClose, streamUrl, onD
           </div>
         </div>
       </div>
+      {reproduciendo && (
+        <PlayDetail
+          name={series.clean_name || series.name}
+          size=""
+          path={reproduciendo}
+          metadata={metadata || {}}
+          streamUrl={streamUrl!}
+          onClose={() => setReproduciendo(null)}
+        />
+      )}
     </FocusScope>
   );
 }

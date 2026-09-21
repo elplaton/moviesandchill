@@ -4,6 +4,7 @@ import Login from './pages/Login';
 import Home from './pages/Home';
 import Movies from './pages/Movies';
 import Series from './pages/Series';
+import Library from './pages/Library';
 import Onboarding from './pages/Onboarding';
 import Channels from './pages/Channels';
 import Settings from './pages/Settings';
@@ -44,6 +45,7 @@ export default function App() {
       </ProtectedRoute>} />
       <Route path="/movies" element={<ProtectedRoute><Movies /></ProtectedRoute>} />
       <Route path="/series" element={<ProtectedRoute><Series /></ProtectedRoute>} />
+      <Route path="/descargas" element={<ProtectedRoute><Library /></ProtectedRoute>} />
       <Route path="/channels" element={<ProtectedRoute><Channels /></ProtectedRoute>} />
       <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
       <Route path="/logs" element={<ProtectedRoute><Logs /></ProtectedRoute>} />
