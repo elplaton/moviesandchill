@@ -177,12 +177,20 @@ export default function SeriesDetail({ series, metadata, onClose, streamUrl, onD
   const [reproduciendo, setReproduciendo] = useState<string | null>(null);
   const reproducir = useCallback((ruta: string) => setReproduciendo(ruta), []);
 
-  // Al terminar una descarga el fichero aparece en disco: hay que releer la
-  // biblioteca para que el boton pase de "Descargar" a "Reproducir".
+  // Mientras haya algo bajando se relee la biblioteca cada pocos segundos,
+  // para que el boton pase de "Descargar" a "Reproducir" en cuanto el fichero
+  // aparezca en disco. Con un solo disparo al ver el estado "done" se escapaba:
+  // ese estado se borra a los tres segundos y la extraccion aun no habia
+  // terminado de dejar el fichero.
+  const hayDescargas = [...(downloadStates?.values() || [])]
+    .some(d => d.status !== 'error');
+
   useEffect(() => {
-    const hayTerminada = [...(downloadStates?.values() || [])].some(d => d.status === 'done');
-    if (hayTerminada) recargar();
-  }, [downloadStates, recargar]);
+    if (!hayDescargas) return;
+    recargar();
+    const t = setInterval(recargar, 5000);
+    return () => clearInterval(t);
+  }, [hayDescargas, recargar]);
   const [collapsed, setCollapsed] = useState<Set<number>>(new Set());
   const [expandedVariants, setExpandedVariants] = useState<Set<string>>(new Set());
   const [episodeNames, setEpisodeNames] = useState<Map<number, string>>(new Map());

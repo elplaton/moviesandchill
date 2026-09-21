@@ -176,5 +176,20 @@ const movido = E.move('down');
 check('la flecha recoloca el foco', movido, true);
 check('y cae en la pantalla nueva', E.getCurrentFocusId() !== null, true);
 
+
+// --- Un elemento que cambia de aspecto --------------------------------------
+// El boton de descargar se desmonta y vuelve a montarse con el mismo focusKey
+// al convertirse en anillo de progreso. El foco tiene que quedarse en el.
+console.log('\nElemento que se remonta con el mismo id:');
+E.registerContainer({ id: 'rm-root', parentId: null, orientation: 'vertical' });
+E.pushRoot('rm-root');
+E.registerItem({ id: 'rm-cerrar', parentId: 'rm-root', index: 0, el: mk() });
+E.registerItem({ id: 'rm-boton', parentId: 'rm-root', index: 1, el: mk() });
+E.setFocus('rm-boton');
+E.unregister('rm-boton');                                   // React desmonta
+E.registerItem({ id: 'rm-boton', parentId: 'rm-root', index: 1, el: mk() });  // y remonta
+E.move('down');   // cualquier interaccion dispara la recuperacion pendiente
+check('el foco vuelve al mismo elemento, no al primero', E.getCurrentFocusId(), 'rm-boton');
+
 console.log(`\n${pass} correctas, ${fail} fallidas`);
 process.exit(fail ? 1 : 0);

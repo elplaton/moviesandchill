@@ -64,13 +64,19 @@ export default function MovieRow({ title, children, index, id }: MovieRowProps) 
       onChildFocus={handleChildFocus}
       className="relative mb-10"
     >
-      <h2 className="text-white text-lg md:text-xl font-medium mb-3 px-6 md:px-14">{title}</h2>
-      {/* La altura minima mantiene el hueco aunque la fila aun no haya montado
-          sus tarjetas, para que el layout no salte al virtualizar. */}
-      <div ref={viewportRef} className="relative overflow-hidden min-h-[19rem]">
+      <h2 className="text-white text-lg md:text-xl font-medium mb-5 px-6 md:px-14">{title}</h2>
+      {/*
+        La altura minima mantiene el hueco aunque la fila aun no haya montado
+        sus tarjetas, para que el layout no salte al virtualizar.
+
+        El relleno vertical no es decorativo: la tarjeta enfocada escala a 1.1
+        y sube 4 px, y como el carril recorta con overflow-hidden, sin ese
+        hueco la caratula se comia el titulo de la seccion y aparecia cortada.
+      */}
+      <div ref={viewportRef} className="relative overflow-hidden min-h-[21.5rem]">
         <div
           ref={trackRef}
-          className="rail-track flex gap-2 px-6 md:px-14 pb-3"
+          className="rail-track flex gap-2 px-6 md:px-14 pt-8 pb-5"
           style={{ transform: 'translate3d(0, 0, 0)' }}
         >
           {children}

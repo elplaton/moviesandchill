@@ -112,9 +112,12 @@ export function useDownloads() {
                   speed = `${v.toFixed(1)} ${units[i]}`;
                 }
               }
-              next.set(data.part_message_id, { ...existing, progress: data.part_progress || data.overall_progress || existing.progress, downloadedStr: data.downloaded_size_str, totalStr: data.total_size_str || existing.totalStr || '', speed, _lastBytes: 0, _lastTime: now });
+              // ?? y no ||: part_progress puede valer 0, que es falsy, y
+              // entonces se colaba el progreso global del lote. Por eso el
+              // anillo mostraba un porcentaje que no correspondia al fichero.
+              next.set(data.part_message_id, { ...existing, progress: data.part_progress ?? existing.progress, downloadedStr: data.downloaded_size_str, totalStr: data.total_size_str || existing.totalStr || '', speed, _lastBytes: 0, _lastTime: now });
             } else {
-              next.set(data.part_message_id, { ...existing, progress: data.part_progress || data.overall_progress || 0 });
+              next.set(data.part_message_id, { ...existing, progress: data.part_progress ?? existing.progress ?? 0 });
             }
           }
           return next;

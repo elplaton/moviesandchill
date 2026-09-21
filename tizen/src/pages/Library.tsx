@@ -12,8 +12,24 @@ interface Descargado {
   nombre: string;
   ruta: string;
   tamano: string;
+  /** Titulo de la fila a la que pertenece. */
   serie?: string;
-  meta?: TMDBMetadata;
+  /**
+   * Clave para pedir la caratula. Es el clean_name del backend, que ya viene
+   * normalizado igual que lo que usa TMDB. Antes se usaba el titulo de la fila,
+   * que pasa por el cleanTitle del frontend sobre el nombre crudo y da una
+   * cadena distinta: se pedia una clave y se buscaba otra.
+   */
+  clave: string;
+}
+
+/**
+ * Prefijo de tres palabras. El nombre limpio de un episodio arrastra su titulo
+ * ("Sabrina, The Teenage Witch Soul Mates") y con eso TMDB no encuentra nada;
+ * con el prefijo si. Es la misma heuristica que usa el backend al enriquecer.
+ */
+function prefijo(nombre: string): string {
+  return nombre.split(/\s+/).slice(0, 3).join(' ');
 }
 
 /** Agrupa por serie cuando el nombre trae SxxEyy o NxM, para no listar 200 episodios sueltos. */
@@ -27,6 +43,7 @@ export default function Library() {
   const [items, setItems] = useState<Descargado[]>([]);
   const [cargando, setCargando] = useState(true);
   const [reproduciendo, setReproduciendo] = useState<Descargado | null>(null);
+  const [caratulas, setCaratulas] = useState<Map<string, TMDBMetadata>>(new Map());
 
   useEffect(() => {
     (async () => {
@@ -41,6 +58,7 @@ export default function Library() {
             ruta: e.path,
             tamano: e.size || '',
             serie: serieDe(e.name) || (carpeta ? cleanTitle(carpeta) : undefined),
+            clave: e.clean_name || cleanTitle(e.name),
           });
         };
         for (const f of data.files || []) {
@@ -51,18 +69,50 @@ export default function Library() {
           }
         }
         setItems(lista);
+
+        // /api/files solo sabe de ficheros en disco, no de TMDB. Las caratulas
+        // se piden aparte con los titulos limpios; sin esto las tarjetas
+        // salian con el degradado de respaldo en vez de la portada.
+        // Se piden dos variantes por titulo: el nombre limpio completo y su
+        // prefijo de tres palabras. El completo suele arrastrar el titulo del
+        // episodio ("... Soul Mates") y TMDB no encuentra nada; el prefijo si.
+        const nombres = [...new Set(lista.flatMap(i => (
+          i.clave ? [i.clave, prefijo(i.clave)] : []
+        )).filter(Boolean))];
+        if (nombres.length) {
+          try {
+            const r = await apiFetch('/metadata/batch', {
+              method: 'POST', body: JSON.stringify({ names: nombres }),
+            });
+            const meta = (await r.json()).metadata || {};
+            setCaratulas(new Map(Object.entries(meta) as [string, TMDBMetadata][]));
+          } catch {}
+        }
       } catch {} finally { setCargando(false); }
     })();
   }, []);
 
-  // Una fila por serie y una final con las peliculas sueltas.
+  const caratulaDe = (it: Descargado): TMDBMetadata | undefined => {
+    if (!it.clave) return undefined;
+    const exacto = caratulas.get(it.clave);
+    if (exacto?.poster) return exacto;
+    return caratulas.get(prefijo(it.clave)) || exacto;
+  };
+
+  // Una fila por serie y una final con las peliculas sueltas. El titulo sale
+  // de TMDB cuando se conoce: el nombre del fichero incluye el titulo del
+  // episodio y quedaba un encabezado como "S07E22 - Sabrina... Soul Mates".
   const filas = useMemo(() => {
     const porSerie = new Map<string, Descargado[]>();
     const sueltos: Descargado[] = [];
     for (const it of items) {
-      if (it.serie) {
-        if (!porSerie.has(it.serie)) porSerie.set(it.serie, []);
-        porSerie.get(it.serie)!.push(it);
+      const meta = it.clave
+        ? (caratulas.get(it.clave)?.poster ? caratulas.get(it.clave) : caratulas.get(prefijo(it.clave)))
+        : undefined;
+      const titulo = it.serie ? (meta?.title || prefijo(it.clave) || it.serie) : undefined;
+      if (titulo) {
+        if (!porSerie.has(titulo)) porSerie.set(titulo, []);
+        porSerie.get(titulo)!.push(it);
       } else {
         sueltos.push(it);
       }
@@ -70,7 +120,7 @@ export default function Library() {
     const out = [...porSerie.entries()].map(([titulo, eps]) => ({ titulo, items: eps }));
     if (sueltos.length) out.push({ titulo: 'Peliculas', items: sueltos });
     return out;
-  }, [items]);
+  }, [items, caratulas]);
 
   return (
     <Layout>
@@ -98,7 +148,9 @@ export default function Library() {
                 forceFocus={filaIdx === 0 && i === 0}
                 name={it.nombre}
                 size={it.tamano}
-                subtitle={fila.titulo === 'Peliculas' ? '' : undefined}
+                posterUrl={caratulaDe(it)?.poster}
+                year={caratulaDe(it)?.year}
+                rating={caratulaDe(it)?.rating}
                 downloaded
                 hoverLabel="Reproducir"
                 actions="click"
@@ -114,7 +166,7 @@ export default function Library() {
           name={reproduciendo.nombre}
           size={reproduciendo.tamano}
           path={reproduciendo.ruta}
-          metadata={{ title: cleanTitle(reproduciendo.nombre) }}
+          metadata={caratulaDe(reproduciendo) || { title: cleanTitle(reproduciendo.nombre) }}
           streamUrl={streamUrl}
           onClose={() => setReproduciendo(null)}
         />

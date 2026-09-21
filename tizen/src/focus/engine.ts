@@ -256,11 +256,22 @@ export function unregister(id: string): void {
   nodes.delete(id);
   if (currentId === id) {
     currentId = null;
+    lostId = id;
     scheduleRecovery();
   }
 }
 
 let recoveryScheduled = false;
+/**
+ * Id que tenia el foco cuando su nodo desaparecio.
+ *
+ * Un componente que cambia de aspecto (el boton de descargar que pasa a
+ * anillo de progreso) se desmonta y se vuelve a montar con el mismo
+ * focusKey. Sin recordar el id, la recuperacion lo daba por perdido y mandaba
+ * el foco al primer elemento de la pantalla: al pulsar Descargar el foco se
+ * iba al boton de cerrar en vez de quedarse en el anillo.
+ */
+let lostId: string | null = null;
 
 /**
  * Recoloca el foco cuando el elemento enfocado desaparece.
@@ -275,10 +286,7 @@ function scheduleRecovery() {
   recoveryScheduled = true;
   const run = () => {
     recoveryScheduled = false;
-    if (currentId && nodes.has(currentId)) return;
-    const root = activeRoot();
-    const fallback = root ? descend(root) : null;
-    if (fallback) applyFocus(fallback);
+    recoverFocus();
   };
   if (typeof requestAnimationFrame === 'function') requestAnimationFrame(run);
   else setTimeout(run, 0);
@@ -378,6 +386,34 @@ function descend(id: string, preferred?: number): string | null {
   return null;
 }
 
+/**
+ * Recoloca el foco tras un desmontaje. Primero intenta el mismo elemento (que
+ * puede haberse remontado con el mismo focusKey) y, si no, entra por el
+ * principio de la raiz activa.
+ */
+function recoverFocus(): boolean {
+  if (currentId && nodes.has(currentId)) {
+    lostId = null;
+    return true;
+  }
+  if (lostId && nodes.has(lostId)) {
+    const vuelto = descend(lostId);
+    lostId = null;
+    if (vuelto) {
+      applyFocus(vuelto);
+      return true;
+    }
+  }
+  lostId = null;
+  const root = activeRoot();
+  const fallback = root ? descend(root) : null;
+  if (fallback) {
+    applyFocus(fallback);
+    return true;
+  }
+  return false;
+}
+
 function axisOf(dir: Direction): 'h' | 'v' {
   return dir === 'left' || dir === 'right' ? 'h' : 'v';
 }
@@ -442,8 +478,11 @@ export function move(dir: Direction): boolean {
 
   // Sin foco valido, o con el foco fuera de la raiz activa, el mando quedaria
   // muerto. Se entra en la raiz y se consume la pulsacion.
-  if (!currentId || !nodes.has(currentId) || (root && !isInside(currentId, root))) {
-    const first = root ? descend(root) : null;
+  if (!currentId || !nodes.has(currentId)) {
+    return recoverFocus();
+  }
+  if (root && !isInside(currentId, root)) {
+    const first = descend(root);
     if (first) {
       applyFocus(first);
       return true;
