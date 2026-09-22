@@ -13,6 +13,9 @@ export interface SearchResult {
   season?: number;
   episode?: number;
   tags?: string[];
+  tmdb_id?: number;
+  tmdb_type?: string;
+  tmdb_valid?: boolean;
   tmdb_title?: string;
   tmdb_year?: number;
   tmdb_rating?: number;
@@ -133,6 +136,7 @@ export interface IndexChannelStatus {
 
 export interface BrowseItem {
   id: string;
+  tmdb_id: number;
   title: string;
   poster?: string;
   backdrop?: string;
@@ -141,6 +145,7 @@ export interface BrowseItem {
   overview?: string;
   media_type: 'movie' | 'series';
   episode_count?: number;
+  file_count?: number;
   genres?: string[];
   channel_id?: number;
   channel_name?: string;

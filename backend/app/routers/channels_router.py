@@ -90,12 +90,10 @@ async def add_channel_by_url(req: AddChannelRequest, user: Annotated[str, Depend
     logger.info("Canal %s | ID=%d | %s", "anadido" if is_new else "actualizado", ch_id, name)
 
     if is_new:
-        from app.services.indexer import scan_channel, enrich_all_missing_tmdb
+        from app.services.indexer import scan_channel
         api_key = config.get("tmdb_api_key", "") if config.get("tmdb_enabled", False) else ""
         total = await downloader.get_total_messages(ch_id)
         spawn(scan_channel(downloader, ch_id, name, api_key=api_key, total_estimate=total),
               f"scan_channel:{ch_id}")
-        if api_key:
-            spawn(enrich_all_missing_tmdb(api_key), f"enrich:{ch_id}")
 
     return {"status": "added" if is_new else "updated", "channel": {"id": ch_id, "name": name}}

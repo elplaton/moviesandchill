@@ -109,7 +109,7 @@ function DownloadAction({ messageId, channelId, partes, downloadStates, onDownlo
       onClick={() => onDownload?.(messageId, channelId)}
       className="bg-netflix-red text-white text-xs px-3 py-1.5 rounded-lg font-medium shrink-0"
     >
-      Descargar{partes ? ` (${partes})` : ''}
+      Descargar
     </FocusableButton>
   );
 }

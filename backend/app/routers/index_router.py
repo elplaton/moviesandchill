@@ -10,6 +10,7 @@ router = APIRouter(prefix="/api", tags=["index"])
 
 _index_stop_flag: asyncio.Event | None = None
 _index_running = False
+_reclassify_running = False
 
 
 @router.get("/index/stats")
@@ -120,3 +121,34 @@ async def index_enrich(user: Annotated[str, Depends(get_current_admin)]):
 
     spawn(_task(), "enrich_tmdb")
     return {"status": "started", "tmdb_enabled": True}
+
+
+@router.post("/index/reclassify")
+async def index_reclassify(user: Annotated[str, Depends(get_current_admin)]):
+    """Reinterpreta todos los nombres de archivo con el parser actual y vuelve
+    a buscar en TMDB lo que estaba sin emparejar o con el tipo equivocado."""
+    from app.routers.download import config
+    from app.services.indexer import reclassify_all
+    from app.routers.ws_router import _broadcast_index
+
+    global _reclassify_running
+    if _reclassify_running:
+        return {"status": "already_running"}
+
+    api_key = config.get("tmdb_api_key", "") if config.get("tmdb_enabled", False) else ""
+
+    async def _task():
+        global _reclassify_running
+        _reclassify_running = True
+        try:
+            await reclassify_all(api_key, broadcast=_broadcast_index)
+        finally:
+            _reclassify_running = False
+
+    spawn(_task(), "reclassify")
+    return {"status": "started", "tmdb_enabled": bool(api_key)}
+
+
+@router.get("/index/reclassify")
+async def index_reclassify_status(user: Annotated[str, Depends(get_current_admin)]):
+    return {"running": _reclassify_running}

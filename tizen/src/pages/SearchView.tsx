@@ -8,6 +8,7 @@ import type { SearchResult, TMDBMetadata } from '../types';
 
 interface SearchGroup {
   groupKey?: string;
+  tmdbId?: number;
   seriesName: string;
   season: number;
   episodes: SearchResult[];
@@ -96,7 +97,7 @@ export default function SearchView({
           {searchGroups.map((g, i) => {
             const meta = tmdbFromResult(g.episodes[0]);
             return (
-              <MovieCard key={g.groupKey || g.seriesName} index={i} name={g.groupKey || g.seriesName}
+              <MovieCard key={g.groupKey || g.seriesName} index={i} name={g.seriesName}
                 subtitle={`${g.episodes.length} episodios`}
                 posterUrl={meta.poster} year={meta.year} rating={meta.rating}
                 onClick={() => onOpenSeries(g)} hoverLabel="Ver episodios" actions="click" />
@@ -107,14 +108,14 @@ export default function SearchView({
 
       {movieGroups.size > 0 && (
         <MovieRow index={nextRow()} title="Peliculas encontradas">
-          {Array.from(movieGroups.entries()).map(([rawName, items], i) => {
-            const key = cleanTitle(rawName);
+          {Array.from(movieGroups.entries()).map(([groupKey, items], i) => {
+            const name = items[0].tmdb_title || cleanTitle(items[0].file_name);
             const meta = tmdbFromResult(items[0]);
             return (
-              <MovieCard key={key} index={i} name={key}
-                subtitle={`${items.length} versiones`}
+              <MovieCard key={groupKey} index={i} name={name}
+                subtitle={items.length === 1 ? '1 archivo' : `${items.length} archivos`}
                 posterUrl={meta.poster} year={meta.year} rating={meta.rating}
-                onClick={() => onOpenMovie(key, meta, items)}
+                onClick={() => onOpenMovie(name, meta, items)}
                 actions="click" />
             );
           })}

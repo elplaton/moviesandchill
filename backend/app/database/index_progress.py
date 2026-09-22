@@ -121,3 +121,20 @@ async def get_index_stats():
             "with_tmdb": with_tmdb, "tmdb_searched": tmdb_searched,
             "by_channel": [{"channel_id": r["channel_id"], "channel_name": r["channel_name"], "count": r["cnt"]} for r in by_channel],
         }
+
+
+async def bump_index_progress(channel_id: int, message_id: int, indexed: bool):
+    """Avanza el progreso de un canal por un mensaje llegado en tiempo real,
+    sin releer ni pisar el resto de contadores."""
+    pool = get_pool()
+    if not pool:
+        return
+    async with pool.acquire() as conn:
+        await conn.execute("""
+            UPDATE index_progress
+            SET last_message_id = GREATEST(last_message_id, $2),
+                total_scanned = total_scanned + 1,
+                total_estimate = GREATEST(total_estimate, $2),
+                total_indexed = total_indexed + $3
+            WHERE channel_id = $1
+        """, channel_id, message_id, 1 if indexed else 0)

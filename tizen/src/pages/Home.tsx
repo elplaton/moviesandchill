@@ -11,7 +11,8 @@ import FocusableButton from '../components/FocusableButton';
 import SeriesDetail from '../components/SeriesDetail';
 import MovieDetail from '../components/MovieDetail';
 import SearchView from './SearchView';
-import { cleanTitle } from '../utils/text';
+import { groupSearchResults } from '../utils/search';
+import { fetchMediaFiles, toEpisodes } from '../services/media';
 import { useDownloads } from '../hooks/useDownloads';
 import type { BrowseRow, BrowseItem, TMDBMetadata, IndexChannelStatus, SeriesEpisode, SearchResult } from '../types';
 
@@ -91,35 +92,7 @@ export default function Home() {
       const data = await res.json();
       const results: SearchResult[] = data.results || [];
 
-      const groups: any[] = [];
-      const singles: SearchResult[] = [];
-      const movieMap = new Map<string, SearchResult[]>();
-
-      for (const r of results) {
-        const m = r.file_name.match(/(\d{1,2})x(\d{2})/i)
-               || r.file_name.match(/[sS](\d{2})[eE](\d{2})/)
-               || r.file_name.match(/\[[Ss]\s*(\d{1,2})\s*[Ee]\s*(\d{1,2})\]/);
-        if (m) {
-          const ctitle = cleanTitle(r.file_name);
-          const words = ctitle.split(/\s+/);
-          const key = words.length >= 3 ? words.slice(0, 3).join(' ') : ctitle;
-          let found = false;
-          for (const g of groups) {
-            if (g.groupKey === key) { g.episodes.push(r); found = true; break; }
-          }
-          if (!found) {
-            groups.push({ groupKey: key, seriesName: ctitle, season: parseInt(m[1]), episode: parseInt(m[2]), episodes: [r], channelId: r.channel_id });
-          }
-          continue;
-        }
-        const cname = cleanTitle(r.file_name);
-        if (cname && cname.length > 1) {
-          if (!movieMap.has(cname)) movieMap.set(cname, []);
-          movieMap.get(cname)!.push(r);
-        } else {
-          singles.push(r);
-        }
-      }
+      const { groups, movieGroups: movieMap, singles } = groupSearchResults(results);
 
       setSearchGroups(groups);
       setSearchSingles(singles);
@@ -166,15 +139,10 @@ export default function Home() {
       title: item.title, poster: item.poster, backdrop: item.backdrop,
       year: item.year, rating: item.rating, overview: item.overview, genres: item.genres,
     };
-    const tmdbId = item.id.startsWith('s') ? parseInt(item.id.slice(1)) : undefined;
+    const tmdbId = item.tmdb_id;
     try {
-      const res = await apiFetch('/search', { method: 'POST', body: JSON.stringify({ query: item.title, page_size: 100 }) });
-      const data = await res.json();
-      const results: SearchResult[] = data.results || [];
-      const episodes: SeriesEpisode[] = results.map((r: SearchResult) => ({
-        name: r.file_name, size: r.size_str, path: '', message_id: r.id, channel_id: r.channel_id,
-      }));
-      setSelectedSeries({ title: item.title, metadata: meta, channelId: item.channel_id, episodes, tmdbId });
+      const { results } = await fetchMediaFiles(tmdbId, 'tv');
+      setSelectedSeries({ title: item.title, metadata: meta, channelId: item.channel_id, episodes: toEpisodes(results), tmdbId });
     } catch {
       setSelectedSeries({ title: item.title, metadata: meta, channelId: item.channel_id, episodes: [], tmdbId });
     }
@@ -186,11 +154,7 @@ export default function Home() {
       year: item.year, rating: item.rating, overview: item.overview, genres: item.genres,
     };
     try {
-      const res = await apiFetch('/search', { method: 'POST', body: JSON.stringify({ query: item.title, page_size: 20 }) });
-      const data = await res.json();
-      const results: SearchResult[] = (data.results || []).filter((r: SearchResult) =>
-        !/(\d{1,2}x\d{2}|s\d{2}e\d{2})/i.test(r.file_name)
-      );
+      const { results } = await fetchMediaFiles(item.tmdb_id, 'movie');
       setSelectedMovie({ title: item.title, metadata: meta, results, channelId: item.channel_id });
     } catch {
       setSelectedMovie({ title: item.title, metadata: meta, results: [], channelId: item.channel_id });
@@ -206,12 +170,20 @@ export default function Home() {
     await download(msgId, channelId);
   };
 
-  const openSearchSeries = (group: any) => {
+  const openSearchSeries = async (group: any) => {
     const meta = tmdbFromResult(group.episodes[0]);
-    const episodes: SeriesEpisode[] = group.episodes.map((r: SearchResult) => ({
-      name: r.file_name, size: r.size_str, path: '', message_id: r.id, channel_id: r.channel_id,
-    }));
-    setSelectedSeries({ title: group.groupKey, metadata: meta, channelId: group.channelId, episodes, tmdbId: undefined });
+    // Con id de TMDB se cargan todos los episodios, no solo los que coincidian
+    // con el texto buscado.
+    if (group.tmdbId) {
+      try {
+        const { results } = await fetchMediaFiles(group.tmdbId, 'tv');
+        if (results.length) {
+          setSelectedSeries({ title: group.seriesName, metadata: meta, channelId: group.channelId, episodes: toEpisodes(results), tmdbId: group.tmdbId });
+          return;
+        }
+      } catch {}
+    }
+    setSelectedSeries({ title: group.seriesName, metadata: meta, channelId: group.channelId, episodes: toEpisodes(group.episodes), tmdbId: group.tmdbId });
   };
 
 

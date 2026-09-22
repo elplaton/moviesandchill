@@ -51,8 +51,8 @@ async def get_top_rated(limit: int = 30, offset: int = 0):
                    tc.tmdb_id, tc.title as tmdb_title, tc.year, tc.rating, tc.poster,
                    tc.backdrop, tc.overview, tc.genres
             FROM media_items mi
-            JOIN tmdb_cache tc ON mi.tmdb_id = tc.tmdb_id
-            WHERE mi.media_type = 'movie' AND tc.media_type = 'movie'
+            JOIN tmdb_cache tc ON mi.tmdb_id = tc.tmdb_id AND tc.media_type = mi.tmdb_type
+            WHERE mi.media_type = 'movie' AND tc.media_type = 'movie' AND mi.tmdb_valid IS TRUE
               AND tc.rating >= 7 AND tc.year >= 2015
             ORDER BY tc.tmdb_id, tc.rating DESC
             OFFSET $1 LIMIT $2
@@ -62,8 +62,8 @@ async def get_top_rated(limit: int = 30, offset: int = 0):
                    mi.tmdb_id, tc.title as tmdb_title, tc.year, tc.rating, tc.poster,
                    tc.backdrop, tc.overview, tc.genres
             FROM media_items mi
-            JOIN tmdb_cache tc ON mi.tmdb_id = tc.tmdb_id
-            WHERE mi.media_type = 'series' AND tc.media_type = 'tv'
+            JOIN tmdb_cache tc ON mi.tmdb_id = tc.tmdb_id AND tc.media_type = mi.tmdb_type
+            WHERE mi.media_type = 'series' AND tc.media_type = 'tv' AND mi.tmdb_valid IS TRUE
               AND tc.rating >= 7 AND tc.year >= 2015
             ORDER BY mi.tmdb_id, tc.rating DESC
             OFFSET $1 LIMIT $2

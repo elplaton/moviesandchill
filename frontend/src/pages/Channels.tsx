@@ -142,6 +142,14 @@ export default function Channels() {
     setTimeout(() => { setToast(''); loadIndexInfo(); }, 2000);
   };
 
+  const reclassify = async () => {
+    const res = await apiFetch('/index/reclassify', { method: 'POST' });
+    const data = await res.json();
+    setToast(data.status === 'already_running' ? 'Ya hay una reclasificación en marcha' : 'Reclasificando catálogo...');
+    setPolling(true);
+    setTimeout(() => { setToast(''); loadIndexInfo(); }, 2000);
+  };
+
   const scanChannel = async (channelId: number) => {
     await apiFetch(`/index/channel/${channelId}`, { method: 'POST' });
     setToast('Reescanear canal...');
@@ -187,6 +195,10 @@ export default function Channels() {
                 )}
               </h2>
               <div className="flex gap-2">
+                <button onClick={reclassify} title="Vuelve a decidir qué es película y qué es serie con las reglas actuales y corrige los emparejamientos con TMDB"
+                  className="text-xs bg-white/10 hover:bg-white/20 text-white px-4 py-2 rounded-lg transition-all font-medium">
+                  Reclasificar catálogo
+                </button>
                 <button onClick={scanAll} className="text-xs bg-netflix-red hover:bg-netflix-red-hover text-white px-4 py-2 rounded-lg transition-all font-medium">
                   Reescanear todo
                 </button>

@@ -290,6 +290,9 @@ export default function SeriesDetail({ series, metadata, onClose, streamUrl, onD
         </div>
 
         <div className="p-5 md:p-6 overflow-y-auto max-h-[50vh]">
+          {(series.episodes?.length || 0) === 0 && (
+            <p className="text-gray-500 text-sm text-center py-6">No hay episodios indexados para esta serie.</p>
+          )}
           {seasons.length > 1 ? (
             seasons.map(([seasonNum, epGroups]) => (
               <div key={seasonNum} className="mb-3">
@@ -328,7 +331,7 @@ export default function SeriesDetail({ series, metadata, onClose, streamUrl, onD
                             {g.first.message_id ? (
                               <button onClick={(e) => { e.stopPropagation(); onDownload ? onDownload(g.first.message_id!, g.first.channel_id) : null; }}
                                 className="bg-netflix-red hover:bg-netflix-red-hover text-white text-xs px-3 py-1.5 rounded-lg transition-all hover:scale-105 font-medium shrink-0">
-                                Descargar{g.isMultipart ? ` (${g.episodes.length})` : ''}
+                                Descargar
                               </button>
                             ) : (
                               <span className="text-gray-600 text-[10px] shrink-0">No disponible</span>
@@ -372,7 +375,7 @@ export default function SeriesDetail({ series, metadata, onClose, streamUrl, onD
                                     {v.first.message_id ? (
                                       <button onClick={(e) => { e.stopPropagation(); onDownload ? onDownload(v.first.message_id!, v.first.channel_id) : null; }}
                                         className="bg-netflix-red hover:bg-netflix-red-hover text-white text-xs px-2.5 py-1 rounded-lg transition-all hover:scale-105 font-medium shrink-0">
-                                        Descargar{v.isMultipart ? ` (${v.episodes.length})` : ''}
+                                        Descargar
                                       </button>
                                     ) : (
                                       <span className="text-gray-600 text-[10px] shrink-0">No disponible</span>
@@ -412,7 +415,7 @@ export default function SeriesDetail({ series, metadata, onClose, streamUrl, onD
                       {g.first.message_id ? (
                         <button onClick={(e) => { e.stopPropagation(); onDownload ? onDownload(g.first.message_id!, g.first.channel_id) : null; }}
                           className="bg-netflix-red hover:bg-netflix-red-hover text-white text-xs px-3 py-1.5 rounded-lg transition-all hover:scale-105 font-medium shrink-0">
-                          Descargar{g.isMultipart ? ` (${g.episodes.length})` : ''}
+                          Descargar
                         </button>
                       ) : (
                         <span className="text-gray-600 text-[10px] shrink-0">No disponible</span>
@@ -455,7 +458,7 @@ export default function SeriesDetail({ series, metadata, onClose, streamUrl, onD
                               {v.first.message_id ? (
                                 <button onClick={(e) => { e.stopPropagation(); onDownload ? onDownload(v.first.message_id!, v.first.channel_id) : null; }}
                                   className="bg-netflix-red hover:bg-netflix-red-hover text-white text-xs px-2.5 py-1 rounded-lg transition-all hover:scale-105 font-medium shrink-0">
-                                  Descargar{v.isMultipart ? ` (${v.episodes.length})` : ''}
+                                  Descargar
                                 </button>
                               ) : (
                                 <span className="text-gray-600 text-[10px] shrink-0">No disponible</span>

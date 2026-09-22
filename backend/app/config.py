@@ -58,6 +58,9 @@ def load_config(force_reload: bool = False) -> dict:
         "database_url": os.getenv("TMD_DATABASE_URL", "postgresql://movieapp:movieapp123@db:5432/moviesandchill"),
         "tmdb_api_key": os.getenv("TMD_TMBD_API_KEY", ""),
         "tmdb_enabled": _env_bool("TMD_TMDB_ENABLED", False),
+        # Cada cuantas horas se hace un barrido incremental de los canales
+        # (0 = nunca). Lo nuevo llega en tiempo real; esto cubre desconexiones.
+        "rescan_hours": _env_int("TMD_RESCAN_HOURS", 6),
         "state_dir": os.getenv("TMD_STATE_DIR", ""),
         "cors_origins": _env_list("TMD_CORS_ORIGINS", ["*"]),
         "log_unit": os.getenv("TMD_LOG_UNIT", "telegram-movie"),

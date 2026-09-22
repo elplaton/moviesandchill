@@ -71,6 +71,13 @@ function extractRes(name: string): string {
 export default function MovieDetail({ title, metadata, results, onClose, onDownload, onCancelDownload, downloadStates }: MovieDetailProps) {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
 
+  // Una version = un archivo o un archivo troceado en partes. Antes la
+  // cabecera contaba partes ("20 versiones" para dos rips de 6 y 14 partes).
+  const versionCount = useMemo(() => {
+    const { groups: g, singles } = groupMultiparts(results);
+    return g.length + singles.length;
+  }, [results]);
+
   const groups = useMemo(() => {
     const map = new Map<string, SearchResult[]>();
     for (const r of results) {
@@ -165,7 +172,7 @@ export default function MovieDetail({ title, metadata, results, onClose, onDownl
                   {metadata.rating.toFixed(1)}
                 </span>
               )}
-              <span className="text-gray-400 text-sm">{results.length} versiones</span>
+              <span className="text-gray-400 text-sm">{versionCount === 1 ? '1 versión' : `${versionCount} versiones`}</span>
             </div>
           </div>
         </div>
@@ -191,7 +198,7 @@ export default function MovieDetail({ title, metadata, results, onClose, onDownl
                         <p className="text-white text-sm truncate">{cleanFileName(g.baseName)}</p>
                         <p className="text-gray-500 text-[11px]">{g.parts.length} partes · {formatBytes(g.totalSize)}</p>
                       </div>
-                      {downloadBtn(g.firstId, g.channelId, `Descargar (${g.parts.length})`, g.parts[0].downloaded, `md-dl-${g.firstId}`)}
+                      {downloadBtn(g.firstId, g.channelId, 'Descargar', g.parts[0].downloaded, `md-dl-${g.firstId}`)}
                     </div>
                   ))}
                   {mpSingles.map((r, idx) => (

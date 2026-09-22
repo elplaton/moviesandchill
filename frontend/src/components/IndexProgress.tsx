@@ -28,6 +28,7 @@ const PHASE_LABELS: Record<string, string> = {
   scanning: 'Indexando canales...',
   done: 'Indexacion completada',
   enriching: 'Enriqueciendo metadatos...',
+  reclassifying: 'Reclasificando catálogo...',
   stopped: 'Detenido',
 };
 

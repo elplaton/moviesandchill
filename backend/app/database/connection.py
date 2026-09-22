@@ -104,6 +104,7 @@ async def _ensure_tables():
                 created_at    TIMESTAMP DEFAULT NOW()
             )
         """)
+        await _migrate_tmdb_keys(conn)
         try:
             await conn.execute("ALTER TABLE index_progress ADD COLUMN IF NOT EXISTS total_scanned INTEGER DEFAULT 0")
             await conn.execute("ALTER TABLE index_progress ADD COLUMN IF NOT EXISTS total_estimate INTEGER DEFAULT 0")
@@ -115,8 +116,43 @@ async def _ensure_tables():
             pass
 
 
+async def _migrate_tmdb_keys(conn):
+    """tmdb_cache estaba indexada solo por tmdb_id, pero en TMDB peliculas y
+    series tienen ids independientes: la serie "Ed, Edd y Eddy" es tv/606 y
+    "Memorias de Africa" es movie/606, y cada una pisaba la cache de la otra.
+    La clave pasa a ser (tmdb_id, media_type) y media_items guarda el tipo."""
+    try:
+        await conn.execute("ALTER TABLE media_items ADD COLUMN IF NOT EXISTS tmdb_type VARCHAR(10)")
+        await conn.execute("ALTER TABLE tmdb_cache ADD COLUMN IF NOT EXISTS vote_count INTEGER")
+        cols = await conn.fetchval("""
+            SELECT COUNT(*) FROM information_schema.key_column_usage
+            WHERE table_name = 'tmdb_cache' AND constraint_name = 'tmdb_cache_pkey'
+        """)
+        if cols == 1:
+            await conn.execute("ALTER TABLE tmdb_cache DROP CONSTRAINT tmdb_cache_pkey")
+            await conn.execute("ALTER TABLE tmdb_cache ADD PRIMARY KEY (tmdb_id, media_type)")
+            logger.info("tmdb_cache: clave primaria migrada a (tmdb_id, media_type)")
+        # Lo que ya estaba validado (tipo detectado == tipo TMDB) conserva su id
+        # con el tipo que le corresponde; el resto se resuelve al reclasificar.
+        await conn.execute("""
+            UPDATE media_items
+            SET tmdb_type = CASE media_type WHEN 'series' THEN 'tv' ELSE 'movie' END
+            WHERE tmdb_id IS NOT NULL AND tmdb_type IS NULL AND tmdb_valid IS TRUE
+        """)
+        await conn.execute("""
+            UPDATE media_items mi SET tmdb_type = tc.media_type
+            FROM tmdb_cache tc
+            WHERE tc.tmdb_id = mi.tmdb_id AND mi.tmdb_id IS NOT NULL AND mi.tmdb_type IS NULL
+        """)
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_media_items_tmdb ON media_items (tmdb_id, tmdb_type)")
+    except Exception as e:
+        logger.error("Migracion de tmdb_cache fallo: %s", e)
+
+
 from app.database.users import get_user_by_username, create_user
 from app.database.channels_db import get_all_channels, get_active_channels, upsert_channel, set_active_channels, remove_channel
-from app.database.media import insert_media_item, insert_media_items, update_media_tmdb, search_media, get_media_without_tmdb, get_media_by_channel, mark_batch_tmdb_searched
+from app.database.media import (insert_media_item, insert_media_items, update_media_tmdb, update_media_tmdb_many,
+    search_media, get_media_by_tmdb, get_media_without_tmdb, get_media_by_channel, mark_batch_tmdb_searched,
+    fetch_all_media_for_reclassify, bulk_update_parsed, reset_tmdb_for_ids, get_missing_cache_pairs)
 from app.database.tmdb_cache import get_tmdb_cached, upsert_tmdb_cache
-from app.database.index_progress import get_index_progress, upsert_index_progress, get_index_stats, set_index_phase, reset_all_index_progress, get_index_status
+from app.database.index_progress import get_index_progress, upsert_index_progress, bump_index_progress, get_index_stats, set_index_phase, reset_all_index_progress, get_index_status

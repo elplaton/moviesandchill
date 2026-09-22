@@ -3,14 +3,34 @@ import logging
 import re
 import time
 
-from app.services.tmdb import clean_title
+from app.services.title_parser import parse_filename, ParsedName
+from app.services.tmdb import title_similarity
 from app.database.connection import (
     get_pool, get_active_channels,
-    insert_media_item, insert_media_items, update_media_tmdb,
+    insert_media_items, update_media_tmdb_many,
     upsert_tmdb_cache, upsert_index_progress, get_index_progress,
 )
 
 logger = logging.getLogger("tmd")
+
+# TMDB admite ~50 peticiones/s; con 5 en paralelo cada lote de 300 tardaba 20-30 s.
+TMDB_CONCURRENCY = 10
+
+# Escaneos de canal en curso y si ya hay un bucle de enriquecimiento corriendo.
+# El escaneo ya no espera a TMDB en cada lote: inserta y sigue leyendo Telegram,
+# y un unico bucle en paralelo va enriqueciendo lo pendiente mientras haya
+# escaneos activos. Con 250.000 mensajes, esperar a TMDB por lote suponia horas.
+_active_scans = 0
+_enrich_running = False
+
+
+def ensure_enrich_worker(api_key: str, broadcast=None):
+    """Arranca el bucle de enriquecimiento si no hay uno ya en marcha."""
+    if not api_key or _enrich_running:
+        return None
+    from app.tasks import spawn
+    return spawn(enrich_all_missing_tmdb(api_key, broadcast=broadcast), "enrich_tmdb")
+
 
 TAG_PATTERNS = {
     "1080p": r'\b1080p\b', "720p": r'\b720p\b', "2160p": r'\b2160p\b',
@@ -36,130 +56,141 @@ def extract_tags(filename: str) -> list[str]:
 
 
 def detect_media_type(filename: str):
-    m = re.search(r'(\d{1,2})x(\d{2})', filename, re.IGNORECASE)
-    if m:
-        return "series", int(m.group(1)), int(m.group(2))
-    m = re.search(r'[sS](\d{2})[eE](\d{2})', filename)
-    if m:
-        return "series", int(m.group(1)), int(m.group(2))
-    return "movie", None, None
+    p = parse_filename(filename)
+    return p.media_type, p.season, p.episode
 
 
-def validate_media_type(filename: str, tmdb_type: str) -> bool:
-    detected, _, _ = detect_media_type(filename)
+def tmdb_type_matches(detected: str, tmdb_type: str) -> bool:
     expected = "tv" if detected == "series" else "movie"
     return tmdb_type == expected
 
 
-async def _enrich_batch(api_key: str, items: list[dict]):
-    if not api_key or not items:
-        return
+def validate_media_type(filename: str, tmdb_type: str) -> bool:
+    return tmdb_type_matches(parse_filename(filename).media_type, tmdb_type)
+
+
+async def lookup_tmdb(api_key: str, parsed: ParsedName) -> dict | None:
+    """Resuelve un nombre ya interpretado contra TMDB.
+
+    Busca por tipo (serie -> /search/tv, pelicula -> /search/movie con año).
+    Para series con varias palabras prueba sin la primera (grupos de fansub
+    como "A&KProjects Duelo Xiaolin") y con prefijos mas cortos.
+    """
     from app.services.tmdb import search as tmdb_search, get_details as tmdb_details
+
+    tmdb_type = "tv" if parsed.media_type == "series" else "movie"
+
+    if parsed.tmdb_id_hint:
+        for t in (tmdb_type, "movie" if tmdb_type == "tv" else "tv"):
+            details = await tmdb_details(api_key, parsed.tmdb_id_hint, t)
+            if details:
+                return {"tmdb_id": details["tmdb_id"], "media_type": t, "title": details["title"]}
+
+    title = parsed.title
+    if not title or len(title) < 2:
+        return None
+
+    year = parsed.year if parsed.media_type == "movie" else None
+    result = await tmdb_search(api_key, title, tmdb_type, year)
+    if result:
+        return result
+
+    words = title.split()
+    candidates = []
+    if parsed.media_type == "series":
+        if len(words) >= 3:
+            candidates.append(" ".join(words[1:]))
+        for wc in (3, 2):
+            if wc < len(words):
+                candidates.append(" ".join(words[:wc]))
+    for cand in dict.fromkeys(candidates):
+        result = await tmdb_search(api_key, cand, tmdb_type, None)
+        if result:
+            return result
+    return None
+
+
+async def _enrich_batch(api_key: str, items: list[dict]):
+    """Enriquece un lote agrupando por titulo: todos los episodios de una
+    serie (o las partes de una pelicula) hacen UNA consulta a TMDB."""
+    if not api_key or not items:
+        return 0
+    from app.services.tmdb import get_details as tmdb_details
     from app.database.connection import mark_batch_tmdb_searched
 
-    episodes = [i for i in items if i.get("season") is not None and i.get("episode") is not None]
-    regular = [i for i in items if i.get("season") is None or i.get("episode") is None]
+    groups: dict[tuple, dict] = {}
+    for item in items:
+        parsed = parse_filename(item["file_name"])
+        if parsed.tmdb_id_hint:
+            key = ("hint", parsed.tmdb_id_hint)
+        elif parsed.title and len(parsed.title) >= 2:
+            key = (parsed.media_type, parsed.title.lower(), parsed.year if parsed.media_type == "movie" else None)
+        else:
+            continue
+        grp = groups.setdefault(key, {"parsed": parsed, "items": []})
+        grp["items"].append(item)
 
-    sem = asyncio.Semaphore(5)
+    sem = asyncio.Semaphore(TMDB_CONCURRENCY)
     enriched = 0
     lock = asyncio.Lock()
 
-    async def _enrich_one(item):
+    async def _enrich_group(grp):
         nonlocal enriched
+        parsed: ParsedName = grp["parsed"]
         async with sem:
             t0 = time.time()
-            ctitle = clean_title(item["file_name"])
-            if not ctitle or len(ctitle) < 2:
-                return
             try:
-                result = await tmdb_search(api_key, ctitle)
+                result = await lookup_tmdb(api_key, parsed)
                 if not result:
                     return
-                valid = validate_media_type(item["file_name"], result["media_type"])
-                await update_media_tmdb(item["channel_id"], item["message_id"], result["tmdb_id"], valid)
                 details = await tmdb_details(api_key, result["tmdb_id"], result["media_type"])
                 if details:
                     await upsert_tmdb_cache(details)
+                valid = tmdb_type_matches(parsed.media_type, result["media_type"])
+                await update_media_tmdb_many([
+                    (result["tmdb_id"], result["media_type"], valid, it["channel_id"], it["message_id"])
+                    for it in grp["items"]
+                ])
                 async with lock:
-                    enriched += 1
-                    t1 = time.time() - t0
-                    if enriched % 10 == 0:
-                        logger.info("  TMDB: %d enriched | last: %.2fs | %s -> %s",
-                            enriched, t1, ctitle[:40], result.get("title", "?")[:40])
+                    enriched += len(grp["items"])
+                logger.info("  TMDB %s: %s (%d archivos) -> %s [%s]%s (%.2fs)",
+                            parsed.media_type, parsed.title[:40], len(grp["items"]),
+                            result.get("title", "?")[:40], result["media_type"],
+                            "" if valid else " TIPO DISTINTO", time.time() - t0)
             except Exception as e:
-                logger.warning("  TMDB error %s: %s", ctitle[:40], str(e)[:60])
+                logger.warning("  TMDB error %s: %s", parsed.title[:40], str(e)[:80])
 
-    async def _enrich_episode_groups():
-        nonlocal enriched
-        if not episodes:
-            return
-        logger.info("  TMDB: processing %d episodes in groups", len(episodes))
-        groups: dict[tuple, dict] = {}
-        for ep in episodes:
-            ctitle = clean_title(ep["file_name"])
-            if not ctitle or len(ctitle) < 2:
-                continue
-            words = ctitle.split()
-            for word_count in [3, 2]:
-                if len(words) >= word_count:
-                    group_name = " ".join(words[:word_count])
-                    break
-            else:
-                group_name = ctitle
-            key = (ep["channel_id"], group_name.lower())
-            if key not in groups:
-                groups[key] = {"title": group_name, "episodes": [], "channel_id": ep["channel_id"]}
-            groups[key]["episodes"].append(ep)
-
-        sem2 = asyncio.Semaphore(5)
-        logger.info("  TMDB: %d episode groups to search", len(groups))
-        async def _enrich_group(key, group):
-            nonlocal enriched
-            async with sem2:
-                try:
-                    title = group["title"]
-                    result = await tmdb_search(api_key, title)
-                    if not result:
-                        words = title.split()
-                        for wc in [3, 2, 1]:
-                            if 0 < wc < len(words):
-                                fallback = " ".join(words[:wc])
-                                result = await tmdb_search(api_key, fallback)
-                                if result:
-                                    title = fallback
-                                    break
-                    if not result:
-                        return
-                    details = await tmdb_details(api_key, result["tmdb_id"], result["media_type"])
-                    if details:
-                        await upsert_tmdb_cache(details)
-                    for ep in group["episodes"]:
-                        valid = validate_media_type(ep["file_name"], result["media_type"])
-                        await update_media_tmdb(ep["channel_id"], ep["message_id"], result["tmdb_id"], valid)
-                    async with lock:
-                        enriched += 1
-                    logger.info("  TMDB series: %s (%d episodes) -> %s",
-                                group["title"], len(group["episodes"]), result.get("title", "?"))
-                except Exception as e:
-                    logger.warning("  TMDB series error %s: %s", group["title"][:40], str(e)[:60])
-
-        tasks = [_enrich_group(key, grp) for key, grp in groups.items()]
-        await asyncio.gather(*tasks, return_exceptions=True)
-
-    regular_task = asyncio.gather(*[_enrich_one(item) for item in regular], return_exceptions=True)
-    episodes_task = _enrich_episode_groups()
-    await asyncio.gather(regular_task, episodes_task)
-
+    await asyncio.gather(*[_enrich_group(g) for g in groups.values()], return_exceptions=True)
     await mark_batch_tmdb_searched(items)
-
     return enriched
+
+
+def _item_from_message(downloader, channel_id, channel_name, msg, file_name, size):
+    parsed = parse_filename(file_name)
+    return {
+        "channel_id": channel_id, "channel_name": channel_name,
+        "message_id": msg.id, "file_name": file_name,
+        "file_size": size, "size_str": downloader._format_size(size),
+        "clean_title": parsed.clean_title[:300], "media_type": parsed.media_type,
+        "season": parsed.season, "episode": parsed.episode,
+    }
 
 
 async def scan_channel(downloader, channel_id: int, channel_name: str, api_key: str = "",
                        broadcast=None, total_estimate: int = 0, stop_flag: asyncio.Event = None):
+    global _active_scans
     pool = get_pool()
     if not pool:
         return
+    _active_scans += 1
+    try:
+        ensure_enrich_worker(api_key, broadcast)
+        return await _scan_channel(downloader, channel_id, channel_name, broadcast, total_estimate, stop_flag)
+    finally:
+        _active_scans -= 1
+
+
+async def _scan_channel(downloader, channel_id, channel_name, broadcast, total_estimate, stop_flag):
 
     entity = downloader.channels.get(channel_id, {}).get("entity")
     if not entity:
@@ -173,7 +204,6 @@ async def scan_channel(downloader, channel_id: int, channel_name: str, api_key: 
     total_scanned = prog.get("total_scanned", 0) or 0
     batch_items = []
     batch_size = 500
-    first_batch = offset == 0
 
     if not total_estimate:
         total_estimate = prog.get("total_estimate", 0) or 0
@@ -219,16 +249,7 @@ async def scan_channel(downloader, channel_id: int, channel_name: str, api_key: 
                 size = downloader._get_file_size(msg)
                 if size == 0:
                     continue
-                ctitle = clean_title(file_name)
-                mtype, season, episode = detect_media_type(file_name)
-                item = {
-                    "channel_id": channel_id, "channel_name": channel_name,
-                    "message_id": msg.id, "file_name": file_name,
-                    "file_size": size, "size_str": downloader._format_size(size),
-                    "clean_title": ctitle, "media_type": mtype,
-                    "season": season, "episode": episode,
-                }
-                batch_items.append(item)
+                batch_items.append(_item_from_message(downloader, channel_id, channel_name, msg, file_name, size))
         except Exception as e:
             logger.error("Error escaneando canal %d: %s", channel_id, e)
             had_error = True
@@ -240,13 +261,6 @@ async def scan_channel(downloader, channel_id: int, channel_name: str, api_key: 
         if batch_items:
             await insert_media_items(batch_items)
             total_indexed += len(batch_items)
-
-            if api_key:
-                t0 = time.time()
-                enriched = await _enrich_batch(api_key, batch_items)
-                if enriched:
-                    logger.info("  %s: batch %d items | TMDB %d enriched (%.1fs)",
-                                channel_name, len(batch_items), enriched, time.time() - t0)
 
         await upsert_index_progress(channel_id, offset, total_indexed, "scanning", phase="scanning",
                                     total_scanned=total_scanned, total_estimate=total_estimate)
@@ -333,15 +347,21 @@ async def run_full_index(downloader, config, broadcast=None, stop_flag: asyncio.
             logger.info("Indexacion detenida antes del canal %s", ch_info["channel_name"])
             return
 
-        if ch_info["channel_id"] in done_ids:
-            logger.info("--- Canal %d/%d: %s (%s mensajes) — ya completado, omitiendo ---",
+        # Un canal ya completado se escanea igualmente, pero desde su ultimo
+        # mensaje: solo se piden los nuevos. Antes se omitia y lo publicado
+        # despues del primer escaneo no se indexaba nunca.
+        if ch_info["channel_id"] in done_ids and not force:
+            prog = next((p for p in existing_progress if p["channel_id"] == ch_info["channel_id"]), {})
+            pending = ch_info["total_estimate"] - (prog.get("last_message_id", 0) or 0)
+            if pending <= 0:
+                skipped += 1
+                continue
+            logger.info("--- Canal %d/%d: %s — ~%d mensajes nuevos ---",
+                        i + 1, total_channels, ch_info["channel_name"], pending)
+        else:
+            logger.info("--- Canal %d/%d: %s (%s mensajes) ---",
                         i + 1, total_channels, ch_info["channel_name"], ch_info["total_estimate"])
-            skipped += 1
-            continue
-
         scanned += 1
-        logger.info("--- Canal %d/%d: %s (%s mensajes) ---",
-                    i + 1, total_channels, ch_info["channel_name"], ch_info["total_estimate"])
 
         await scan_channel(
             downloader,
@@ -360,19 +380,35 @@ async def run_full_index(downloader, config, broadcast=None, stop_flag: asyncio.
 
 
 async def enrich_all_missing_tmdb(api_key: str, broadcast=None):
-    if not api_key:
-        return
+    global _enrich_running
+    if not api_key or _enrich_running:
+        return 0
+    _enrich_running = True
+    try:
+        return await _enrich_loop(api_key, broadcast)
+    finally:
+        _enrich_running = False
 
+
+async def _enrich_loop(api_key: str, broadcast=None):
     total_enriched = 0
     batch_num = 0
-    consecutive_empty = 0
     t_start = time.time()
+    idle_logged = False
 
     while True:
         from app.database.connection import get_media_without_tmdb
         items = await get_media_without_tmdb(limit=300)
         if not items:
+            if _active_scans > 0:
+                # El escaneo sigue metiendo archivos: se espera en vez de salir.
+                if not idle_logged:
+                    logger.info("TMDB: al dia, esperando al escaneo en curso")
+                    idle_logged = True
+                await asyncio.sleep(5)
+                continue
             break
+        idle_logged = False
 
         batch_num += 1
         logger.info("TMDB: batch %d — %d items pendientes", batch_num, len(items))
@@ -381,21 +417,13 @@ async def enrich_all_missing_tmdb(api_key: str, broadcast=None):
             await broadcast({"type": "index_phase", "phase": "enriching"})
 
         enriched = await _enrich_batch(api_key, items)
-        if enriched:
-            total_enriched += enriched
-            consecutive_empty = 0
-        else:
-            consecutive_empty += 1
+        total_enriched += enriched or 0
 
         elapsed = time.time() - t_start
         logger.info("TMDB: batch %d completado — %d enriquecidos (%d total en %.1fs)",
                     batch_num, enriched or 0, total_enriched, elapsed)
 
-        if consecutive_empty >= 5:
-            logger.info("TMDB: %d batches consecutivos sin enriquecer — deteniendo", consecutive_empty)
-            break
-
-        await asyncio.sleep(1)
+        await asyncio.sleep(0.5)
 
     logger.info("TMDB: enriquecimiento finalizado — %d items en %d batches (%.1fs)",
                 total_enriched, batch_num, time.time() - t_start)
@@ -404,3 +432,121 @@ async def enrich_all_missing_tmdb(api_key: str, broadcast=None):
         await broadcast({"type": "index_phase", "phase": "done"})
 
     return total_enriched
+
+
+async def reclassify_all(api_key: str, broadcast=None):
+    """Vuelve a interpretar todos los nombres de archivo con el parser actual
+    y manda a TMDB lo que quedo sin emparejar o emparejado con el tipo
+    equivocado. Lo que ya esta bien (tipo detectado == tipo TMDB) se respeta."""
+    from app.database.connection import fetch_all_media_for_reclassify, bulk_update_parsed, reset_tmdb_for_ids
+
+    t0 = time.time()
+    if broadcast:
+        await broadcast({"type": "index_phase", "phase": "reclassifying"})
+
+    rows = await fetch_all_media_for_reclassify()
+    updates = []
+    to_reset = []
+    changed_type = 0
+    for r in rows:
+        p = parse_filename(r["file_name"])
+        clean = p.clean_title[:300]
+        if (clean, p.media_type, p.season, p.episode) != (r["clean_title"], r["media_type"], r["season"], r["episode"]):
+            updates.append((clean, p.media_type, p.season, p.episode, r["id"]))
+            if p.media_type != r["media_type"]:
+                changed_type += 1
+        mismatch = r["tmdb_type"] and not tmdb_type_matches(p.media_type, r["tmdb_type"])
+        # "[1945] Cena de Navidad" emparejado con una pelicula de 2026: el año
+        # del archivo manda (antes no se pasaba a TMDB).
+        year_off = (p.media_type == "movie" and p.year and r["tmdb_year"]
+                    and abs(p.year - r["tmdb_year"]) > 1)
+        # Emparejado cuando se mandaba el titulo del episodio como serie, o con
+        # un resultado que no se parece en nada a lo que se busco.
+        no_title = r["tmdb_id"] is not None and not p.title and not p.tmdb_id_hint
+        bad_match = False
+        if r["tmdb_id"] is not None and p.title and not p.tmdb_id_hint:
+            sim = title_similarity(p.title, r["tmdb_title"], r["tmdb_original"])
+            votes = r["tmdb_votes"]
+            bad_match = sim < 0.6 and len(p.title.split()) >= 3 and votes is not None and votes < 500
+        if r["tmdb_id"] is None or mismatch or year_off or no_title or bad_match or r["tmdb_valid"] is not True:
+            to_reset.append(r["id"])
+
+    for i in range(0, len(updates), 2000):
+        await bulk_update_parsed(updates[i:i + 2000])
+    for i in range(0, len(to_reset), 5000):
+        await reset_tmdb_for_ids(to_reset[i:i + 5000])
+
+    logger.info("Reclasificacion: %d archivos, %d actualizados (%d cambian de tipo), %d a re-buscar en TMDB (%.1fs)",
+                len(rows), len(updates), changed_type, len(to_reset), time.time() - t0)
+
+    result = {"total": len(rows), "updated": len(updates), "type_changed": changed_type, "to_search": len(to_reset)}
+    if api_key:
+        result["enriched"] = await enrich_all_missing_tmdb(api_key, broadcast=broadcast)
+        result["cache_refreshed"] = await refresh_missing_cache(api_key)
+    elif broadcast:
+        await broadcast({"type": "index_phase", "phase": "done"})
+    return result
+
+
+async def refresh_missing_cache(api_key: str) -> int:
+    """Descarga los detalles de los (tmdb_id, tipo) que media_items referencia
+    pero no estan en tmdb_cache (con la clave antigua pelicula y serie con el
+    mismo id se pisaban)."""
+    from app.database.connection import get_missing_cache_pairs
+    from app.services.tmdb import get_details as tmdb_details
+
+    pairs = await get_missing_cache_pairs()
+    if not pairs:
+        return 0
+    logger.info("TMDB: %d titulos sin ficha en cache, descargando", len(pairs))
+    sem = asyncio.Semaphore(TMDB_CONCURRENCY)
+    done = 0
+
+    async def _one(tmdb_id, media_type):
+        nonlocal done
+        async with sem:
+            details = await tmdb_details(api_key, tmdb_id, media_type)
+            if details:
+                await upsert_tmdb_cache(details)
+                done += 1
+
+    await asyncio.gather(*[_one(i, t) for i, t in pairs], return_exceptions=True)
+    logger.info("TMDB: %d/%d fichas recuperadas", done, len(pairs))
+    return done
+
+
+async def index_live_message(downloader, channel_id: int, msg, api_key: str = "", broadcast=None):
+    """Indexa un mensaje recien publicado en un canal (evento de Telethon)."""
+    from app.database.connection import bump_index_progress
+
+    indexed = False
+    if msg.media:
+        file_name = downloader._get_file_name(msg)
+        if file_name and downloader._is_downloadable(file_name):
+            size = downloader._get_file_size(msg)
+            if size:
+                name = downloader.channels.get(channel_id, {}).get("name", "")
+                await insert_media_items([_item_from_message(downloader, channel_id, name, msg, file_name, size)])
+                indexed = True
+                logger.info("Nuevo en %s: %s", name, file_name[:80])
+                ensure_enrich_worker(api_key, broadcast)
+    await bump_index_progress(channel_id, msg.id, indexed)
+
+
+async def periodic_rescan(downloader, config, hours: float, broadcast=None):
+    """Barrido incremental cada `hours` horas por si algun mensaje se perdio
+    mientras no habia conexion."""
+    from app.routers import index_router
+
+    while True:
+        await asyncio.sleep(hours * 3600)
+        if index_router._index_running:
+            continue
+        index_router._index_running = True
+        try:
+            logger.info("Barrido periodico de canales (cada %.1f h)", hours)
+            await run_full_index(downloader, config, broadcast=broadcast)
+        except Exception as e:
+            logger.error("Barrido periodico fallo: %s", e)
+        finally:
+            index_router._index_running = False

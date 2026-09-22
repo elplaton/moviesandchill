@@ -16,6 +16,8 @@ const QUALITY = /\b(1080p|720p|2160p|4k|4K|hdr|hdrip|bdrip|bluray|blu-ray|web-dl
 
 export function cleanTitle(name: string): string {
   let s = name;
+  // "@La_Comunidad" se quita entero antes de convertir "_" en espacio.
+  s = s.replace(/@[\w.]+/g, ' ');
   s = s.replace(/\.part\d+/i, '');
   s = s.replace(/\.r\d{2,}$/i, '');
   s = s.replace(/\.\d{3,}$/, '');

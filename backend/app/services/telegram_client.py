@@ -113,6 +113,27 @@ class TelegramDownloader:
                     pass
         self.channels = new_channels
 
+    def watch_new_messages(self, callback):
+        """Llama a callback(channel_id, msg) por cada mensaje nuevo en un canal
+        activo. Telethon ya mantiene la conexion abierta para las descargas,
+        asi que escuchar actualizaciones no cuesta peticiones extra. El filtro
+        se evalua en cada evento para que los canales añadidos despues cuenten.
+        """
+        from telethon import events
+
+        async def _handler(event):
+            chat_id = event.chat_id  # viene como -100XXXXXXXXXX
+            for ch_id in list(self.channels.keys()):
+                if self._resolve_channel_id(ch_id) == chat_id:
+                    try:
+                        await callback(ch_id, event.message)
+                    except Exception as e:
+                        logger.warning("Error procesando mensaje nuevo del canal %d: %s", ch_id, e)
+                    return
+
+        self.client.add_event_handler(_handler, events.NewMessage())
+        logger.info("Escuchando mensajes nuevos en %d canales", len(self.channels))
+
     async def stop(self):
         if self.client:
             await self.client.disconnect()

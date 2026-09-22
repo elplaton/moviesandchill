@@ -10,6 +10,7 @@ interface SearchGroup {
   season: number;
   episodes: SearchResult[];
   channelId?: number;
+  tmdbId?: number;
 }
 
 interface Props {
@@ -86,7 +87,7 @@ export default function SearchView({
           {searchGroups.map(g => {
             const meta = tmdbFromResult(g.episodes[0]);
             return (
-              <MovieCard key={g.groupKey || g.seriesName} name={g.groupKey || g.seriesName}
+              <MovieCard key={g.groupKey || g.seriesName} name={g.seriesName}
                 subtitle={`${g.episodes.length} episodios`}
                 posterUrl={meta.poster} year={meta.year} rating={meta.rating}
                 onClick={() => onOpenSeries(g)} hoverLabel="Ver episodios" actions="click" />
@@ -97,14 +98,14 @@ export default function SearchView({
 
       {movieGroups.size > 0 && (
         <MovieRow title="Peliculas encontradas">
-          {Array.from(movieGroups.entries()).map(([rawName, items]) => {
-            const key = cleanTitle(rawName);
+          {Array.from(movieGroups.entries()).map(([groupKey, items]) => {
+            const name = items[0].tmdb_title || cleanTitle(items[0].file_name);
             const meta = tmdbFromResult(items[0]);
             return (
-              <MovieCard key={key} name={key}
-                subtitle={`${items.length} versiones`}
+              <MovieCard key={groupKey} name={name}
+                subtitle={items.length === 1 ? '1 archivo' : `${items.length} archivos`}
                 posterUrl={meta.poster} year={meta.year} rating={meta.rating}
-                onClick={() => onOpenMovie(key, meta, items)}
+                onClick={() => onOpenMovie(name, meta, items)}
                 actions="click" />
             );
           })}

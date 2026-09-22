@@ -113,17 +113,31 @@ async def startup():
                 len(config.get("channels", [])))
 
     if config.get("channels"):
-        from app.services.indexer import run_full_index
+        from app.services.indexer import run_full_index, index_live_message, periodic_rescan
         from app.routers import index_router
+        from app.routers.ws_router import _broadcast_index
         from app.tasks import spawn
         async def _bg_index():
             index_router._index_running = True
             try:
-                await run_full_index(downloader, config)
+                await run_full_index(downloader, config, broadcast=_broadcast_index)
             finally:
                 index_router._index_running = False
         spawn(_bg_index(), "indexacion_inicial")
         logger.info("Indexacion iniciada en background (TMDB=%s)", "ON" if config.get("tmdb_enabled") else "OFF")
+
+        # Lo que se publique a partir de ahora entra segun llega, sin escaneos.
+        if downloader.client:
+            api_key = config.get("tmdb_api_key", "") if config.get("tmdb_enabled") else ""
+
+            async def _on_new(ch_id, msg):
+                await index_live_message(downloader, ch_id, msg, api_key=api_key, broadcast=_broadcast_index)
+
+            downloader.watch_new_messages(_on_new)
+
+        hours = config.get("rescan_hours") or 0
+        if hours > 0:
+            spawn(periodic_rescan(downloader, config, hours, broadcast=_broadcast_index), "barrido_periodico")
 
 
 @app.on_event("shutdown")

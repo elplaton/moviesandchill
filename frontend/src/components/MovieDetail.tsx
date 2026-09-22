@@ -69,6 +69,13 @@ function extractRes(name: string): string {
 export default function MovieDetail({ title, metadata, results, onClose, onDownload, onCancelDownload, downloadStates }: MovieDetailProps) {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
 
+  // Una version = un archivo o un archivo troceado en partes. Antes la
+  // cabecera contaba partes ("20 versiones" para dos rips de 6 y 14 partes).
+  const versionCount = useMemo(() => {
+    const { groups: g, singles } = groupMultiparts(results);
+    return g.length + singles.length;
+  }, [results]);
+
   const groups = useMemo(() => {
     const map = new Map<string, SearchResult[]>();
     for (const r of results) {
@@ -160,12 +167,15 @@ export default function MovieDetail({ title, metadata, results, onClose, onDownl
                   {metadata.rating.toFixed(1)}
                 </span>
               )}
-              <span className="text-gray-400 text-sm">{results.length} versiones</span>
+              <span className="text-gray-400 text-sm">{versionCount === 1 ? '1 versión' : `${versionCount} versiones`}</span>
             </div>
           </div>
         </div>
 
         <div className="p-5 overflow-y-auto max-h-[50vh]">
+          {results.length === 0 && (
+            <p className="text-gray-500 text-sm text-center py-6">No hay archivos indexados para este título.</p>
+          )}
           {groups.map(({ res, mpGroups, mpSingles }) => (
             <div key={res} className="mb-3">
               <button onClick={() => toggleRes(res)}
@@ -184,9 +194,9 @@ export default function MovieDetail({ title, metadata, results, onClose, onDownl
                       className="flex items-center gap-3 bg-white/[0.03] border border-white/5 rounded-xl px-4 py-2.5 hover:bg-white/[0.06] transition-all">
                       <div className="flex-1 min-w-0">
                         <p className="text-white text-sm truncate">{cleanFileName(g.baseName)}</p>
-                        <p className="text-gray-500 text-[11px]">{g.parts.length} partes · {formatBytes(g.totalSize)}</p>
+                        <p className="text-gray-500 text-[11px]">{g.parts[0].channel_name} · {g.parts.length} partes · {formatBytes(g.totalSize)}</p>
                       </div>
-                      {downloadBtn(g.firstId, g.channelId, `Descargar (${g.parts.length})`, g.parts[0].downloaded)}
+                      {downloadBtn(g.firstId, g.channelId, 'Descargar', g.parts[0].downloaded)}
                     </div>
                   ))}
                   {mpSingles.map((r, idx) => (

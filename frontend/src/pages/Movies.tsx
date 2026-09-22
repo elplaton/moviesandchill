@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { apiFetch, getAccessToken } from '../services/api';
+import { fetchMediaFiles, toEpisodes } from '../services/media';
 import Layout from '../components/Layout';
 import MovieRow from '../components/MovieRow';
 import MovieCard from '../components/MovieCard';
@@ -35,25 +36,16 @@ export default function Movies() {
       year: item.year, rating: item.rating, overview: item.overview, genres: item.genres,
     };
     if (item.media_type === 'series') {
-      const tmdbId = item.id.startsWith('s') ? parseInt(item.id.slice(1)) : undefined;
+      const tmdbId = item.tmdb_id;
       try {
-        const res = await apiFetch('/search', { method: 'POST', body: JSON.stringify({ query: item.title, page_size: 100 }) });
-        const data = await res.json();
-        const results: SearchResult[] = data.results || [];
-        const episodes: SeriesEpisode[] = results.map((r: SearchResult) => ({
-          name: r.file_name, size: r.size_str, path: '', message_id: r.id, channel_id: r.channel_id,
-        }));
-        setSelectedSeries({ title: item.title, metadata: meta, episodes, tmdbId });
+        const { results } = await fetchMediaFiles(tmdbId, 'tv');
+        setSelectedSeries({ title: item.title, metadata: meta, episodes: toEpisodes(results), tmdbId });
       } catch {
         setSelectedSeries({ title: item.title, metadata: meta, episodes: [], tmdbId });
       }
     } else {
       try {
-        const res = await apiFetch('/search', { method: 'POST', body: JSON.stringify({ query: item.title, page_size: 20 }) });
-        const data = await res.json();
-        const results: SearchResult[] = (data.results || []).filter((r: SearchResult) =>
-          !/(\d{1,2}x\d{2}|s\d{2}e\d{2})/i.test(r.file_name)
-        );
+        const { results } = await fetchMediaFiles(item.tmdb_id, 'movie');
         setSelectedMovie({ title: item.title, metadata: meta, results });
       } catch {
         setSelectedMovie({ title: item.title, metadata: meta, results: [] });
