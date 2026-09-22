@@ -9,19 +9,21 @@ import './index.css';
 // Fuera de la TV (navegador de escritorio) conviene ver el cursor.
 if (!/Tizen|SMART-TV|SmartTV/i.test(navigator.userAgent)) document.body.classList.add('has-pointer');
 
-// La interfaz mide 1920x1080 fijos. En un navegador de escritorio mas pequeño
-// se escala entera para poder revisarla sin una tele delante.
+// La interfaz mide 1920x1080 fijos. Si la ventana (o la tele: algun modelo
+// usa 1280x720) no mide eso, se escala entera y se centra, con bandas negras
+// alrededor: asi el video y la ficha ocupan siempre todo el lienzo y lo que
+// sobra se ve como el marco de una tele, no como un lateral gris.
 function fitToWindow() {
   const root = document.getElementById('root');
   if (!root) return;
-  const k = Math.min(window.innerWidth / 1920, window.innerHeight / 1080, 1);
+  const k = Math.min(window.innerWidth / 1920, window.innerHeight / 1080);
+  const x = Math.max(0, (window.innerWidth - 1920 * k) / 2);
+  const y = Math.max(0, (window.innerHeight - 1080 * k) / 2);
   root.style.transformOrigin = '0 0';
-  root.style.transform = k < 1 ? `scale(${k})` : '';
+  root.style.transform = Math.abs(k - 1) < 0.001 && x < 1 && y < 1 ? '' : `translate(${x}px, ${y}px) scale(${k})`;
 }
-if (import.meta.env.DEV) {
-  fitToWindow();
-  window.addEventListener('resize', fitToWindow);
-}
+fitToWindow();
+window.addEventListener('resize', fitToWindow);
 
 // Sin VITE_DEBUG_HOST la condicion es constante-falsa y Vite elimina el modulo
 // entero del paquete: las compilaciones normales no llevan consola remota.

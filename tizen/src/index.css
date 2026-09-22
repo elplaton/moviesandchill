@@ -34,14 +34,22 @@ html {
   font-size: 16px;
 }
 
-html, body, #root {
+#root {
   width: 1920px;
   height: 1080px;
+  overflow: hidden;
+  background-color: var(--tv-bg);
+}
+
+html, body {
+  width: 100%;
+  height: 100%;
   overflow: hidden;
 }
 
 body {
-  background-color: var(--tv-bg);
+  /* Fuera del lienzo de 1920x1080 (ventana que no es 16:9) va negro. */
+  background-color: #000;
   color: #fff;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
