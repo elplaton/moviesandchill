@@ -348,39 +348,25 @@ function isItem(node: FocusNode | undefined): node is ItemNode {
  *
  * Orden de preferencia al entrar en un contenedor:
  *   1. la memoria de fila (donde se dejo el foco la ultima vez),
- *   2. `preferred`, la columna en la que se venia,
- *   3. el primer hijo.
+ *   2. el primer hijo.
  *
- * El paso 2 es lo que hace que bajar de fila caiga debajo de donde estabas y
- * no al principio de la fila.
+ * Cada carril es independiente: al bajar a otra fila el foco entra por donde
+ * se dejo en esa fila, no por la columna de la fila de la que se viene. Antes
+ * se arrastraba la columna de partida y parecia que la fila nueva "heredaba"
+ * la posicion de la anterior.
  */
-function descend(id: string, preferred?: number): string | null {
+function descend(id: string): string | null {
   const node = nodes.get(id);
   if (!node) return null;
   if (isItem(node)) return node.disabled ? null : node.id;
 
   if (node.lastChildId && nodes.has(node.lastChildId)) {
-    const viaMemory = descend(node.lastChildId, preferred);
+    const viaMemory = descend(node.lastChildId);
     if (viaMemory) return viaMemory;
   }
 
-  if (preferred !== undefined && node.childIds.length > 0) {
-    const clamped = Math.min(Math.max(preferred, 0), node.childIds.length - 1);
-    const viaColumn = descend(node.childIds[clamped], preferred);
-    if (viaColumn) return viaColumn;
-    // Si esa columna no vale, se busca hacia fuera desde ella.
-    for (let d = 1; d < node.childIds.length; d++) {
-      for (const idx of [clamped - d, clamped + d]) {
-        if (idx < 0 || idx >= node.childIds.length) continue;
-        const found = descend(node.childIds[idx], preferred);
-        if (found) return found;
-      }
-    }
-    return null;
-  }
-
   for (const childId of node.childIds) {
-    const found = descend(childId, preferred);
+    const found = descend(childId);
     if (found) return found;
   }
   return null;
@@ -423,12 +409,10 @@ function stepOf(dir: Direction): number {
 }
 
 /** Primer hermano en esa direccion que contenga algo enfocable. */
-function neighbour(
-  parent: ContainerNode, fromIndex: number, step: number, preferred?: number,
-): string | null {
+function neighbour(parent: ContainerNode, fromIndex: number, step: number): string | null {
   const order = parent.childIds;
   for (let i = fromIndex + step; i >= 0 && i < order.length; i += step) {
-    const candidate = descend(order[i], preferred);
+    const candidate = descend(order[i]);
     if (candidate) return candidate;
   }
   return null;
@@ -495,17 +479,6 @@ export function move(dir: Direction): boolean {
 
   const axis = axisOf(dir);
 
-  // Columna de partida: se arrastra hacia abajo para que al entrar en una fila
-  // nueva el foco caiga en la misma posicion en la que se venia.
-  let preferred: number | undefined;
-  if (node.parentId) {
-    const ownParent = nodes.get(node.parentId);
-    if (ownParent && ownParent.kind === 'container') {
-      const i = ownParent.childIds.indexOf(node.id);
-      if (i !== -1) preferred = i;
-    }
-  }
-
   while (node && node.parentId && node.id !== root) {
     const parent = nodes.get(node.parentId);
     if (!parent || parent.kind !== 'container') break;
@@ -518,7 +491,7 @@ export function move(dir: Direction): boolean {
       const parentAxis = parent.orientation === 'horizontal' ? 'h' : 'v';
       if (parentAxis === axis) {
         const idx = parent.childIds.indexOf(node.id);
-        if (idx !== -1) next = neighbour(parent, idx, stepOf(dir), preferred);
+        if (idx !== -1) next = neighbour(parent, idx, stepOf(dir));
       }
     }
 

@@ -19,9 +19,18 @@ export function useDownloads() {
       // mensajes de progreso del WebSocket solo actualizan entradas que ya
       // existen, asi que sin esto una descarga arrancada antes de recargar la
       // app no mostraba su anillo en ninguna parte.
+      const enCurso = new Set(['downloading', 'extracting', 'converting']);
       setDownloadStates(prev => {
         const next = new Map(prev);
+        const vivos = new Set(activos.filter(b => enCurso.has(b.status)).map(b => b.batch_id));
+        // Un lote cancelado o fallido ya no esta "en curso": se limpia su
+        // estado para que la fila vuelva a ofrecer Descargar. Antes el lote
+        // cancelado seguia 10 s en /status y se resembraba como "22%".
+        for (const [key, ds] of next) {
+          if (ds.status !== 'done' && !vivos.has(ds.batchId)) next.delete(key);
+        }
         for (const b of activos) {
+          if (!enCurso.has(b.status)) continue;
           for (const p of b.parts || []) {
             const actual = next.get(p.message_id);
             if (actual && actual.status === 'done') continue;
@@ -30,7 +39,7 @@ export function useDownloads() {
               messageId: p.message_id,
               batchId: b.batch_id,
               progress: p.progress ?? b.progress ?? 0,
-              status: (b.status === 'downloading' ? 'downloading' : b.status) as DownloadState['status'],
+              status: b.status as DownloadState['status'],
             });
           }
         }
@@ -85,8 +94,33 @@ export function useDownloads() {
     loadPaused(); loadStatus();
   };
 
+  // Sondeo mientras haya algo en marcha: si el WebSocket se cae (o la TV lo
+  // corta al dormir), el progreso sigue llegando aunque sea cada pocos segundos.
+  const hayActivas = batches.some((b) => ['downloading', 'extracting', 'converting'].includes(b.status));
+  useEffect(() => {
+    if (!hayActivas) return;
+    const t = setInterval(loadStatus, 4000);
+    return () => clearInterval(t);
+  }, [hayActivas, loadStatus]);
+
   useEffect(() => {
     const unsub = onProgress((data: any) => {
+      // El porcentaje global del lote tambien se refleja en las tarjetas de
+      // Descargas, que leen `batches` y no el estado por archivo.
+      if (data.type === 'batch_progress' && data.batch_id) {
+        setBatches(prev => prev.map(b => b.batch_id === data.batch_id
+          ? { ...b, progress: data.overall_progress ?? b.progress, status: 'downloading' }
+          : b));
+      }
+      if (data.type === 'batch_status' && data.batch_id) {
+        // Cambio de fase (extrayendo, convirtiendo, hecho, error): se relee el estado completo.
+        loadStatus();
+      }
+      if (data.type === 'batch_update' && data.batch_id && data.downloaded_parts !== undefined) {
+        setBatches(prev => prev.map(b => b.batch_id === data.batch_id
+          ? { ...b, downloaded_parts: data.downloaded_parts, progress: data.overall_progress ?? b.progress }
+          : b));
+      }
       if (data.type === 'batch_progress' && data.part_message_id) {
         setDownloadStates(prev => {
           const next = new Map(prev);
@@ -169,7 +203,7 @@ export function useDownloads() {
       }
     });
     return () => unsub();
-  }, []);
+  }, [loadStatus]);
 
   return { batches, pausedBatches, downloadStates, loadStatus, loadPaused, download, cancelBatch, pauseBatch, resumeBatch };
 }

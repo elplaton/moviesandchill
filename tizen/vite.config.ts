@@ -1,7 +1,7 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
   plugins: [react()],
   base: './',
   resolve: {
@@ -21,12 +21,14 @@ export default defineConfig({
     // 108. Se compila para el suelo, no para el techo: con el objetivo por
     // defecto de Vite (chrome87) el paquete salia con sintaxis que una TV
     // anterior a 2022 no sabe leer, y la app quedaba en negro sin avisar.
-    target: 'chrome85',
+    // webOS 5 (LG 2020) va por Chromium 68 y webOS 6 (2021) por 79.
+    target: mode === 'webos' ? 'chrome68' : 'chrome85',
   },
   server: {
     proxy: {
-      '/api': 'http://localhost:8000',
-      '/ws': { target: 'ws://localhost:8000', ws: true },
+      // ws: true tambien para /api: el progreso de descargas va por
+      // /api/ws/progress y sin ello en desarrollo nunca llegaba.
+      '/api': { target: 'http://localhost:8000', ws: true },
     },
   },
-});
+}));

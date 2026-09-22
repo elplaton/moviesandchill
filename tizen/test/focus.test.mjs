@@ -36,9 +36,9 @@ E.move('right'); check('derecha dentro de la fila', E.getCurrentFocusId(), 'c0-1
 E.move('right'); E.move('right');
 check('hasta el final de la fila', E.getCurrentFocusId(), 'c0-3');
 E.move('right'); check('tope derecho no se pasa', E.getCurrentFocusId(), 'c0-3');
-E.move('down');  check('baja de fila conservando columna', E.getCurrentFocusId(), 'c1-3');
-E.move('left'); E.move('left');
-check('izquierda en la fila 1', E.getCurrentFocusId(), 'c1-1');
+E.move('down');  check('baja de fila: cada fila es independiente, entra por el principio', E.getCurrentFocusId(), 'c1-0');
+E.move('right');
+check('derecha en la fila 1', E.getCurrentFocusId(), 'c1-1');
 E.move('up');    check('memoria de fila al subir', E.getCurrentFocusId(), 'c0-3');
 E.move('down');  check('memoria de fila al bajar', E.getCurrentFocusId(), 'c1-1');
 E.move('up'); E.move('up');
@@ -108,8 +108,8 @@ E.setFocus('x0-0');
 check('el foco entra en la primera tarjeta', E.getCurrentFocusId(), 'x0-0');
 E.move('right'); check('derecha funciona pese al orden', E.getCurrentFocusId(), 'x0-1');
 E.move('right'); check('sigue avanzando', E.getCurrentFocusId(), 'x0-2');
-E.move('down');  check('baja de fila conservando columna', E.getCurrentFocusId(), 'x1-2');
-E.move('left');  check('izquierda en la fila de abajo', E.getCurrentFocusId(), 'x1-1');
+E.move('down');  check('baja de fila por el principio', E.getCurrentFocusId(), 'x1-0');
+E.move('right'); check('derecha en la fila de abajo', E.getCurrentFocusId(), 'x1-1');
 
 console.log('\nNunca puede haber dos elementos enfocados:');
 const conFoco = () => ['x0-0','x0-1','x0-2','x1-0','x1-1','x1-2']

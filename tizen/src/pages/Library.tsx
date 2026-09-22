@@ -1,176 +1,211 @@
-import { useEffect, useMemo, useState } from 'react';
-import Layout from '../components/Layout';
-import MovieCard from '../components/MovieCard';
-import MovieRow from '../components/MovieRow';
-import PlayDetail from '../components/PlayDetail';
-import { FocusScope } from '../focus/react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { apiFetch, streamUrl } from '../services/api';
+import { fetchMetadataBatch } from '../services/tmdb';
+import { fetchMediaFiles } from '../services/media';
+import { useDownloadsCtx } from '../contexts/DownloadsContext';
+import { continueWatching, type Watched } from '../tv/progress';
+import { toast } from '../tv/toast';
 import { cleanTitle } from '../utils/text';
-import type { TMDBMetadata } from '../types';
+import Screen from '../components/Screen';
+import Row from '../components/Row';
+import PosterCard from '../components/PosterCard';
+import Dialog from '../components/Dialog';
+import Player from '../components/Player';
+import TitleDetail, { type DetailInput } from '../components/TitleDetail';
+import type { Batch, Featured, FileItem, SearchResult, TMDBMetadata } from '../types';
 
-interface Descargado {
-  nombre: string;
-  ruta: string;
-  tamano: string;
-  /** Titulo de la fila a la que pertenece. */
-  serie?: string;
-  /**
-   * Clave para pedir la caratula. Es el clean_name del backend, que ya viene
-   * normalizado igual que lo que usa TMDB. Antes se usaba el titulo de la fila,
-   * que pasa por el cleanTitle del frontend sobre el nombre crudo y da una
-   * cadena distinta: se pedia una clave y se buscaba otra.
-   */
-  clave: string;
+interface Local { file: FileItem; f: Featured; meta: TMDBMetadata }
+
+/** Nombre de serie a partir de un episodio ("1x01 - The Office (US).mkv") o de su carpeta ("S1 - The Office (US)"). */
+function seriesName(fileName: string, folder: string): string {
+  const fromFolder = cleanTitle(folder).replace(/^S\d{1,2}\s*[-–]\s*|\s*S\d{1,2}$/gi, '').trim();
+  return fromFolder || cleanTitle(fileName);
 }
 
 /**
- * Prefijo de tres palabras. El nombre limpio de un episodio arrastra su titulo
- * ("Sabrina, The Teenage Witch Soul Mates") y con eso TMDB no encuentra nada;
- * con el prefijo si. Es la misma heuristica que usa el backend al enriquecer.
+ * Descargas: lo que hay en disco (series y peliculas), lo que esta bajando y
+ * lo que se dejo a medias de ver. Todo se reproduce desde aqui.
  */
-function prefijo(nombre: string): string {
-  return nombre.split(/\s+/).slice(0, 3).join(' ');
-}
-
-/** Agrupa por serie cuando el nombre trae SxxEyy o NxM, para no listar 200 episodios sueltos. */
-function serieDe(nombre: string): string | undefined {
-  const limpio = cleanTitle(nombre);
-  if (/(\d{1,2})x(\d{2})|[sS]\d{2}[eE]\d{2}/.test(nombre)) return limpio || nombre;
-  return undefined;
-}
-
 export default function Library() {
-  const [items, setItems] = useState<Descargado[]>([]);
-  const [cargando, setCargando] = useState(true);
-  const [reproduciendo, setReproduciendo] = useState<Descargado | null>(null);
-  const [caratulas, setCaratulas] = useState<Map<string, TMDBMetadata>>(new Map());
+  const { batches, pausedBatches, downloadStates, pauseBatch, cancelBatch, resumeBatch, loadStatus, loadPaused, total } = useDownloadsCtx();
+  const [files, setFiles] = useState<FileItem[]>([]);
+  const [metas, setMetas] = useState<Map<string, TMDBMetadata>>(new Map());
+  const [loading, setLoading] = useState(true);
+  const [focusRow, setFocusRow] = useState(0);
+  const [playing, setPlaying] = useState<{ path: string; title: string; subtitle?: string; poster?: string; backdrop?: string } | null>(null);
+  const [detail, setDetail] = useState<DetailInput | null>(null);
+  const [batchDialog, setBatchDialog] = useState<Batch | null>(null);
+  const [resume, setResume] = useState<Watched[]>(() => continueWatching());
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const res = await apiFetch('/files');
-        const data = await res.json();
-        const lista: Descargado[] = [];
-        const anadir = (e: any, carpeta?: string) => {
-          if (!e?.name || !e?.path || e.is_dir) return;
-          lista.push({
-            nombre: e.clean_name || e.name,
-            ruta: e.path,
-            tamano: e.size || '',
-            serie: serieDe(e.name) || (carpeta ? cleanTitle(carpeta) : undefined),
-            clave: e.clean_name || cleanTitle(e.name),
-          });
-        };
-        for (const f of data.files || []) {
-          if (f.episodes?.length) {
-            for (const ep of f.episodes) anadir(ep, f.clean_name || f.name);
-          } else {
-            anadir(f);
-          }
-        }
-        setItems(lista);
-
-        // /api/files solo sabe de ficheros en disco, no de TMDB. Las caratulas
-        // se piden aparte con los titulos limpios; sin esto las tarjetas
-        // salian con el degradado de respaldo en vez de la portada.
-        // Se piden dos variantes por titulo: el nombre limpio completo y su
-        // prefijo de tres palabras. El completo suele arrastrar el titulo del
-        // episodio ("... Soul Mates") y TMDB no encuentra nada; el prefijo si.
-        const nombres = [...new Set(lista.flatMap(i => (
-          i.clave ? [i.clave, prefijo(i.clave)] : []
-        )).filter(Boolean))];
-        if (nombres.length) {
-          try {
-            const r = await apiFetch('/metadata/batch', {
-              method: 'POST', body: JSON.stringify({ names: nombres }),
-            });
-            const meta = (await r.json()).metadata || {};
-            setCaratulas(new Map(Object.entries(meta) as [string, TMDBMetadata][]));
-          } catch {}
-        }
-      } catch {} finally { setCargando(false); }
-    })();
+  const load = useCallback(async () => {
+    try {
+      const res = await apiFetch('/files');
+      const data = await res.json();
+      const items: FileItem[] = (data.files || []).filter((f: FileItem) => !f.is_dir || f.is_series);
+      setFiles(items);
+      const names = [...new Set(items.flatMap((f) => {
+        const parts = f.path.split('/');
+        const folder = parts[parts.length - 2] || '';
+        return [f.clean_name || cleanTitle(f.name), seriesName(f.name, folder)];
+      }).filter(Boolean))];
+      if (names.length) setMetas(await fetchMetadataBatch(names));
+    } catch {
+      toast('No se ha podido leer la biblioteca', 'error', 5000);
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
-  const caratulaDe = (it: Descargado): TMDBMetadata | undefined => {
-    if (!it.clave) return undefined;
-    const exacto = caratulas.get(it.clave);
-    if (exacto?.poster) return exacto;
-    return caratulas.get(prefijo(it.clave)) || exacto;
-  };
+  // `total` cambia cuando el indice de disco se recarga (descarga terminada o archivo borrado).
+  useEffect(() => { load(); loadStatus(); loadPaused(); }, [load, total]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Una fila por serie y una final con las peliculas sueltas. El titulo sale
-  // de TMDB cuando se conoce: el nombre del fichero incluye el titulo del
-  // episodio y quedaba un encabezado como "S07E22 - Sabrina... Soul Mates".
-  const filas = useMemo(() => {
-    const porSerie = new Map<string, Descargado[]>();
-    const sueltos: Descargado[] = [];
-    for (const it of items) {
-      const meta = it.clave
-        ? (caratulas.get(it.clave)?.poster ? caratulas.get(it.clave) : caratulas.get(prefijo(it.clave)))
-        : undefined;
-      const titulo = it.serie ? (meta?.title || prefijo(it.clave) || it.serie) : undefined;
-      if (titulo) {
-        if (!porSerie.has(titulo)) porSerie.set(titulo, []);
-        porSerie.get(titulo)!.push(it);
-      } else {
-        sueltos.push(it);
+  // Lo que esta bajando tambien esta ya en disco (a medias): se excluye de la
+  // biblioteca por el nombre de su carpeta. Y un episodio suelto en una
+  // carpeta de temporada se agrupa como serie, no como pelicula.
+  const activeFolders = useMemo(() => new Set(batches
+    .filter((b) => ['downloading', 'extracting', 'converting'].includes(b.status))
+    .map((b) => b.folder_name.toLowerCase())), [batches]);
+
+  const grouped = useMemo<FileItem[]>(() => {
+    const out: FileItem[] = [];
+    const byFolder = new Map<string, FileItem>();
+    for (const f of files) {
+      const parts = f.path.split('/');
+      const folder = f.is_series ? f.name : (parts[parts.length - 2] || '');
+      if (activeFolders.has(folder.toLowerCase())) continue;
+      if (f.is_series) { out.push(f); continue; }
+      const isEpisode = /(\d{1,2})x(\d{2,3})|[sS]\d{1,2}[eE]\d{1,3}/.test(f.name);
+      if (!isEpisode) { out.push(f); continue; }
+      const key = folder.toLowerCase().replace(/^s\d{1,2}\s*[-–]\s*|\s*s\d{1,2}$/g, '').trim();
+      let g = byFolder.get(key);
+      if (!g) {
+        g = { name: folder, is_dir: true, size: '', path: parts.slice(0, -1).join('/'), is_series: true,
+          clean_name: seriesName(f.name, folder), episodes: [] };
+        byFolder.set(key, g);
+        out.push(g);
       }
+      g.episodes!.push({ name: f.name, size: f.size, path: f.path });
     }
-    const out = [...porSerie.entries()].map(([titulo, eps]) => ({ titulo, items: eps }));
-    if (sueltos.length) out.push({ titulo: 'Peliculas', items: sueltos });
     return out;
-  }, [items, caratulas]);
+  }, [files, activeFolders]);
+
+  const locals = useMemo<Local[]>(() => grouped.map((file) => {
+    const key = file.clean_name || cleanTitle(file.name);
+    const meta = metas.get(key) || { title: key };
+    const isSeries = !!file.is_series;
+    return {
+      file, meta,
+      f: {
+        key: `lib-${file.path}`, kind: isSeries ? 'series' : 'movie',
+        title: meta.title || key, poster: meta.poster, backdrop: meta.backdrop, year: meta.year, rating: meta.rating,
+        overview: meta.overview, genres: meta.genres,
+        subtitle: isSeries ? `${file.episodes?.length || 0} ${(file.episodes?.length || 0) === 1 ? 'episodio' : 'episodios'} en disco` : file.size,
+      },
+    };
+  }), [grouped, metas]);
+
+  const seriesLocal = locals.filter((l) => l.file.is_series);
+  const moviesLocal = locals.filter((l) => !l.file.is_series);
+
+  const active = batches.filter((b) => ['downloading', 'extracting', 'converting'].includes(b.status));
+  const activeCards = active.map((b) => {
+    const name = seriesName(b.folder_name, b.folder_name);
+    const meta = metas.get(name);
+    const label = b.status === 'extracting' ? 'Extrayendo' : b.status === 'converting' ? 'Convirtiendo' : `${b.downloaded_parts}/${b.total_parts} partes`;
+    return { b, label, f: { key: `dl-${b.batch_id}`, kind: 'movie' as const, title: name, poster: meta?.poster, backdrop: meta?.backdrop, subtitle: `${b.progress} % · ${label}` } };
+  });
+
+  // Desde disco se abre la misma ficha que desde el catalogo: todos los
+  // episodios o versiones, con Reproducir en los que ya estan bajados y
+  // Borrar al lado. Si el titulo no esta en TMDB, solo lo que hay en disco.
+  const open = useCallback(async (l: Local) => {
+    const kind = l.file.is_series ? 'series' : 'movie';
+    const local = l.file.is_series
+      ? (l.file.episodes || []).map((e) => ({ name: e.name, path: e.path, size: e.size }))
+      : [{ name: l.file.name, path: l.file.path, size: l.file.size }];
+    let files: SearchResult[] = [];
+    if (l.meta.tmdb_id) {
+      try { files = (await fetchMediaFiles(l.meta.tmdb_id, kind)).results; } catch { /* solo disco */ }
+    }
+    setDetail({ kind, tmdbId: l.meta.tmdb_id, meta: l.f, files, local });
+  }, []);
+
+  const rowsOrder: string[] = [];
+  if (resume.length) rowsOrder.push('resume');
+  if (activeCards.length) rowsOrder.push('active');
+  if (pausedBatches.length) rowsOrder.push('paused');
+  if (seriesLocal.length) rowsOrder.push('series');
+  if (moviesLocal.length) rowsOrder.push('movies');
+  const idx = (k: string) => rowsOrder.indexOf(k);
+  const mounted = (k: string) => Math.abs(idx(k) - focusRow) <= 2;
+  const empty = !loading && rowsOrder.length === 0;
+  const fallback = locals[0]?.f || activeCards[0]?.f || null;
 
   return (
-    <Layout>
-      <div className="pt-20 pb-4 px-6 md:px-14">
-        <h1 className="text-white text-4xl md:text-5xl font-bold mb-2 tracking-tight">Descargas</h1>
-        <p className="text-gray-400 text-base md:text-lg">
-          {cargando ? 'Cargando...' : `${items.length} ${items.length === 1 ? 'archivo' : 'archivos'} en disco`}
-        </p>
-      </div>
+    <Screen hero heading="Descargas" heroFallback={fallback} ready={!loading && rowsOrder.length > 0} onRowFocus={setFocusRow}>
+      {resume.length > 0 && (
+        <Row index={idx('resume')} title="Continuar viendo">
+          {resume.map((w, i) => (
+            <PosterCard key={w.path} index={i} autoFocus={i === 0}
+              item={{ key: `cw-${w.path}`, kind: 'file', title: w.title, poster: w.poster, backdrop: w.backdrop, subtitle: w.subtitle, progress: w.position / w.duration }}
+              onSelect={() => setPlaying({ path: w.path, title: w.title, subtitle: w.subtitle, poster: w.poster, backdrop: w.backdrop })} />
+          ))}
+        </Row>
+      )}
+      {activeCards.length > 0 && (
+        <Row index={idx('active')} title="Descargando">
+          {activeCards.map(({ b, f, label }, i) => (
+            <PosterCard key={f.key} index={i} item={f} downloading={b.progress} busyLabel={label} onSelect={() => setBatchDialog(b)} />
+          ))}
+        </Row>
+      )}
+      {pausedBatches.length > 0 && (
+        <Row index={idx('paused')} title="Pausadas">
+          {pausedBatches.map((b: any, i: number) => (
+            <PosterCard key={b.batch_id} index={i}
+              item={{ key: `paused-${b.batch_id}`, kind: 'movie', title: cleanTitle(b.folder_name), poster: metas.get(cleanTitle(b.folder_name))?.poster, subtitle: `Pausada · ${b.total_parts} partes · ${b.total_size_str}` }}
+              onSelect={() => { resumeBatch(b.batch_id); toast('Reanudando descarga'); }} />
+          ))}
+        </Row>
+      )}
+      {seriesLocal.length > 0 && (
+        <Row index={idx('series')} title="Series">
+          {mounted('series') ? seriesLocal.map((l, i) => (
+            <PosterCard key={l.f.key} index={i} item={l.f} downloaded autoFocus={rowsOrder[0] === 'series' && i === 0} onSelect={() => open(l)} />
+          )) : null}
+        </Row>
+      )}
+      {moviesLocal.length > 0 && (
+        <Row index={idx('movies')} title="Películas">
+          {mounted('movies') ? moviesLocal.map((l, i) => (
+            <PosterCard key={l.f.key} index={i} item={l.f} downloaded autoFocus={rowsOrder[0] === 'movies' && i === 0} onSelect={() => open(l)} />
+          )) : null}
+        </Row>
+      )}
 
-      {!cargando && items.length === 0 && (
-        <div className="px-6 md:px-14 py-16 text-center">
-          <p className="text-gray-500 text-lg mb-2">Todavia no has descargado nada</p>
-          <p className="text-gray-600 text-sm">Busca una pelicula o serie y pulsa Descargar</p>
+      {empty && (
+        <div style={{ paddingLeft: 'var(--content-x)' }}>
+          <p className="text-lead text-tv-text2">Todavía no has descargado nada.</p>
+          <p className="text-body text-tv-text3 mt-2">Entra en una película o serie y pulsa OK sobre un episodio para bajarlo.</p>
         </div>
       )}
 
-      <FocusScope orientation="vertical" index={1} as="none">
-        {filas.map((fila, filaIdx) => (
-          <MovieRow key={fila.titulo} index={filaIdx} title={fila.titulo}>
-            {fila.items.map((it, i) => (
-              <MovieCard
-                key={it.ruta}
-                index={i}
-                forceFocus={filaIdx === 0 && i === 0}
-                name={it.nombre}
-                size={it.tamano}
-                posterUrl={caratulaDe(it)?.poster}
-                year={caratulaDe(it)?.year}
-                rating={caratulaDe(it)?.rating}
-                downloaded
-                hoverLabel="Reproducir"
-                actions="click"
-                onClick={() => setReproduciendo(it)}
-              />
-            ))}
-          </MovieRow>
-        ))}
-      </FocusScope>
-
-      {reproduciendo && (
-        <PlayDetail
-          name={reproduciendo.nombre}
-          size={reproduciendo.tamano}
-          path={reproduciendo.ruta}
-          metadata={caratulaDe(reproduciendo) || { title: cleanTitle(reproduciendo.nombre) }}
-          streamUrl={streamUrl}
-          onClose={() => setReproduciendo(null)}
-        />
+      {batchDialog && (
+        <Dialog title={cleanTitle(batchDialog.folder_name)}
+          text={`${batchDialog.progress} % · ${batchDialog.downloaded_parts}/${batchDialog.total_parts} partes · ${batchDialog.total_size_str}`}
+          onClose={() => setBatchDialog(null)}
+          actions={[
+            { label: 'Seguir', onSelect: () => setBatchDialog(null), primary: true },
+            { label: 'Pausar', onSelect: () => { pauseBatch(batchDialog.batch_id); setBatchDialog(null); } },
+            { label: 'Cancelar descarga', onSelect: () => { cancelBatch(batchDialog.batch_id); setBatchDialog(null); } },
+          ]} />
       )}
-    </Layout>
+      {detail && <TitleDetail input={detail} onClose={() => setDetail(null)} />}
+      {playing && (
+        <Player src={streamUrl(playing.path)} path={playing.path} title={playing.title} subtitle={playing.subtitle}
+          poster={playing.poster} backdrop={playing.backdrop}
+          onClose={() => { setPlaying(null); setResume(continueWatching()); }} />
+      )}
+    </Screen>
   );
 }
