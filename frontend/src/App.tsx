@@ -5,6 +5,7 @@ import Home from './pages/Home';
 import Movies from './pages/Movies';
 import Series from './pages/Series';
 import Onboarding from './pages/Onboarding';
+import Downloads from './pages/Downloads';
 import Admin from './pages/Admin';
 import Account from './pages/Account';
 
@@ -43,6 +44,7 @@ export default function App() {
       </ProtectedRoute>} />
       <Route path="/movies" element={<ProtectedRoute><Movies /></ProtectedRoute>} />
       <Route path="/series" element={<ProtectedRoute><Series /></ProtectedRoute>} />
+      <Route path="/descargas" element={<ProtectedRoute><Downloads /></ProtectedRoute>} />
       <Route path="/admin" element={<ProtectedRoute><Admin /></ProtectedRoute>} />
       <Route path="/admin/:tab" element={<ProtectedRoute><Admin /></ProtectedRoute>} />
       <Route path="/cuenta" element={<ProtectedRoute><Account /></ProtectedRoute>} />

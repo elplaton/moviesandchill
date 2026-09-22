@@ -34,6 +34,9 @@ export default function NavBar() {
         <Link to="/series" className={`px-3 py-1 text-sm rounded-lg transition-all duration-200 ${
           location.pathname === '/series' ? 'text-white font-medium' : 'text-gray-400 hover:text-gray-200'
         }`}>Series</Link>
+        <Link to="/descargas" className={`px-3 py-1 text-sm rounded-lg transition-all duration-200 ${
+          location.pathname === '/descargas' ? 'text-white font-medium' : 'text-gray-400 hover:text-gray-200'
+        }`}>Descargas</Link>
         {isAdmin && (
           <Link to="/admin" className={`px-3 py-1 text-sm rounded-lg transition-all duration-200 ${
             location.pathname.startsWith('/admin') ? 'text-white font-medium' : 'text-gray-400 hover:text-gray-200'
