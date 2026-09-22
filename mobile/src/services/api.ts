@@ -63,9 +63,9 @@ export async function apiFetch(
   }
 
   if (res.status === 401) {
+    const hadToken = !!accessToken;
     clearTokens();
-    window.location.hash = '';
-    window.location.replace('/m/login');
+    if (hadToken && !window.location.pathname.endsWith('/login')) window.location.replace('/m/login');
   }
 
   return res;

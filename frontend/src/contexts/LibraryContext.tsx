@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
 import { apiFetch } from '../services/api';
 import { onProgress } from '../services/ws';
+import { useAuth } from './AuthContext';
 
 /**
  * Indice de lo que hay en disco, con su dueño.
@@ -45,6 +46,7 @@ function episodeOf(n: string): string | null {
 }
 
 export function LibraryProvider({ children }: { children: ReactNode }) {
+  const { isAuthenticated } = useAuth();
   const [byName, setByName] = useState<Map<string, LocalFile>>(new Map());
   const [byFolder, setByFolder] = useState<Map<string, LocalFile[]>>(new Map());
 
@@ -71,9 +73,11 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
+    // Sin sesion no se pide nada: el 401 tiraba el token y recargaba en bucle.
+    if (!isAuthenticated) return;
     reload();
     return onProgress((d: any) => { if (d?.type === 'batch_status' && d.status === 'done') reload(); });
-  }, [reload]);
+  }, [reload, isAuthenticated]);
 
   const localFor = useCallback((fileName: string, season?: number | null, episode?: number | null) => {
     const exact = byName.get(normalizeName(fileName));

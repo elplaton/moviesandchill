@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
 import { apiFetch } from '../services/api';
 import { onProgress } from '../services/ws';
+import { useAuth } from './AuthContext';
 import type { Batch, DownloadState } from '../types';
 
 /**
@@ -36,6 +37,7 @@ const folderOf = (n: string) => {
 const epOf = (n: string) => { const m = n.match(/(\d{1,2})x(\d{2,3})|[sS](\d{1,2})[eE](\d{1,3})/); return m ? `${parseInt(m[1] || m[3])}:${parseInt(m[2] || m[4])}` : null; };
 
 export function LibraryProvider({ children }: { children: ReactNode }) {
+  const { me } = useAuth();
   const [files, setFiles] = useState<LocalFile[]>([]);
   const [byName, setByName] = useState<Map<string, LocalFile>>(new Map());
   const [byFolder, setByFolder] = useState<Map<string, LocalFile[]>>(new Map());
@@ -85,6 +87,7 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
   }, [loadStatus]);
 
   useEffect(() => {
+    if (!me) return; // sin sesion no se pide nada
     reload();
     return onProgress((d: any) => {
       if (d?.type === 'batch_progress' && d.part_message_id) {
@@ -95,7 +98,7 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
         if (d.status === 'done') reload(); else loadStatus();
       }
     });
-  }, [reload, loadStatus]);
+  }, [reload, loadStatus, me]);
 
   const hayActivas = batches.some(b => ['downloading', 'extracting', 'converting'].includes(b.status));
   useEffect(() => { if (!hayActivas) return; const t = setInterval(loadStatus, 4000); return () => clearInterval(t); }, [hayActivas, loadStatus]);
