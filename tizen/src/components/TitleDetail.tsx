@@ -97,7 +97,11 @@ export default function TitleDetail({ input, onClose }: Props) {
   const { meta, kind } = input;
   const { downloadStates, download, cancelBatch, pauseBatch, rutaDe, rutaEpisodio } = useDownloadsCtx();
   const [playing, setPlaying] = useState<{ path: string; title: string; subtitle?: string } | null>(null);
-  const [dialog, setDialog] = useState<{ title: string; text?: string; actions: { label: string; onSelect: () => void; primary?: boolean }[] } | null>(null);
+  const [dialog, setDialog] = useState<{
+    title: string; text?: string; actions: { label: string; onSelect: () => void; primary?: boolean }[];
+    /** Version cuyo progreso se enseña en vivo; si deja de estar en curso, el cuadro se cierra. */
+    live?: Version;
+  } | null>(null);
   const [episodeNames, setEpisodeNames] = useState<Map<string, string>>(new Map());
   const [season, setSeason] = useState<number | null | undefined>(undefined);
   const listRef = useRef<HTMLDivElement>(null);
@@ -156,7 +160,7 @@ export default function TitleDetail({ input, onClose }: Props) {
     const p = pathOf(v);
     if (p) return { status: 'ready', path: p };
     const ds = downloadStates.get(v.messageId);
-    if (ds && ds.status !== 'done') return { status: 'busy', ds };
+    if (ds && (ds.status === 'downloading' || ds.status === 'extracting' || ds.status === 'converting')) return { status: 'busy', ds };
     return { status: 'idle' };
   }, [pathOf, downloadStates]);
 
@@ -171,7 +175,7 @@ export default function TitleDetail({ input, onClose }: Props) {
       const ds = st.ds;
       setDialog({
         title: 'Descarga en curso',
-        text: `${v.baseName} · ${stateLabel(ds)}`,
+        live: v,
         actions: [
           { label: 'Seguir descargando', onSelect: () => setDialog(null), primary: true },
           { label: 'Pausar', onSelect: () => { pauseBatch(ds.batchId); setDialog(null); toast('Descarga pausada'); } },
@@ -338,7 +342,16 @@ export default function TitleDetail({ input, onClose }: Props) {
         </FocusScope>
       </FocusScope>
 
-      {dialog && <Dialog title={dialog.title} text={dialog.text} actions={dialog.actions} onClose={() => setDialog(null)} />}
+      {dialog && (() => {
+        // El porcentaje del cuadro se lee en cada render, no al abrirlo.
+        let text = dialog.text;
+        if (dialog.live) {
+          const st = stateOf(dialog.live);
+          if (st.status !== 'busy') { setTimeout(() => setDialog(null), 0); return null; }
+          text = `${dialog.live.baseName} · ${stateLabel(st.ds)}${st.ds.downloadedStr && st.ds.totalStr ? ` · ${st.ds.downloadedStr} / ${st.ds.totalStr}` : ''}${st.ds.speed ? ` · ${st.ds.speed}` : ''}`;
+        }
+        return <Dialog title={dialog.title} text={text} actions={dialog.actions} onClose={() => setDialog(null)} />;
+      })()}
 
       {playing && (
         <Player src={streamUrl(playing.path)} path={playing.path} title={playing.title} subtitle={playing.subtitle}

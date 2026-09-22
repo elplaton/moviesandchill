@@ -19,9 +19,18 @@ export function useDownloads() {
       // mensajes de progreso del WebSocket solo actualizan entradas que ya
       // existen, asi que sin esto una descarga arrancada antes de recargar la
       // app no mostraba su anillo en ninguna parte.
+      const enCurso = new Set(['downloading', 'extracting', 'converting']);
       setDownloadStates(prev => {
         const next = new Map(prev);
+        const vivos = new Set(activos.filter(b => enCurso.has(b.status)).map(b => b.batch_id));
+        // Un lote cancelado o fallido ya no esta "en curso": se limpia su
+        // estado para que la fila vuelva a ofrecer Descargar. Antes el lote
+        // cancelado seguia 10 s en /status y se resembraba como "22%".
+        for (const [key, ds] of next) {
+          if (ds.status !== 'done' && !vivos.has(ds.batchId)) next.delete(key);
+        }
         for (const b of activos) {
+          if (!enCurso.has(b.status)) continue;
           for (const p of b.parts || []) {
             const actual = next.get(p.message_id);
             if (actual && actual.status === 'done') continue;
@@ -30,7 +39,7 @@ export function useDownloads() {
               messageId: p.message_id,
               batchId: b.batch_id,
               progress: p.progress ?? b.progress ?? 0,
-              status: (b.status === 'downloading' ? 'downloading' : b.status) as DownloadState['status'],
+              status: b.status as DownloadState['status'],
             });
           }
         }
