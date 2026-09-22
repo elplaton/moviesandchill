@@ -8,15 +8,32 @@ import type { Batch, DownloadState } from '../types';
  * Estado compartido: lo que hay en disco (con dueño), lo que se esta bajando
  * y el progreso por archivo que llega por WebSocket.
  */
-export interface LocalFile { name: string; path: string; size?: string; owner: string; canDelete: boolean }
+export interface LocalFile {
+  name: string; path: string; size?: string; owner: string; canDelete: boolean;
+  /** Si es un episodio: a que serie, temporada y numero pertenece. */
+  series?: string; season?: number | null; episode?: number | null;
+}
+
+/** Un titulo tal y como lo devuelve el servidor: pelicula suelta o serie con episodios. */
+export interface LocalTitle {
+  name: string; path: string; size?: string; cleanName: string;
+  isSeries: boolean; owner: string; canDelete: boolean;
+  episodes: LocalFile[];
+  /** Solo peliculas: el archivo. */
+  file?: LocalFile;
+}
 
 interface Ctx {
   files: LocalFile[];
+  /** Lo mismo pero con la estructura del servidor (series con sus episodios). */
+  titles: LocalTitle[];
+  /** Sube en cada recarga: quien dependa del disco lo pone en sus dependencias. */
+  version: number;
   batches: Batch[];
   paused: any[];
   states: Map<number, DownloadState>;
   reload: () => Promise<void>;
-  localFor: (fileName: string, season?: number | null, episode?: number | null) => LocalFile | undefined;
+  localFor: (fileName: string, season?: number | null, episode?: number | null, series?: string) => LocalFile | undefined;
   download: (msgId: number, channelId?: number) => Promise<string | null>;
   cancel: (batchId: string) => Promise<void>;
   pause: (batchId: string) => Promise<void>;
@@ -39,8 +56,11 @@ const epOf = (n: string) => { const m = n.match(/(\d{1,2})x(\d{2,3})|[sS](\d{1,2
 export function LibraryProvider({ children }: { children: ReactNode }) {
   const { me } = useAuth();
   const [files, setFiles] = useState<LocalFile[]>([]);
+  const [titles, setTitles] = useState<LocalTitle[]>([]);
+  const [version, setVersion] = useState(0);
   const [byName, setByName] = useState<Map<string, LocalFile>>(new Map());
   const [byFolder, setByFolder] = useState<Map<string, LocalFile[]>>(new Map());
+  const [byEpisode, setByEpisode] = useState<Map<string, LocalFile>>(new Map());
   const [batches, setBatches] = useState<Batch[]>([]);
   const [paused, setPaused] = useState<any[]>([]);
   const [states, setStates] = useState<Map<number, DownloadState>>(new Map());
@@ -72,16 +92,39 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
   const reload = useCallback(async () => {
     try {
       const d = await (await apiFetch('/files')).json();
-      const list: LocalFile[] = []; const names = new Map<string, LocalFile>(); const folders = new Map<string, LocalFile[]>();
-      const add = (e: any, owner: string, can: boolean) => {
-        if (!e?.name || !e?.path || e.is_dir) return;
-        const f: LocalFile = { name: e.name, path: e.path, size: e.size, owner, canDelete: can };
+      const list: LocalFile[] = []; const names = new Map<string, LocalFile>();
+      const folders = new Map<string, LocalFile[]>(); const eps = new Map<string, LocalFile>();
+      const titleList: LocalTitle[] = [];
+
+      const add = (e: any, owner: string, can: boolean, series?: string): LocalFile | undefined => {
+        if (!e?.name || !e?.path || e.is_dir) return undefined;
+        const f: LocalFile = {
+          name: e.name, path: e.path, size: e.size, owner, canDelete: can,
+          series, season: e.season ?? null, episode: e.episode ?? null,
+        };
         list.push(f); names.set(norm(e.name), f);
         const parts = String(e.path).split('/'); const folder = (parts[parts.length - 2] || '').toLowerCase();
         if (!folders.has(folder)) folders.set(folder, []); folders.get(folder)!.push(f);
+        // Indice por serie+episodio: el archivo en disco se llama "1x01.mp4",
+        // que no se parece al nombre del mensaje de Telegram, asi que buscarlo
+        // por nombre no vale. Por serie y numero si.
+        if (series && e.episode != null) eps.set(`${norm(series)}|${e.season ?? ''}:${e.episode}`, f);
+        return f;
       };
-      for (const it of d.files || []) { add(it, it.owner || 'admin', !!it.can_delete); for (const ep of it.episodes || []) add(ep, it.owner || 'admin', !!it.can_delete); }
-      setFiles(list); setByName(names); setByFolder(folders);
+
+      for (const it of d.files || []) {
+        const owner = it.owner || 'admin'; const can = !!it.can_delete;
+        const clean = it.clean_name || it.name;
+        if (it.is_series) {
+          const list2 = (it.episodes || []).map((ep: any) => add(ep, ep.owner || owner, ep.can_delete ?? can, clean)).filter(Boolean) as LocalFile[];
+          titleList.push({ name: it.name, path: it.path, size: it.size, cleanName: clean, isSeries: true, owner, canDelete: can, episodes: list2 });
+        } else {
+          const f = add(it, owner, can);
+          if (f) titleList.push({ name: it.name, path: it.path, size: it.size, cleanName: clean, isSeries: false, owner, canDelete: can, episodes: [], file: f });
+        }
+      }
+      setFiles(list); setTitles(titleList); setByName(names); setByFolder(folders); setByEpisode(eps);
+      setVersion(v => v + 1);
     } catch {}
     await loadStatus();
   }, [loadStatus]);
@@ -103,13 +146,21 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
   const hayActivas = batches.some(b => ['downloading', 'extracting', 'converting'].includes(b.status));
   useEffect(() => { if (!hayActivas) return; const t = setInterval(loadStatus, 4000); return () => clearInterval(t); }, [hayActivas, loadStatus]);
 
-  const localFor = useCallback((fileName: string, season?: number | null, episode?: number | null) => {
+  const localFor = useCallback((fileName: string, season?: number | null, episode?: number | null, series?: string) => {
+    // 1) Por serie y numero de episodio (lo que de verdad identifica un capitulo).
+    if (series && episode != null) {
+      const hit = byEpisode.get(`${norm(series)}|${season ?? ''}:${episode}`)
+        || (season == null ? [...byEpisode.entries()].find(([k]) => k.startsWith(`${norm(series)}|`) && k.endsWith(`:${episode}`))?.[1] : undefined);
+      if (hit) return hit;
+    }
+    // 2) Por nombre exacto del archivo (estructura antigua y peliculas sin convertir).
     const exact = byName.get(norm(fileName)); if (exact) return exact;
+    // 3) Por la carpeta que le tocaria.
     const folder = byFolder.get(folderOf(fileName)); if (!folder) return undefined;
     if (episode != null) { const key = `${season ?? ''}:${episode}`; return folder.find(f => epOf(f.name) === key || (season == null && epOf(f.name)?.endsWith(`:${episode}`))); }
     if (folder.length === 1 && !epOf(folder[0].name) && !epOf(fileName)) return folder[0];
     return undefined;
-  }, [byName, byFolder]);
+  }, [byName, byFolder, byEpisode]);
 
   const download = useCallback(async (msgId: number, channelId?: number) => {
     try {
@@ -129,7 +180,7 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
     catch { return 'No se ha podido borrar'; }
   }, [reload]);
 
-  return <LibCtx.Provider value={{ files, batches, paused, states, reload, localFor, download, cancel, pause, resume, remove }}>{children}</LibCtx.Provider>;
+  return <LibCtx.Provider value={{ files, titles, version, batches, paused, states, reload, localFor, download, cancel, pause, resume, remove }}>{children}</LibCtx.Provider>;
 }
 
 export function useLibrary(): Ctx { const v = useContext(LibCtx); if (!v) throw new Error('LibraryProvider ausente'); return v; }

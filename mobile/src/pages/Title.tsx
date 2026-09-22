@@ -42,7 +42,7 @@ export default function Title() {
   const { kind = 'movie', id = '0' } = useParams();
   const [params] = useSearchParams();
   const navigate = useNavigate();
-  const { localFor, states, download, cancel, pause, remove } = useLibrary();
+  const { localFor, states, version, download, cancel, pause, remove } = useLibrary();
   const { refresh } = useAuth();
   const tmdbId = parseInt(id) || 0;
   const isSeries = kind === 'series';
@@ -73,7 +73,9 @@ export default function Title() {
       } catch { toast('No se ha podido cargar la ficha', 'error'); }
       finally { setLoading(false); }
     })();
-  }, [tmdbId, isSeries]); // eslint-disable-line react-hooks/exhaustive-deps
+    // `version` sube cuando termina una descarga o se borra algo: asi la ficha
+    // abierta pasa sola de "Descargar" a "Ver" sin recargar la app.
+  }, [tmdbId, isSeries, version]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const versions = useMemo(() => groupVersions(files), [files]);
   const episodes = useMemo(() => (isSeries ? groupEpisodes(versions) : []), [versions, isSeries]);
@@ -91,11 +93,11 @@ export default function Title() {
   const stateOf = useCallback((v: Version): RowState => {
     // Primero lo que dice el servidor (ruta y dueño en la tabla de descargas); si no, el indice local.
     if (v.localPath) return { s: 'ready', f: { name: v.localPath.split('/').pop() || v.fileName, path: v.localPath, owner: v.owner || 'admin', canDelete: !!v.canDelete } };
-    const f = localFor(v.fileName, v.season, v.episode); if (f) return { s: 'ready', f };
+    const f = localFor(v.fileName, v.season, v.episode, meta?.title); if (f) return { s: 'ready', f };
     const ds = states.get(v.messageId);
     if (ds && ['downloading', 'extracting', 'converting'].includes(ds.status)) return { s: 'busy', ds };
     return { s: 'idle' };
-  }, [localFor, states]);
+  }, [localFor, states, meta]);
 
   const act = useCallback(async (v: Version, subtitle?: string) => {
     const st = stateOf(v);
@@ -112,11 +114,11 @@ export default function Title() {
   }, [remove, refresh]);
 
   const playable = useMemo(() => {
-    const ready = versions.map(v => ({ v, f: v.localPath ? { name: v.fileName, path: v.localPath, owner: v.owner || 'admin', canDelete: !!v.canDelete } : localFor(v.fileName, v.season, v.episode) })).filter(x => x.f) as { v: Version; f: LocalFile }[];
+    const ready = versions.map(v => ({ v, f: v.localPath ? { name: v.fileName, path: v.localPath, owner: v.owner || 'admin', canDelete: !!v.canDelete } : localFor(v.fileName, v.season, v.episode, meta?.title) })).filter(x => x.f) as { v: Version; f: LocalFile }[];
     if (!ready.length) return null;
     const r = ready.find(x => resumePoint(x.f.path) > 0) || ready[0];
     return { path: r.f.path, resume: !!ready.find(x => resumePoint(x.f.path) > 0), subtitle: r.v.episode !== undefined ? `${r.v.season ?? ''}x${String(r.v.episode).padStart(2, '0')}` : undefined };
-  }, [versions, localFor]);
+  }, [versions, localFor, meta]);
 
   const bg = meta?.backdrop || meta?.poster;
   const info = [meta?.year, meta?.genres?.slice(0, 2).join(', '), isSeries ? `${episodes.length} episodios` : `${versions.length} ${versions.length === 1 ? 'versión' : 'versiones'}`].filter(Boolean).join(' · ');

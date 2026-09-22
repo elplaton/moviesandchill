@@ -38,7 +38,7 @@ export default function DownloadOrPlay({ localPath, owner, canDelete, fileName, 
   const [busy, setBusy] = useState(false);
   const local = localPath
     ? { name: localPath.split('/').pop() || fileName, path: localPath, size: undefined as string | undefined, owner: owner || 'admin', canDelete: !!canDelete }
-    : localFor(fileName, season, episode);
+    : localFor(fileName, season, episode, title);
   const ds = downloadStates?.get(messageId);
   const pad = small ? 'px-2.5 py-1 text-xs' : 'px-3 py-1.5 text-xs';
 

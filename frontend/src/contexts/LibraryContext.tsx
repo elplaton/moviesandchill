@@ -10,13 +10,16 @@ import { useAuth } from './AuthContext';
  * y nadie puede volver a bajarla. Las fichas consultan aqui si un archivo ya
  * esta en el servidor para ofrecer Ver / Borrar en vez de Descargar.
  */
-export interface LocalFile { name: string; path: string; size?: string; owner: string; canDelete: boolean }
+export interface LocalFile {
+  name: string; path: string; size?: string; owner: string; canDelete: boolean;
+  series?: string; season?: number | null; episode?: number | null;
+}
 
 interface Ctx {
   byName: Map<string, LocalFile>;
   byFolder: Map<string, LocalFile[]>;
   reload: () => Promise<void>;
-  localFor: (fileName: string, season?: number | null, episode?: number | null) => LocalFile | undefined;
+  localFor: (fileName: string, season?: number | null, episode?: number | null, series?: string) => LocalFile | undefined;
   remove: (path: string) => Promise<string | null>;
 }
 
@@ -49,26 +52,33 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
   const { isAuthenticated } = useAuth();
   const [byName, setByName] = useState<Map<string, LocalFile>>(new Map());
   const [byFolder, setByFolder] = useState<Map<string, LocalFile[]>>(new Map());
+  const [byEpisode, setByEpisode] = useState<Map<string, LocalFile>>(new Map());
 
   const reload = useCallback(async () => {
     try {
       const data = await (await apiFetch('/files')).json();
       const names = new Map<string, LocalFile>();
       const folders = new Map<string, LocalFile[]>();
-      const add = (e: any, owner: string, canDelete: boolean) => {
+      const eps = new Map<string, LocalFile>();
+      const add = (e: any, owner: string, canDelete: boolean, series?: string) => {
         if (!e?.name || !e?.path || e.is_dir) return;
-        const f: LocalFile = { name: e.name, path: e.path, size: e.size, owner, canDelete };
+        const f: LocalFile = { name: e.name, path: e.path, size: e.size, owner, canDelete, series, season: e.season ?? null, episode: e.episode ?? null };
         names.set(normalizeName(e.name), f);
         const parts = String(e.path).split('/');
         const folder = (parts[parts.length - 2] || '').toLowerCase();
         if (!folders.has(folder)) folders.set(folder, []);
         folders.get(folder)!.push(f);
+        // El archivo en disco se llama "1x01.mp4" y el del mensaje
+        // "1x01 - The Office (US).mkv": por nombre no coinciden, por serie y
+        // numero de episodio si.
+        if (series && e.episode != null) eps.set(`${normalizeName(series)}|${e.season ?? ''}:${e.episode}`, f);
       };
       for (const it of data.files || []) {
-        add(it, it.owner || 'admin', !!it.can_delete);
-        for (const ep of it.episodes || []) add(ep, it.owner || 'admin', !!it.can_delete);
+        const owner = it.owner || 'admin'; const can = !!it.can_delete;
+        add(it, owner, can);
+        for (const ep of it.episodes || []) add(ep, ep.owner || owner, ep.can_delete ?? can, it.clean_name || it.name);
       }
-      setByName(names); setByFolder(folders);
+      setByName(names); setByFolder(folders); setByEpisode(eps);
     } catch {}
   }, []);
 
@@ -79,7 +89,12 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
     return onProgress((d: any) => { if (d?.type === 'batch_status' && d.status === 'done') reload(); });
   }, [reload, isAuthenticated]);
 
-  const localFor = useCallback((fileName: string, season?: number | null, episode?: number | null) => {
+  const localFor = useCallback((fileName: string, season?: number | null, episode?: number | null, series?: string) => {
+    if (series && episode != null) {
+      const hit = byEpisode.get(`${normalizeName(series)}|${season ?? ''}:${episode}`)
+        || (season == null ? [...byEpisode.entries()].find(([k]) => k.startsWith(`${normalizeName(series)}|`) && k.endsWith(`:${episode}`))?.[1] : undefined);
+      if (hit) return hit;
+    }
     const exact = byName.get(normalizeName(fileName));
     if (exact) return exact;
     const folder = byFolder.get(suggestedFolder(fileName));
@@ -90,7 +105,7 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
     }
     if (folder.length === 1 && !episodeOf(folder[0].name) && !episodeOf(fileName)) return folder[0];
     return undefined;
-  }, [byName, byFolder]);
+  }, [byName, byFolder, byEpisode]);
 
   const remove = useCallback(async (path: string) => {
     try {

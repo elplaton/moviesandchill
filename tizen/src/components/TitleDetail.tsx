@@ -140,7 +140,7 @@ export default function TitleDetail({ input, onClose }: Props) {
   // Versiones de los archivos indexados + los que ya estan en disco (biblioteca).
   const versions = useMemo(() => {
     const vs = groupVersions(input.files);
-    const resolved = new Set(vs.map((v) => rutaEpisodio(v.fileName, v.season, v.episode) || rutaDe(v.fileName)).filter(Boolean));
+    const resolved = new Set(vs.map((v) => rutaEpisodio(v.fileName, v.season, v.episode, meta.title) || rutaDe(v.fileName)).filter(Boolean));
     for (const l of input.local || []) {
       // Ya representado por su version del catalogo (mismo nombre o misma ruta en disco).
       if (vs.some((v) => v.fileName === l.name) || resolved.has(l.path)) continue;
@@ -152,7 +152,7 @@ export default function TitleDetail({ input, onClose }: Props) {
       });
     }
     return vs;
-  }, [input.files, input.local, rutaDe, rutaEpisodio]);
+  }, [input.files, input.local, rutaDe, rutaEpisodio, meta.title]);
 
   const episodes = useMemo(() => (kind === 'series' ? groupEpisodes(versions) : []), [versions, kind]);
   const seasons = useMemo(() => {
@@ -184,8 +184,8 @@ export default function TitleDetail({ input, onClose }: Props) {
   const pathOf = useCallback((v: Version): string | undefined => {
     if (v.path) return v.path;
     if (v.localPath) return v.localPath;
-    return rutaEpisodio(v.fileName, v.season, v.episode) || rutaDe(v.fileName);
-  }, [rutaDe, rutaEpisodio]);
+    return rutaEpisodio(v.fileName, v.season, v.episode, meta.title) || rutaDe(v.fileName);
+  }, [rutaDe, rutaEpisodio, meta.title]);
 
   const stateOf = useCallback((v: Version): RowState => {
     const p = pathOf(v);

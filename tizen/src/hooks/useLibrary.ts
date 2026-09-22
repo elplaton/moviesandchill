@@ -56,6 +56,7 @@ function episodioDe(nombre: string): string | null {
 export function useLibrary() {
   const [porNombre, setPorNombre] = useState<Map<string, EntradaBiblioteca>>(new Map());
   const [porCarpeta, setPorCarpeta] = useState<Map<string, EntradaBiblioteca[]>>(new Map());
+  const [porEpisodio, setPorEpisodio] = useState<Map<string, EntradaBiblioteca>>(new Map());
 
   const recargar = useCallback(async () => {
     try {
@@ -63,7 +64,8 @@ export function useLibrary() {
       const data = await res.json();
       const nombres = new Map<string, EntradaBiblioteca>();
       const carpetas = new Map<string, EntradaBiblioteca[]>();
-      const anadir = (e: any) => {
+      const episodios = new Map<string, EntradaBiblioteca>();
+      const anadir = (e: any, serie?: string) => {
         if (!e?.name || !e?.path || e.is_dir) return;
         const entrada = { name: e.name, path: e.path, size: e.size };
         nombres.set(normalizarNombre(e.name), entrada);
@@ -73,13 +75,17 @@ export function useLibrary() {
           if (!carpetas.has(carpeta)) carpetas.set(carpeta, []);
           carpetas.get(carpeta)!.push(entrada);
         }
+        // El archivo en disco es "1x01.mp4" y el del mensaje trae el titulo
+        // del episodio: por nombre no casan, por serie y numero si.
+        if (serie && e.episode != null) episodios.set(`${normalizarNombre(serie)}|${e.season ?? ''}:${e.episode}`, entrada);
       };
       for (const f of data.files || []) {
         anadir(f);
-        for (const ep of f.episodes || []) anadir(ep);
+        for (const ep of f.episodes || []) anadir(ep, f.clean_name || f.name);
       }
       setPorNombre(nombres);
       setPorCarpeta(carpetas);
+      setPorEpisodio(episodios);
     } catch { /* sin conexion: se mantiene lo anterior */ }
   }, []);
 
@@ -99,8 +105,13 @@ export function useLibrary() {
   }, [porNombre, porCarpeta]);
 
   /** Ruta de un episodio concreto dentro de la carpeta de su temporada. */
-  const rutaEpisodio = useCallback((nombre: string, season?: number, episode?: number) => {
+  const rutaEpisodio = useCallback((nombre: string, season?: number, episode?: number, serie?: string) => {
     if (episode === undefined) return undefined;
+    if (serie) {
+      const hit = porEpisodio.get(`${normalizarNombre(serie)}|${season ?? ''}:${episode}`)
+        || (season === undefined ? [...porEpisodio.entries()].find(([k]) => k.startsWith(`${normalizarNombre(serie)}|`) && k.endsWith(`:${episode}`))?.[1] : undefined);
+      if (hit) return hit.path;
+    }
     const exacto = porNombre.get(normalizarNombre(nombre))?.path;
     if (exacto) return exacto;
     const carpeta = porCarpeta.get(carpetaSugerida(nombre));
@@ -111,7 +122,7 @@ export function useLibrary() {
     // la temporada salia como descargada apuntando al mismo archivo.
     const hit = carpeta.find((e) => episodioDe(e.name) === clave || (season === undefined && episodioDe(e.name)?.endsWith(`:${episode}`)));
     return hit?.path;
-  }, [porNombre, porCarpeta]);
+  }, [porNombre, porCarpeta, porEpisodio]);
 
   return { rutaDe, rutaEpisodio, recargar, total: porNombre.size };
 }
