@@ -10,7 +10,7 @@ import Dialog from './Dialog';
 import Overlay from './Overlay';
 import Player from './Player';
 import TvButton from './TvButton';
-import { IconCheck, IconDownload, IconPlay, IconStar } from './Icons';
+import { IconCheck, IconDownload, IconPlay, IconStar, IconTrash } from './Icons';
 import { groupEpisodes, groupVersions, seasonLabel, episodeLabel, type Episode, type Version } from '../utils/versions';
 import type { DownloadState, Featured, SearchResult } from '../types';
 
@@ -44,13 +44,41 @@ function Chip({ label, index, selected, onSelect }: { label: string; index: numb
   );
 }
 
-function ListRow({ index, focusKey, label, title, meta, state, variants, onEnter, autoFocus }: {
+function DeleteButton({ focusKey, onDelete }: { focusKey: string; onDelete: () => void }) {
+  const { ref } = useFocusItem<HTMLDivElement>({ index: 1, focusKey, onEnter: onDelete });
+  return (
+    <div ref={ref} onClick={(e) => { e.stopPropagation(); onDelete(); }}
+      className="tv-row-item shrink-0 w-[84px] h-[84px] rounded-lg mb-[10px] flex flex-col items-center justify-center text-tv-text2">
+      <span className="w-7 h-7"><IconTrash /></span>
+      <span className="text-[14px] font-semibold mt-1">Borrar</span>
+    </div>
+  );
+}
+
+/**
+ * Fila de episodio o version. Es un carril horizontal de una o dos casillas:
+ * la accion principal (reproducir/descargar) y, si el archivo esta en disco,
+ * Borrar al lado. Arriba y abajo cambian de fila; izquierda y derecha, de casilla.
+ */
+function ListRow({ index, focusKey, label, title, meta, state, variants, onEnter, onDelete, autoFocus }: {
   index: number; focusKey: string; label: string; title: string; meta: string; state: RowState; variants: number;
+  onEnter: () => void; onDelete?: () => void; autoFocus?: boolean;
+}) {
+  return (
+    <FocusScope index={index} orientation="horizontal" className="flex items-stretch gap-[10px]">
+      <MainCell focusKey={focusKey} label={label} title={title} meta={meta} state={state} variants={variants} onEnter={onEnter} autoFocus={autoFocus} />
+      {state.status === 'ready' && onDelete && <DeleteButton focusKey={`${focusKey}-del`} onDelete={onDelete} />}
+    </FocusScope>
+  );
+}
+
+function MainCell({ focusKey, label, title, meta, state, variants, onEnter, autoFocus }: {
+  focusKey: string; label: string; title: string; meta: string; state: RowState; variants: number;
   onEnter: () => void; autoFocus?: boolean;
 }) {
-  const { ref } = useFocusItem<HTMLDivElement>({ index, focusKey, onEnter, autoFocus });
+  const { ref } = useFocusItem<HTMLDivElement>({ index: 0, focusKey, onEnter, autoFocus });
   return (
-    <div ref={ref} onClick={onEnter} className="tv-row-item flex items-center gap-5 h-[84px] rounded-lg px-5 mb-[10px]">
+    <div ref={ref} onClick={onEnter} className="tv-row-item flex-1 min-w-0 flex items-center gap-5 h-[84px] rounded-lg px-5 mb-[10px]">
       <span className="tv-dim w-[76px] shrink-0 text-lead font-semibold tabular-nums text-tv-text2">{label}</span>
       <div className="flex-1 min-w-0">
         <p className="text-body font-semibold truncate">{title}</p>
@@ -95,7 +123,7 @@ const LIST_VIEW = 720;   // alto visible de la lista
  */
 export default function TitleDetail({ input, onClose }: Props) {
   const { meta, kind } = input;
-  const { downloadStates, download, cancelBatch, pauseBatch, rutaDe, rutaEpisodio } = useDownloadsCtx();
+  const { downloadStates, download, cancelBatch, pauseBatch, rutaDe, rutaEpisodio, recargar } = useDownloadsCtx();
   const [playing, setPlaying] = useState<{ path: string; title: string; subtitle?: string } | null>(null);
   const [dialog, setDialog] = useState<{
     title: string; text?: string; actions: { label: string; onSelect: () => void; primary?: boolean }[];
@@ -112,8 +140,10 @@ export default function TitleDetail({ input, onClose }: Props) {
   // Versiones de los archivos indexados + los que ya estan en disco (biblioteca).
   const versions = useMemo(() => {
     const vs = groupVersions(input.files);
+    const resolved = new Set(vs.map((v) => rutaEpisodio(v.fileName, v.season, v.episode) || rutaDe(v.fileName)).filter(Boolean));
     for (const l of input.local || []) {
-      if (vs.some((v) => v.fileName === l.name)) continue;
+      // Ya representado por su version del catalogo (mismo nombre o misma ruta en disco).
+      if (vs.some((v) => v.fileName === l.name) || resolved.has(l.path)) continue;
       const m = l.name.match(/(\d{1,2})x(\d{2,3})|[sS](\d{1,2})[eE](\d{1,3})/);
       vs.push({
         key: `local:${l.path}`, fileName: l.name, baseName: l.name.replace(/\.[^.]+$/, ''), quality: 'En disco',
@@ -122,7 +152,7 @@ export default function TitleDetail({ input, onClose }: Props) {
       });
     }
     return vs;
-  }, [input.files, input.local]);
+  }, [input.files, input.local, rutaDe, rutaEpisodio]);
 
   const episodes = useMemo(() => (kind === 'series' ? groupEpisodes(versions) : []), [versions, kind]);
   const seasons = useMemo(() => {
@@ -189,6 +219,25 @@ export default function TitleDetail({ input, onClose }: Props) {
       else toast(`Descargando ${v.baseName}${v.parts > 1 ? ` (${v.parts} partes)` : ''}`);
     });
   }, [stateOf, play, download, pauseBatch, cancelBatch]);
+
+  const askDelete = useCallback((path: string, label: string) => {
+    setDialog({
+      title: '¿Borrar del servidor?',
+      text: `${label} se eliminará del disco. Podrás volver a descargarlo desde el catálogo.`,
+      actions: [
+        { label: 'Cancelar', onSelect: () => setDialog(null), primary: true },
+        { label: 'Borrar', onSelect: async () => {
+          setDialog(null);
+          try {
+            const res = await apiFetch('/files', { method: 'DELETE', body: JSON.stringify({ path }) });
+            const data = await res.json();
+            if (data.error) toast(data.error, 'error', 5000);
+            else { toast('Archivo borrado', 'ok'); await recargar(); }
+          } catch { toast('No se ha podido borrar', 'error', 5000); }
+        } },
+      ],
+    });
+  }, [recargar]);
 
   const onEpisode = useCallback((e: Episode) => {
     const subtitle = `${episodeLabel(e)} · ${episodeNames.get(`${e.season}:${e.episode}`) || ''}`.replace(/ · $/, '');
@@ -325,14 +374,16 @@ export default function TitleDetail({ input, onClose }: Props) {
                     <ListRow key={`${e.season}:${e.episode}`} index={i} focusKey={`ep-${e.season}-${e.episode}`}
                       label={episodeLabel(e)} title={name}
                       meta={`${best.quality} · ${best.sizeStr}${best.channelName ? ` · ${best.channelName}` : ''}`}
-                      state={st} variants={e.variants.length} onEnter={() => onEpisode(e)} autoFocus={i === 0 && !playable} />
+                      state={st} variants={e.variants.length} onEnter={() => onEpisode(e)} autoFocus={i === 0 && !playable}
+                      onDelete={st.status === 'ready' ? () => askDelete(st.path, `${episodeLabel(e)} · ${name}`) : undefined} />
                   );
                 })}
                 {kind === 'movie' && versions.map((v, i) => (
                   <ListRow key={v.key} index={i} focusKey={`ver-${v.key}`} label={v.quality.split(' · ')[0]}
                     title={v.baseName}
                     meta={`${v.quality} · ${v.sizeStr}${v.parts > 1 ? ` · ${v.parts} partes` : ''}${v.channelName ? ` · ${v.channelName}` : ''}`}
-                    state={stateOf(v)} variants={1} onEnter={() => act(v)} autoFocus={i === 0 && !playable} />
+                    state={stateOf(v)} variants={1} onEnter={() => act(v)} autoFocus={i === 0 && !playable}
+                    onDelete={(() => { const st = stateOf(v); return st.status === 'ready' ? () => askDelete(st.path, v.baseName) : undefined; })()} />
                 ))}
               </div>
             </FocusScope>

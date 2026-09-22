@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { apiFetch, streamUrl } from '../services/api';
 import { fetchMetadataBatch } from '../services/tmdb';
+import { fetchMediaFiles } from '../services/media';
 import { useDownloadsCtx } from '../contexts/DownloadsContext';
 import { continueWatching, type Watched } from '../tv/progress';
 import { toast } from '../tv/toast';
@@ -11,7 +12,7 @@ import PosterCard from '../components/PosterCard';
 import Dialog from '../components/Dialog';
 import Player from '../components/Player';
 import TitleDetail, { type DetailInput } from '../components/TitleDetail';
-import type { Batch, Featured, FileItem, TMDBMetadata } from '../types';
+import type { Batch, Featured, FileItem, SearchResult, TMDBMetadata } from '../types';
 
 interface Local { file: FileItem; f: Featured; meta: TMDBMetadata }
 
@@ -26,7 +27,7 @@ function seriesName(fileName: string, folder: string): string {
  * lo que se dejo a medias de ver. Todo se reproduce desde aqui.
  */
 export default function Library() {
-  const { batches, pausedBatches, downloadStates, pauseBatch, cancelBatch, resumeBatch, loadStatus, loadPaused } = useDownloadsCtx();
+  const { batches, pausedBatches, downloadStates, pauseBatch, cancelBatch, resumeBatch, loadStatus, loadPaused, total } = useDownloadsCtx();
   const [files, setFiles] = useState<FileItem[]>([]);
   const [metas, setMetas] = useState<Map<string, TMDBMetadata>>(new Map());
   const [loading, setLoading] = useState(true);
@@ -55,7 +56,8 @@ export default function Library() {
     }
   }, []);
 
-  useEffect(() => { load(); loadStatus(); loadPaused(); }, [load]); // eslint-disable-line react-hooks/exhaustive-deps
+  // `total` cambia cuando el indice de disco se recarga (descarga terminada o archivo borrado).
+  useEffect(() => { load(); loadStatus(); loadPaused(); }, [load, total]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Lo que esta bajando tambien esta ya en disco (a medias): se excluye de la
   // biblioteca por el nombre de su carpeta. Y un episodio suelto en una
@@ -97,7 +99,7 @@ export default function Library() {
         key: `lib-${file.path}`, kind: isSeries ? 'series' : 'movie',
         title: meta.title || key, poster: meta.poster, backdrop: meta.backdrop, year: meta.year, rating: meta.rating,
         overview: meta.overview, genres: meta.genres,
-        subtitle: isSeries ? `${file.episodes?.length || 0} episodios en disco` : file.size,
+        subtitle: isSeries ? `${file.episodes?.length || 0} ${(file.episodes?.length || 0) === 1 ? 'episodio' : 'episodios'} en disco` : file.size,
       },
     };
   }), [grouped, metas]);
@@ -113,13 +115,19 @@ export default function Library() {
     return { b, label, f: { key: `dl-${b.batch_id}`, kind: 'movie' as const, title: name, poster: meta?.poster, backdrop: meta?.backdrop, subtitle: `${b.progress} % · ${label}` } };
   });
 
-  const open = useCallback((l: Local) => {
-    if (l.file.is_series) {
-      // Con el id de TMDB la ficha pone nombre a los episodios.
-      setDetail({ kind: 'series', tmdbId: l.meta.tmdb_id, meta: l.f, files: [], local: (l.file.episodes || []).map((e) => ({ name: e.name, path: e.path, size: e.size })) });
-    } else {
-      setPlaying({ path: l.file.path, title: l.f.title, poster: l.f.poster, backdrop: l.f.backdrop });
+  // Desde disco se abre la misma ficha que desde el catalogo: todos los
+  // episodios o versiones, con Reproducir en los que ya estan bajados y
+  // Borrar al lado. Si el titulo no esta en TMDB, solo lo que hay en disco.
+  const open = useCallback(async (l: Local) => {
+    const kind = l.file.is_series ? 'series' : 'movie';
+    const local = l.file.is_series
+      ? (l.file.episodes || []).map((e) => ({ name: e.name, path: e.path, size: e.size }))
+      : [{ name: l.file.name, path: l.file.path, size: l.file.size }];
+    let files: SearchResult[] = [];
+    if (l.meta.tmdb_id) {
+      try { files = (await fetchMediaFiles(l.meta.tmdb_id, kind)).results; } catch { /* solo disco */ }
     }
+    setDetail({ kind, tmdbId: l.meta.tmdb_id, meta: l.f, files, local });
   }, []);
 
   const rowsOrder: string[] = [];
