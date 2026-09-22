@@ -90,9 +90,11 @@ export function useLibrary() {
     if (!nombre) return undefined;
     const exacto = porNombre.get(normalizarNombre(nombre))?.path;
     if (exacto) return exacto;
+    // Una pelicula comprimida: la carpeta tiene un solo video (y ni el archivo
+    // pedido ni el que hay dentro son episodios de una serie).
+    if (episodioDe(nombre)) return undefined;
     const carpeta = porCarpeta.get(carpetaSugerida(nombre));
-    // Una pelicula comprimida: la carpeta tiene un solo video.
-    if (carpeta && carpeta.length === 1) return carpeta[0].path;
+    if (carpeta && carpeta.length === 1 && !episodioDe(carpeta[0].name)) return carpeta[0].path;
     return undefined;
   }, [porNombre, porCarpeta]);
 
@@ -104,8 +106,11 @@ export function useLibrary() {
     const carpeta = porCarpeta.get(carpetaSugerida(nombre));
     if (!carpeta) return undefined;
     const clave = `${season ?? ''}:${episode}`;
+    // Solo cuenta el archivo cuyo numero de episodio coincide. Nada de "si la
+    // carpeta tiene un solo video es ese": con un unico episodio bajado, toda
+    // la temporada salia como descargada apuntando al mismo archivo.
     const hit = carpeta.find((e) => episodioDe(e.name) === clave || (season === undefined && episodioDe(e.name)?.endsWith(`:${episode}`)));
-    return hit?.path || (carpeta.length === 1 ? carpeta[0].path : undefined);
+    return hit?.path;
   }, [porNombre, porCarpeta]);
 
   return { rutaDe, rutaEpisodio, recargar, total: porNombre.size };

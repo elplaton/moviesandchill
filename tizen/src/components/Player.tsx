@@ -161,8 +161,9 @@ export default function Player({ src, path, title, subtitle, poster, backdrop, o
 
   return (
     <Overlay>
-    <div className="fixed inset-0 z-[70] bg-black">
-      <video ref={videoRef} src={src} autoPlay preload="auto" className="absolute inset-0 w-full h-full" />
+    <div className="fixed inset-0 z-[70]" style={{ background: '#000' }}>
+      <video ref={videoRef} src={src} autoPlay preload="auto" className="absolute inset-0 w-full h-full"
+        style={{ backgroundColor: '#000', objectFit: 'contain' }} />
 
       {buffering && (
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none">

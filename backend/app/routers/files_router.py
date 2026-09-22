@@ -109,6 +109,12 @@ async def delete_file(req: DeleteRequest, user: Annotated[str, Depends(get_curre
             shutil.rmtree(target)
         else:
             os.remove(target)
+            # Si era el ultimo archivo de su carpeta, la carpeta sobra: si se
+            # queda, el buscador la sigue contando como "descargado".
+            parent = os.path.dirname(target)
+            if parent != base_dir and os.path.isdir(parent) and not os.listdir(parent):
+                os.rmdir(parent)
+        logger.info("Borrado desde la app: %s", os.path.relpath(target, base_dir))
         return {"deleted": req.path}
     except OSError as e:
         return {"error": str(e)}
