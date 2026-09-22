@@ -10,7 +10,7 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-TV_IP="${TV_IP:-192.168.1.46}"
+TV_IP="${TV_IP:-192.168.1.45}"
 APP_ID="MCchill026.MoviesChill"
 PROFILE="MoviesChill"
 TIZEN="$HOME/tizen-studio/tools/ide/bin/tizen"
