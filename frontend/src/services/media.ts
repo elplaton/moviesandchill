@@ -24,5 +24,6 @@ export async function fetchMediaFiles(tmdbId: number, mediaType: 'movie' | 'seri
 export function toEpisodes(results: SearchResult[]): SeriesEpisode[] {
   return results.map(r => ({
     name: r.file_name, size: r.size_str, path: '', message_id: r.id, channel_id: r.channel_id,
+    local_path: r.local_path, owner: r.owner, can_delete: r.can_delete,
   }));
 }

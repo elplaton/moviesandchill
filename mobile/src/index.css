@@ -1,0 +1,41 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root { --safe-b: env(safe-area-inset-bottom, 0px); --safe-t: env(safe-area-inset-top, 0px); }
+html { -webkit-text-size-adjust: 100%; }
+html, body, #root { height: 100%; overflow: hidden; }
+body { background: #141414; color: #fff; -webkit-font-smoothing: antialiased; overscroll-behavior-y: none; }
+
+/*
+ * Armazon del alto exacto de lo que se ve.
+ *
+ * Ninguna unidad CSS vale para las dos situaciones de Safari: `100dvh` sigue
+ * a la barra del navegador (la barra de pestañas baila) y `100svh` es el alto
+ * con la barra desplegada (al plegarse queda hueco por debajo). Asi que el
+ * alto lo mide `main.tsx` con la Visual Viewport API y lo escribe en
+ * `--app-h`; `100dvh` queda de respaldo para navegadores sin esa API.
+ */
+.app-shell {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 100dvh;
+  height: var(--app-h, 100dvh);
+  display: flex;
+  flex-direction: column;
+}
+/* Lo unico que se desplaza. Con overscroll contain el rebote no arrastra la pagina. */
+.app-main { flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
+::-webkit-scrollbar { display: none; }
+.no-scrollbar { scrollbar-width: none; }
+.snap-row { scroll-snap-type: x mandatory; }
+.snap-row > * { scroll-snap-align: start; }
+.line-clamp-2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.line-clamp-3 { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.line-clamp-5 { display: -webkit-box; -webkit-line-clamp: 5; -webkit-box-orient: vertical; overflow: hidden; }
+@keyframes rise { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+.rise { animation: rise 220ms ease-out; }
+/* Zona tocable minima de 44 px (guia de iOS) */
+.tap { min-height: 44px; }

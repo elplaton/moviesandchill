@@ -255,6 +255,10 @@ class TelegramDownloader:
 
         base, part_num, archive_type = _detect_multipart(file_name)
 
+        # Cada parte lleva su canal: el message_id se repite entre canales y
+        # descargar "el primero que aparezca" traia el archivo equivocado.
+        own_channel = next((cid for cid, ch in self.channels.items() if ch is ch_data), channel_id)
+
         if base is None:
             folder_name = suggest_folder_name(file_name)
             return file_name, folder_name, [{
@@ -262,6 +266,7 @@ class TelegramDownloader:
                 "file_name": file_name,
                 "part_num": 0,
                 "size": self._get_file_size(msg),
+                "channel_id": own_channel,
             }]
 
         parts_found = {}
@@ -271,6 +276,7 @@ class TelegramDownloader:
             "file_name": file_name,
             "part_num": part_num,
             "size": size,
+            "channel_id": own_channel,
         }
 
         base_lower = base.lower()
@@ -288,6 +294,7 @@ class TelegramDownloader:
                             "file_name": fname,
                             "part_num": p,
                             "size": self._get_file_size(m),
+                            "channel_id": ch_id,
                         }
             except Exception:
                 continue

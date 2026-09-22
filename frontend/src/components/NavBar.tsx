@@ -3,7 +3,9 @@ import { useAuth } from '../contexts/AuthContext';
 import { useState, useEffect } from 'react';
 
 export default function NavBar() {
-  const { username, logout, isAdmin } = useAuth();
+  const { username, logout, isAdmin, usedBytes, quotaBytes } = useAuth();
+  const gb = (b: number) => `${(b / 1024 ** 3).toFixed(1)} GB`;
+  const quota = quotaBytes != null ? `${gb(usedBytes)} de ${gb(quotaBytes)}` : usedBytes > 0 ? `${gb(usedBytes)} en disco` : '';
   const location = useLocation();
   const [menuOpen, setMenuOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
@@ -32,14 +34,14 @@ export default function NavBar() {
         <Link to="/series" className={`px-3 py-1 text-sm rounded-lg transition-all duration-200 ${
           location.pathname === '/series' ? 'text-white font-medium' : 'text-gray-400 hover:text-gray-200'
         }`}>Series</Link>
+        <Link to="/descargas" className={`px-3 py-1 text-sm rounded-lg transition-all duration-200 ${
+          location.pathname === '/descargas' ? 'text-white font-medium' : 'text-gray-400 hover:text-gray-200'
+        }`}>Descargas</Link>
         {isAdmin && (
-          <Link to="/channels" className={`px-3 py-1 text-sm rounded-lg transition-all duration-200 ${
-            location.pathname === '/channels' ? 'text-white font-medium' : 'text-gray-400 hover:text-gray-200'
-          }`}>Canales</Link>
+          <Link to="/admin" className={`px-3 py-1 text-sm rounded-lg transition-all duration-200 ${
+            location.pathname.startsWith('/admin') ? 'text-white font-medium' : 'text-gray-400 hover:text-gray-200'
+          }`}>Administración</Link>
         )}
-        <Link to="/settings" className={`px-3 py-1 text-sm rounded-lg transition-all duration-200 ${
-          location.pathname === '/settings' ? 'text-white font-medium' : 'text-gray-400 hover:text-gray-200'
-        }`}>Ajustes</Link>
       </div>
 
       <div className="flex-1" />
@@ -62,9 +64,12 @@ export default function NavBar() {
           <>
             <div className="fixed inset-0 z-40" onClick={() => setMenuOpen(false)} />
             <div className="absolute right-0 top-full mt-2 w-56 bg-black/95 backdrop-blur-xl border border-white/10 rounded-xl shadow-2xl shadow-black/50 py-2 z-50 animate-scale-in overflow-hidden">
-              <div className="px-4 py-2.5 text-sm text-gray-400 border-b border-white/10">{username}</div>
-              <Link to="/settings" onClick={() => setMenuOpen(false)} className="block px-4 py-2.5 text-sm text-gray-300 hover:text-white hover:bg-white/5 transition-colors">Ajustes</Link>
-              <Link to="/logs" onClick={() => setMenuOpen(false)} className="block px-4 py-2.5 text-sm text-gray-300 hover:text-white hover:bg-white/5 transition-colors">Logs</Link>
+              <div className="px-4 py-2.5 border-b border-white/10">
+                <p className="text-sm text-gray-300">{username}</p>
+                {quota && <p className="text-[11px] text-gray-500 mt-0.5">{quota}</p>}
+              </div>
+              <Link to="/cuenta" onClick={() => setMenuOpen(false)} className="block px-4 py-2.5 text-sm text-gray-300 hover:text-white hover:bg-white/5 transition-colors">Mi cuenta</Link>
+              {isAdmin && <Link to="/admin" onClick={() => setMenuOpen(false)} className="block px-4 py-2.5 text-sm text-gray-300 hover:text-white hover:bg-white/5 transition-colors">Administración</Link>}
               <hr className="border-white/10 my-1" />
               <button onClick={() => { logout(); setMenuOpen(false); }} className="w-full text-left px-4 py-2.5 text-sm text-gray-300 hover:text-white hover:bg-white/5 transition-colors">
                 Cerrar sesion

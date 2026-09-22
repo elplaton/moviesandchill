@@ -63,8 +63,11 @@ export async function apiFetch(
   }
 
   if (res.status === 401) {
+    // Sin token no hay sesion que caducar, y en /login no hay a donde ir:
+    // redirigir ahi provocaba un bucle de recargas.
+    const hadToken = !!accessToken;
     clearTokens();
-    window.location.href = '/login';
+    if (hadToken && window.location.pathname !== '/login') window.location.href = '/login';
   }
 
   return res;

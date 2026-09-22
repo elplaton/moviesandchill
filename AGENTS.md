@@ -25,13 +25,16 @@ cd frontend && npm run dev
 
 ```
 Browser :80 → nginx (frontend) → proxy /api/* → :8000 (FastAPI backend)
+              ├─ /      web de escritorio (frontend/)
+              └─ /m/    PWA de móvil (mobile/), redirigida desde / en teléfonos
                                                     ↓
                                               PostgreSQL :5432
                                               Telegram API
                                               TMDB API
 ```
 
-- **frontend**: React 18 + Vite 5 + Tailwind 3. SPA served by nginx. Dev Vite proxy sends `/api`→`:8000`, `/ws`→`ws://localhost:8000`.
+- **frontend**: React 18 + Vite 5 + Tailwind 3. SPA served by nginx. La imagen se construye desde la raíz del repo (`context: .`) e incluye también `mobile/` en `/m/`.
+- **mobile**: PWA (React + Vite + Tailwind, `base: /m/`), manifest + service worker en `public/`. Pensada para el teléfono: armazón fijo con `<main>` desplazable (la barra de pestañas no se mueve con la de Safari), ficha por ruta (`/m/t/:kind/:tmdbId`), `<video>` nativo que entra en pantalla completa al arrancar y se cierra al salir de ella. **Se actualiza sola**: `scripts/stamp-sw.mjs` marca `dist/sw.js` con la fecha del build; el SW hace `skipWaiting`+`claim` y `main.tsx` recarga una vez en `controllerchange`. Dev Vite proxy sends `/api`→`:8000`, `/ws`→`ws://localhost:8000`.
 - **backend**: Python 3.12 + FastAPI + Telethon. Split into `app/routers/*`, `app/services/*`, `app/database/*`; `app/routers/download.py` is now just the wiring (`init_download_router`). Session file at `session/user.session` (gitignored — never commit it). Downloads go `downloads/` → extract → `movies/`.
 - **db**: PostgreSQL 16-alpine. Tables auto-created on startup. No migration framework.
 
@@ -51,7 +54,11 @@ Browser :80 → nginx (frontend) → proxy /api/* → :8000 (FastAPI backend)
 | `backend/app/database/browse.py` | Filas de la Home: muestreo aleatorio ponderado a lo reciente, novedades, añadidos recientemente. Solo `tmdb_valid` |
 | `backend/app/routers/search_router.py` | `/api/search` y `GET /api/media/{tmdb_id}/files` (archivos de un título; es lo que abren los modales de detalle) |
 | `backend/app/services/telegram_client.py` | Telethon wrapper, channel resolution (positive→`-100` prefix), multi-part detection |
-| `backend/app/auth/service.py` | JWT + password hashing |
+| `backend/app/auth/service.py` | JWT + password hashing; una cuenta `active = false` no entra |
+| `backend/app/routers/admin_router.py` | `/api/admin/users` (alta, rol, cuota, activar, contraseña, baja), `/api/admin/downloads`, `/api/admin/convert-library` |
+| `backend/app/database/downloads.py` | Tabla `downloads`: dueño, carpeta, tamaño y estado de cada descarga; `adopt_orphans()` asigna al admin lo que ya estaba en disco |
+| `backend/app/services/compat.py` | `make_compatible()`: todo a MP4 (H.264/HEVC + AAC, `-movflags +faststart`); `convert_library_job()` reempaqueta la biblioteca |
+| `frontend/src/pages/Admin.tsx` | Panel de administración (Usuarios · Descargas · Canales · Ajustes · Registros); solo admin, solo web |
 | `frontend/src/pages/Dashboard.tsx` | Main UI: search, Biblioteca, Explorar tabs. `parseTitle()`, `cleanTitle()`, grouping logic |
 | `frontend/src/services/api.ts` | HTTP client: auto JWT refresh on 401, redirects to `/login` on failure |
 
@@ -87,9 +94,12 @@ Default admin: `admin`/`admin` (o `TMD_ADMIN_PASSWORD`). Se crea al arrancar con
 - **Logs endpoint**: `GET /api/logs` llama a `journalctl -u $TMD_LOG_UNIT` (por defecto `telegram-movie`). Solo bajo systemd; en Docker devuelve un error explicando que uses `docker compose logs`.
 - **Spanish**: all user-facing strings, CLI output, API messages, and logs are in Spanish. Code identifiers mixed Spanish/English. API JSON keys in English.
 - **`TMD_TMBD_API_KEY`**: intentional typo in env var name. Both code and .env.example use this spelling.
+- **Estructura en disco** (`services/layout.py`): series → `<extract>/<Serie>/Temporada N/<N>x<EE>.<ext>`; películas → `<extract>/<Título (Año)>/<Título (Año)>.<ext>`. Los nombres salen de TMDB (`get_media_item()` sobre el catálogo) y, si no hay, del parser. Cada lote baja a una carpeta temporal `.dl_<batch>` dentro de su destino, se extrae/convierte ahí y `finalize_episode()` mueve el vídeo con su nombre final y borra la temporal; al cancelar/fallar se borra y se podan carpetas vacías (`prune_empty_dirs`). `/files` entiende esta estructura y la antigua (`Serie S1/`). Cada parte lleva su `channel_id` y `download_to_folder()` lo usa: **el `message_id` se repite entre canales** y sin él se descargaba el archivo de otro canal.
 - **Extraction**: sync/blocking via `run_in_executor`. Auto-flattens single-subfolder nesting (`movies/Name/Name/video.mkv` → `movies/Name/video.mkv`).
 - **paused_batches.json**: gitignored. Vive en `TMD_STATE_DIR` (montado como `./state` en Docker) en vez de ser relativo al cwd. Pausar borra **solo** las partes incompletas: las ya descargadas deben sobrevivir o el "reanudar" no sirve de nada.
 - **Mensajes nuevos**: se indexan en tiempo real con un handler `events.NewMessage` de Telethon (`watch_new_messages()` → `index_live_message()`); el filtro de canal se evalúa en cada evento, así que los canales añadidos después también cuentan. `run_full_index` ya **no omite** los canales `done`: los escanea desde `last_message_id` (solo lo nuevo), al arrancar y en el barrido periódico (`periodic_rescan`, `TMD_RESCAN_HOURS`).
 - **Tareas de fondo**: usa `spawn()` de `app/tasks.py`, no `asyncio.create_task()` a secas. Este último se traga las excepciones y mantiene solo una referencia débil a la tarea; así estuvo roto el indexado al añadir un canal sin que apareciera nada en los logs.
 - **App de TV (`tizen/`, y `webos/` para LG)**: un solo código en `tizen/src`; `webos/` solo empaqueta (`appinfo.json`, `build.sh` genera el `.ipk` con `vite --mode webos`, objetivo Chromium 68, y `deploy.sh` instala con el CLI `ares-*` que va como devDependency de `tizen/`). Diferencias por plataforma ya resueltas en código: salida (`tizen.application.exit` / `window.close`), cursor (solo Tizen lo oculta; el Magic Remote de LG enfoca al pasar), nada de `gap` en flex (webOS 5/6 no lo soporta: `space-x`/`space-y`). Interfaz propia, no un calco de la web. Mide 1920×1080 fijos (px absolutos, sin breakpoints; `main.tsx` la escala en desarrollo). Estructura: `components/Rail` (navegación lateral, vive fuera de las rutas), `Screen` (columna de contenido con scroll por transform + `Hero`, el panel que describe la tarjeta enfocada vía `tv/featured.ts`), `Row`/`PosterCard` (carriles), `TitleDetail` (ficha a pantalla completa), `Player` (reproductor sin controles nativos; teclas en `focus/keys.ts` `pushRawHandler`/`pushMediaHandler`), `Keyboard` (teclado en pantalla). Los paneles a pantalla completa se montan por portal en `#overlays` (`components/Overlay`): dentro de la columna con transform, `position: fixed` no funciona. Un solo `DownloadsProvider` para descargas + índice de disco. Reglas de render: solo se animan transform/opacity, nada de backdrop-filter, el foco es una clase CSS. Los tests del motor de foco: `npm test`.
+- **Cuentas, cuotas y dueños**: `users.quota_bytes` (NULL = sin límite) y `users.active`. Cada descarga tiene dueño (`downloads.owner_id`); la cuota compara el disco que ocupan sus descargas vivas (`downloading|paused|done`) con `quota_bytes` antes de aceptar otra. **Una descarga la ve todo el mundo, solo la borra su dueño o un admin, y nadie puede volver a bajar lo mismo** (`POST /download` devuelve `already: true` con el dueño). `/files` devuelve `owner` y `can_delete`; `DELETE /files` los comprueba. Lo anterior a esta versión pasó al admin al arrancar.
+- **MP4 obligatorio**: iPhone/Safari no reproduce MKV, así que `make_compatible()` deja todo en MP4 (contenedor MKV ya no cuenta como compatible; HEVC se etiqueta `hvc1`; sin subtítulos porque MP4 no admite PGS/ASS). El interruptor sigue llamándose `convert_dts_to_ac3` por compatibilidad con el `.env`.
 - **No tests exist** (salvo `tizen/test`). No linting/typechecking in CI. No pre-commit hooks.

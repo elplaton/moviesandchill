@@ -1,0 +1,13 @@
+const b = { fill: 'none', stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const, viewBox: '0 0 24 24', className: 'w-full h-full' };
+export const IHome = () => <svg {...b}><path d="M3 11l9-8 9 8" /><path d="M5 10v10h5v-6h4v6h5V10" /></svg>;
+export const ISearch = () => <svg {...b}><circle cx="11" cy="11" r="7" /><path d="M20 20l-3.5-3.5" /></svg>;
+export const IDown = () => <svg {...b}><path d="M12 4v11M7 10l5 5 5-5" /><path d="M4 19h16" /></svg>;
+export const IUser = () => <svg {...b}><circle cx="12" cy="8" r="4" /><path d="M4 21c0-4 3.6-7 8-7s8 3 8 7" /></svg>;
+export const IShield = () => <svg {...b}><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z" /></svg>;
+export const IPlay = () => <svg viewBox="0 0 24 24" className="w-full h-full" fill="currentColor"><path d="M7 4.5v15l12-7.5z" /></svg>;
+export const IBack = () => <svg {...b}><path d="M15 5l-7 7 7 7" /></svg>;
+export const ITrash = () => <svg {...b}><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3" /></svg>;
+export const IStar = () => <svg viewBox="0 0 20 20" className="w-full h-full" fill="currentColor"><path d="M9.05 2.93c.3-.92 1.6-.92 1.9 0l1.07 3.29a1 1 0 00.95.69h3.46c.97 0 1.37 1.24.59 1.81l-2.8 2.03a1 1 0 00-.37 1.12l1.07 3.29c.3.92-.75 1.69-1.54 1.12l-2.8-2.03a1 1 0 00-1.18 0l-2.8 2.03c-.78.57-1.83-.2-1.53-1.12l1.07-3.29a1 1 0 00-.37-1.12L2.98 8.72c-.78-.57-.38-1.81.59-1.81h3.46a1 1 0 00.95-.69l1.07-3.29z" /></svg>;
+export const IClose = () => <svg {...b}><path d="M6 6l12 12M18 6L6 18" /></svg>;
+export const IPause = () => <svg viewBox="0 0 24 24" className="w-full h-full" fill="currentColor"><rect x="6" y="4" width="4.5" height="16" rx="1" /><rect x="13.5" y="4" width="4.5" height="16" rx="1" /></svg>;
+export const ICheck = () => <svg {...b} strokeWidth={3}><path d="M5 12.5l4.5 4.5L19 7.5" /></svg>;

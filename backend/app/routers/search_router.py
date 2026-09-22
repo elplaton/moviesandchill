@@ -24,13 +24,20 @@ class SearchRequest(BaseModel):
     channel_ids: list[int] | None = None
 
 
-def _row_to_result(r: dict, existing: set) -> dict:
+def _row_to_result(r: dict, existing: set, done: dict | None = None, me: dict | None = None) -> dict:
+    # Lo descargado se sabe por la tabla de descargas (ruta final, dueño), no
+    # adivinando por el nombre del archivo.
+    d = (done or {}).get((r["channel_id"], r["message_id"]))
+    local = d["folder_path"] if d and d["status"] == "done" and os.path.exists(d["folder_path"]) else None
+    is_admin = bool(me and me.get("role") == "admin")
     return {
         "id": r["message_id"], "date": str(r.get("indexed_at", "")), "text": "",
         "file_name": r["file_name"], "size": r.get("file_size", 0),
         "size_str": r.get("size_str", ""),
         "channel_id": r["channel_id"], "channel_name": r.get("channel_name", ""),
-        "downloaded": _strip_filename(r.get("file_name") or "").lower() in existing,
+        "downloaded": bool(local) or _strip_filename(r.get("file_name") or "").lower() in existing,
+        "local_path": local, "owner": d["owner"] if d else None,
+        "can_delete": bool(local) and (is_admin or bool(me and d and d["owner_id"] == me["id"])),
         "clean_name": r.get("clean_title"), "media_type": r.get("media_type"),
         "season": r.get("season"), "episode": r.get("episode"), "tags": r.get("tags") or [],
         "tmdb_id": r.get("tmdb_id"), "tmdb_type": r.get("tmdb_type"), "tmdb_valid": r.get("tmdb_valid"),
@@ -93,9 +100,12 @@ async def search(req: SearchRequest, user: Annotated[str, Depends(get_current_us
     results = []
 
     from app.database.connection import search_media, get_pool
+    from app.database.downloads import downloads_by_message
+    from app.database.users import get_user_by_username
     if get_pool():
         rows = await search_media(req.query.strip(), max(req.page_size, 100) + 1, req.offset)
-        results = [_row_to_result(r, existing) for r in rows]
+        done, me = await asyncio.gather(downloads_by_message(), get_user_by_username(user))
+        results = [_row_to_result(r, existing, done, me) for r in rows]
 
     if len(results) < req.page_size:
         telegram_results = await downloader.search_messages(
@@ -138,9 +148,12 @@ async def media_files(tmdb_id: int, user: Annotated[str, Depends(get_current_use
         media_type = "tv"
     if media_type not in ("movie", "tv"):
         media_type = None
+    from app.database.downloads import downloads_by_message
+    from app.database.users import get_user_by_username
     existing = _find_downloaded_files(config.get("extract_path", "."))
-    rows, tmdb = await asyncio.gather(get_media_by_tmdb(tmdb_id, media_type), get_tmdb_cached(tmdb_id, media_type))
-    results = [_row_to_result(r, existing) for r in rows]
+    rows, tmdb, done, me = await asyncio.gather(get_media_by_tmdb(tmdb_id, media_type), get_tmdb_cached(tmdb_id, media_type),
+                                               downloads_by_message(), get_user_by_username(user))
+    results = [_row_to_result(r, existing, done, me) for r in rows]
     meta = None
     if tmdb:
         meta = {

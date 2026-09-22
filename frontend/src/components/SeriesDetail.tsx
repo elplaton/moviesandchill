@@ -1,5 +1,6 @@
 import { useEffect, useState, useMemo } from 'react';
 import DownloadRing, { type RingStatus } from './DownloadRing';
+import DownloadOrPlay from './DownloadOrPlay';
 import { cleanFileName } from '../utils/text';
 import { formatBytes } from '../utils/format';
 import { MULTIPART as MULTIPART_RE } from '../utils/regex';
@@ -73,10 +74,9 @@ function EpisodeRow({ ep, streamUrl, onDownload, onCancelDownload, downloadState
           <span className="text-white/60 text-[10px]">{ds.progress}%</span>
         </div>
       ) : ep.message_id ? (
-        <button onClick={(e) => { e.stopPropagation(); onDownload ? onDownload(ep.message_id!, ep.channel_id) : null; }}
-          className="bg-netflix-red hover:bg-netflix-red-hover text-white text-xs px-3 py-1.5 rounded-lg transition-all hover:scale-105 font-medium shrink-0">
-          Descargar
-        </button>
+        <DownloadOrPlay localPath={ep.local_path} owner={ep.owner} canDelete={ep.can_delete} fileName={ep.name} messageId={ep.message_id} channelId={ep.channel_id}
+          season={parsed?.season} episode={parsed?.episode} downloadStates={downloadStates}
+          onDownload={(id, ch) => onDownload?.(id, ch)} onCancelDownload={onCancelDownload} title={displayName} />
       ) : (
         <span className="text-gray-600 text-[10px] shrink-0">No disponible</span>
       )}
@@ -329,10 +329,7 @@ export default function SeriesDetail({ series, metadata, onClose, streamUrl, onD
                               <p className="text-gray-500 text-[11px]">{quality ? `${quality} · ` : ''}{info}</p>
                             </div>
                             {g.first.message_id ? (
-                              <button onClick={(e) => { e.stopPropagation(); onDownload ? onDownload(g.first.message_id!, g.first.channel_id) : null; }}
-                                className="bg-netflix-red hover:bg-netflix-red-hover text-white text-xs px-3 py-1.5 rounded-lg transition-all hover:scale-105 font-medium shrink-0">
-                                Descargar
-                              </button>
+                              <DownloadOrPlay localPath={g.first.local_path} owner={g.first.owner} canDelete={g.first.can_delete} fileName={g.first.name} messageId={g.first.message_id!} channelId={g.first.channel_id} season={parseEpisode(g.first.name)?.season} episode={parseEpisode(g.first.name)?.episode} downloadStates={downloadStates} onDownload={(id, ch) => onDownload?.(id, ch)} onCancelDownload={onCancelDownload} title={metadata.title || series.name} metadata={metadata} small={false} />
                             ) : (
                               <span className="text-gray-600 text-[10px] shrink-0">No disponible</span>
                             )}
@@ -373,10 +370,7 @@ export default function SeriesDetail({ series, metadata, onClose, streamUrl, onD
                                       <p className="text-gray-500 text-[10px]">{info}</p>
                                     </div>
                                     {v.first.message_id ? (
-                                      <button onClick={(e) => { e.stopPropagation(); onDownload ? onDownload(v.first.message_id!, v.first.channel_id) : null; }}
-                                        className="bg-netflix-red hover:bg-netflix-red-hover text-white text-xs px-2.5 py-1 rounded-lg transition-all hover:scale-105 font-medium shrink-0">
-                                        Descargar
-                                      </button>
+                                      <DownloadOrPlay localPath={v.first.local_path} owner={v.first.owner} canDelete={v.first.can_delete} fileName={v.first.name} messageId={v.first.message_id!} channelId={v.first.channel_id} season={parseEpisode(v.first.name)?.season} episode={parseEpisode(v.first.name)?.episode} downloadStates={downloadStates} onDownload={(id, ch) => onDownload?.(id, ch)} onCancelDownload={onCancelDownload} title={metadata.title || series.name} metadata={metadata} small={true} />
                                     ) : (
                                       <span className="text-gray-600 text-[10px] shrink-0">No disponible</span>
                                     )}
@@ -413,10 +407,7 @@ export default function SeriesDetail({ series, metadata, onClose, streamUrl, onD
                         <p className="text-gray-500 text-[11px]">{quality ? `${quality} · ` : ''}{info}</p>
                       </div>
                       {g.first.message_id ? (
-                        <button onClick={(e) => { e.stopPropagation(); onDownload ? onDownload(g.first.message_id!, g.first.channel_id) : null; }}
-                          className="bg-netflix-red hover:bg-netflix-red-hover text-white text-xs px-3 py-1.5 rounded-lg transition-all hover:scale-105 font-medium shrink-0">
-                          Descargar
-                        </button>
+                        <DownloadOrPlay localPath={g.first.local_path} owner={g.first.owner} canDelete={g.first.can_delete} fileName={g.first.name} messageId={g.first.message_id!} channelId={g.first.channel_id} season={parseEpisode(g.first.name)?.season} episode={parseEpisode(g.first.name)?.episode} downloadStates={downloadStates} onDownload={(id, ch) => onDownload?.(id, ch)} onCancelDownload={onCancelDownload} title={metadata.title || series.name} metadata={metadata} small={false} />
                       ) : (
                         <span className="text-gray-600 text-[10px] shrink-0">No disponible</span>
                       )}
@@ -456,10 +447,7 @@ export default function SeriesDetail({ series, metadata, onClose, streamUrl, onD
                                 <p className="text-gray-500 text-[10px]">{info}</p>
                               </div>
                               {v.first.message_id ? (
-                                <button onClick={(e) => { e.stopPropagation(); onDownload ? onDownload(v.first.message_id!, v.first.channel_id) : null; }}
-                                  className="bg-netflix-red hover:bg-netflix-red-hover text-white text-xs px-2.5 py-1 rounded-lg transition-all hover:scale-105 font-medium shrink-0">
-                                  Descargar
-                                </button>
+                                <DownloadOrPlay localPath={v.first.local_path} owner={v.first.owner} canDelete={v.first.can_delete} fileName={v.first.name} messageId={v.first.message_id!} channelId={v.first.channel_id} season={parseEpisode(v.first.name)?.season} episode={parseEpisode(v.first.name)?.episode} downloadStates={downloadStates} onDownload={(id, ch) => onDownload?.(id, ch)} onCancelDownload={onCancelDownload} title={metadata.title || series.name} metadata={metadata} small={true} />
                               ) : (
                                 <span className="text-gray-600 text-[10px] shrink-0">No disponible</span>
                               )}

@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo } from 'react';
-import DownloadRing, { type RingStatus } from './DownloadRing';
+import DownloadOrPlay from './DownloadOrPlay';
 import { cleanFileName } from '../utils/text';
 import { formatBytes } from '../utils/format';
 import { RES_TAGS, MULTIPART } from '../utils/regex';
@@ -100,33 +100,6 @@ export default function MovieDetail({ title, metadata, results, onClose, onDownl
     });
   };
 
-  const downloadBtn = (msgId: number, channelId?: number, label = 'Descargar', downloaded = false) => {
-    if (downloaded) {
-      return (
-        <span className="text-green-400 text-[10px] font-medium shrink-0 bg-green-400/10 px-2 py-1 rounded-full">
-          DESCARGADO
-        </span>
-      );
-    }
-    const ds = downloadStates?.get(msgId);
-    if (ds && ds.status !== 'done' && ds.status !== 'error') {
-      return (
-        <div className="flex items-center gap-1.5 shrink-0">
-          <DownloadRing progress={ds.progress} status={ds.status as RingStatus}
-            onCancel={onCancelDownload ? () => onCancelDownload(ds.batchId) : undefined} size={28}
-            downloadedStr={ds.downloadedStr} totalStr={ds.totalStr} speed={ds.speed} />
-          <span className="text-white/60 text-[10px]">{ds.progress}%</span>
-        </div>
-      );
-    }
-    return (
-      <button onClick={(e) => { e.stopPropagation(); onDownload(msgId, channelId); }}
-        className="bg-netflix-red hover:bg-netflix-red-hover text-white text-xs px-3 py-1.5 rounded-lg transition-all hover:scale-105 font-medium shrink-0">
-        {label}
-      </button>
-    );
-  };
-
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
     document.addEventListener('keydown', handleKey);
@@ -196,7 +169,7 @@ export default function MovieDetail({ title, metadata, results, onClose, onDownl
                         <p className="text-white text-sm truncate">{cleanFileName(g.baseName)}</p>
                         <p className="text-gray-500 text-[11px]">{g.parts[0].channel_name} · {g.parts.length} partes · {formatBytes(g.totalSize)}</p>
                       </div>
-                      {downloadBtn(g.firstId, g.channelId, 'Descargar', g.parts[0].downloaded)}
+                      <DownloadOrPlay localPath={g.parts[0].local_path} owner={g.parts[0].owner} canDelete={g.parts[0].can_delete} fileName={g.parts[0].file_name} messageId={g.firstId} channelId={g.channelId} downloadStates={downloadStates} onDownload={onDownload} onCancelDownload={onCancelDownload} title={metadata.title || title} metadata={metadata} />
                     </div>
                   ))}
                   {mpSingles.map((r, idx) => (
@@ -206,7 +179,7 @@ export default function MovieDetail({ title, metadata, results, onClose, onDownl
                         <p className="text-white text-sm truncate">{cleanFileName(r.file_name)}</p>
                         <p className="text-gray-500 text-[11px]">{r.channel_name} · {r.size_str}</p>
                       </div>
-                      {downloadBtn(r.id, r.channel_id, 'Descargar', r.downloaded)}
+                      <DownloadOrPlay localPath={r.local_path} owner={r.owner} canDelete={r.can_delete} fileName={r.file_name} messageId={r.id} channelId={r.channel_id} downloadStates={downloadStates} onDownload={onDownload} onCancelDownload={onCancelDownload} title={metadata.title || title} metadata={metadata} />
                     </div>
                   ))}
                 </div>

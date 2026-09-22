@@ -15,3 +15,8 @@ export default function Layout({ children }: LayoutProps) {
     </div>
   );
 }
+
+/** Envoltorio sin barra ni margen: para incrustar una pagina dentro del panel de administracion. */
+export function Embedded({ children }: LayoutProps) {
+  return <div>{children}</div>;
+}

@@ -2,6 +2,7 @@ import logging
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel
 
 from app.auth.dependencies import get_current_user
 from app.auth.schemas import LoginRequest, RefreshRequest, TokenResponse
@@ -51,5 +52,31 @@ async def refresh(req: RefreshRequest):
 @router.get("/me")
 async def me(user: Annotated[str, Depends(get_current_user)]):
     from app.database.users import get_user_by_username
+    from app.database.downloads import usage_by_user
     db_user = await get_user_by_username(user)
-    return {"username": user, "role": db_user.get("role", "user") if db_user else "user"}
+    if not db_user:
+        return {"username": user, "role": "user"}
+    used = await usage_by_user(db_user["id"])
+    return {
+        "id": db_user["id"], "username": user, "role": db_user.get("role", "user"),
+        "quota_bytes": db_user.get("quota_bytes"), "used_bytes": used, "active": db_user.get("active", True),
+    }
+
+
+class PasswordChangeRequest(BaseModel):
+    current_password: str
+    new_password: str
+
+
+@router.post("/password")
+async def change_password(req: PasswordChangeRequest, user: Annotated[str, Depends(get_current_user)]):
+    """Cada cuenta puede cambiar su propia contraseña."""
+    from app.auth.service import hash_password
+    from app.database.users import update_password_hash
+    if len(req.new_password) < 4:
+        raise HTTPException(status_code=400, detail="La contraseña nueva es demasiado corta")
+    if not await authenticate(user, req.current_password):
+        raise HTTPException(status_code=400, detail="La contraseña actual no es correcta")
+    await update_password_hash(user, hash_password(req.new_password))
+    logger.info("Contraseña cambiada | user=%s", user)
+    return {"status": "ok"}
