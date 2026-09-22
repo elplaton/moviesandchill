@@ -5,49 +5,37 @@ export default {
     "./src/**/*.{js,ts,jsx,tsx}",
   ],
   theme: {
+    // La app se diseña a 1920x1080 y se ve a tres metros: todas las medidas
+    // van en px absolutos, sin puntos de ruptura. No es una web adaptable.
+    screens: {},
     extend: {
       colors: {
-        netflix: {
+        tv: {
+          bg: '#141414',
+          deep: '#0A0A0A',
+          surface: '#1F1F1F',
+          raised: '#2A2A2A',
+          line: 'rgba(255,255,255,0.12)',
+          text: '#FFFFFF',
+          text2: '#B3B3B3',
+          text3: '#808080',
           red: '#E50914',
-          'red-hover': '#B2070E',
-          dark: '#141414',
-          darker: '#0A0A0A',
-          card: '#1A1A1A',
-          'card-hover': '#252525',
-          border: '#404040',
-          text: '#B3B3B3',
-          muted: '#808080',
-        }
+          reddeep: '#B2070E',
+          ok: '#46D369',
+          warn: '#F5A623',
+        },
       },
       fontFamily: {
         sans: ['Helvetica Neue', 'Helvetica', 'Arial', 'sans-serif'],
       },
-      borderRadius: {
-        '2xl': '1rem',
-        '3xl': '1.5rem',
-      },
-      backdropBlur: {
-        md: '12px',
-        lg: '24px',
-      },
-      animation: {
-        'fade-in': 'fadeIn 0.4s ease-out',
-        'slide-up': 'slideUp 0.5s ease-out',
-        'scale-in': 'scaleIn 0.3s ease-out',
-      },
-      keyframes: {
-        fadeIn: {
-          '0%': { opacity: '0' },
-          '100%': { opacity: '1' },
-        },
-        slideUp: {
-          '0%': { opacity: '0', transform: 'translateY(20px)' },
-          '100%': { opacity: '1', transform: 'translateY(0)' },
-        },
-        scaleIn: {
-          '0%': { opacity: '0', transform: 'scale(0.95)' },
-          '100%': { opacity: '1', transform: 'scale(1)' },
-        },
+      // Escala tipografica de television. Nada por debajo de 18 px.
+      fontSize: {
+        caption: ['18px', { lineHeight: '24px' }],
+        body: ['22px', { lineHeight: '30px' }],
+        lead: ['26px', { lineHeight: '34px' }],
+        row: ['30px', { lineHeight: '36px' }],
+        h1: ['44px', { lineHeight: '50px' }],
+        hero: ['64px', { lineHeight: '68px' }],
       },
     },
   },

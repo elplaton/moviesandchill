@@ -87,6 +87,7 @@ export interface SeriesEpisode {
 }
 
 export interface TMDBMetadata {
+  tmdb_id?: number;
   title: string;
   year?: number;
   rating?: number;
@@ -154,4 +155,22 @@ export interface BrowseItem {
 export interface BrowseRow {
   genre: string;
   items: BrowseItem[];
+}
+
+
+/** Lo que enseña el panel de arriba cuando una tarjeta tiene el foco. */
+export interface Featured {
+  key: string;
+  title: string;
+  kind: 'movie' | 'series' | 'file';
+  poster?: string;
+  backdrop?: string;
+  year?: number;
+  rating?: number;
+  overview?: string;
+  genres?: string[];
+  /** "12 episodios", "3 versiones", "1.4 GB"... */
+  subtitle?: string;
+  /** Progreso 0-1 si es algo a medias de ver. */
+  progress?: number;
 }

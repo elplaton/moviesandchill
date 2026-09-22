@@ -85,8 +85,33 @@ export function useDownloads() {
     loadPaused(); loadStatus();
   };
 
+  // Sondeo mientras haya algo en marcha: si el WebSocket se cae (o la TV lo
+  // corta al dormir), el progreso sigue llegando aunque sea cada pocos segundos.
+  const hayActivas = batches.some((b) => ['downloading', 'extracting', 'converting'].includes(b.status));
+  useEffect(() => {
+    if (!hayActivas) return;
+    const t = setInterval(loadStatus, 4000);
+    return () => clearInterval(t);
+  }, [hayActivas, loadStatus]);
+
   useEffect(() => {
     const unsub = onProgress((data: any) => {
+      // El porcentaje global del lote tambien se refleja en las tarjetas de
+      // Descargas, que leen `batches` y no el estado por archivo.
+      if (data.type === 'batch_progress' && data.batch_id) {
+        setBatches(prev => prev.map(b => b.batch_id === data.batch_id
+          ? { ...b, progress: data.overall_progress ?? b.progress, status: 'downloading' }
+          : b));
+      }
+      if (data.type === 'batch_status' && data.batch_id) {
+        // Cambio de fase (extrayendo, convirtiendo, hecho, error): se relee el estado completo.
+        loadStatus();
+      }
+      if (data.type === 'batch_update' && data.batch_id && data.downloaded_parts !== undefined) {
+        setBatches(prev => prev.map(b => b.batch_id === data.batch_id
+          ? { ...b, downloaded_parts: data.downloaded_parts, progress: data.overall_progress ?? b.progress }
+          : b));
+      }
       if (data.type === 'batch_progress' && data.part_message_id) {
         setDownloadStates(prev => {
           const next = new Map(prev);
@@ -169,7 +194,7 @@ export function useDownloads() {
       }
     });
     return () => unsub();
-  }, []);
+  }, [loadStatus]);
 
   return { batches, pausedBatches, downloadStates, loadStatus, loadPaused, download, cancelBatch, pauseBatch, resumeBatch };
 }

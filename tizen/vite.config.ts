@@ -25,8 +25,9 @@ export default defineConfig({
   },
   server: {
     proxy: {
-      '/api': 'http://localhost:8000',
-      '/ws': { target: 'ws://localhost:8000', ws: true },
+      // ws: true tambien para /api: el progreso de descargas va por
+      // /api/ws/progress y sin ello en desarrollo nunca llegaba.
+      '/api': { target: 'http://localhost:8000', ws: true },
     },
   },
 });

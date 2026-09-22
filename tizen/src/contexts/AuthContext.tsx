@@ -7,10 +7,8 @@ interface AuthContextType {
   isLoading: boolean;
   username: string | null;
   isAdmin: boolean;
-  hasPreferences: boolean | null;
   login: (username: string, password: string) => Promise<string | null>;
   logout: () => void;
-  refreshPreferences: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType>({
@@ -18,10 +16,8 @@ const AuthContext = createContext<AuthContextType>({
   isLoading: true,
   username: null,
   isAdmin: false,
-  hasPreferences: null,
   login: async () => null,
   logout: () => {},
-  refreshPreferences: async () => {},
 });
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -29,15 +25,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
   const [username, setUsername] = useState<string | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
-  const [hasPreferences, setHasPreferences] = useState<boolean | null>(null);
-
-  const checkPreferences = async () => {
-    try {
-      const res = await apiFetch('/preferences');
-      const data = await res.json();
-      setHasPreferences(data.preferences !== null);
-    } catch { setHasPreferences(false); }
-  };
 
   useEffect(() => {
     const token = getAccessToken();
@@ -50,7 +37,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             setUsername(data.username);
             setIsAdmin(data.role === 'admin');
             connectProgressWs();
-            checkPreferences();
           } else {
             clearTokens();
           }
@@ -78,15 +64,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         .then((res) => res.json())
         .then((d) => setIsAdmin(d.role === 'admin'));
       connectProgressWs();
-      await checkPreferences();
       return null;
     } catch {
       return 'Error de conexión';
     }
-  };
-
-  const refreshPreferences = async () => {
-    await checkPreferences();
   };
 
   const logout = () => {
@@ -95,11 +76,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setIsAuthenticated(false);
     setUsername(null);
     setIsAdmin(false);
-    setHasPreferences(null);
   };
 
   return (
-    <AuthContext.Provider value={{ isAuthenticated, isLoading, username, isAdmin, hasPreferences, login, logout, refreshPreferences }}>
+    <AuthContext.Provider value={{ isAuthenticated, isLoading, username, isAdmin, login, logout }}>
       {children}
     </AuthContext.Provider>
   );

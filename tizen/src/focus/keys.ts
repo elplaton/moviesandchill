@@ -40,6 +40,38 @@ let fastTimer: ReturnType<typeof setTimeout> | null = null;
 type BackHandler = () => boolean | void;
 const backHandlers: BackHandler[] = [];
 
+/** Teclas de reproduccion del mando (codigos de Tizen). */
+export type MediaKey = 'playpause' | 'play' | 'pause' | 'stop' | 'rewind' | 'forward';
+const MEDIA_BY_CODE: Record<number, MediaKey> = {
+  10252: 'playpause', 415: 'play', 19: 'pause', 413: 'stop', 412: 'rewind', 417: 'forward',
+};
+type MediaHandler = (key: MediaKey) => boolean | void;
+const mediaHandlers: MediaHandler[] = [];
+
+/** El reproductor se registra aqui para recibir play/pausa/avance del mando. */
+export function pushMediaHandler(handler: MediaHandler): () => void {
+  mediaHandlers.push(handler);
+  return () => {
+    const i = mediaHandlers.lastIndexOf(handler);
+    if (i !== -1) mediaHandlers.splice(i, 1);
+  };
+}
+
+/**
+ * Captura de teclas en bruto (reproductor): recibe la direccion antes que el
+ * motor de foco y, si devuelve true, la consume. Asi las flechas saltan en el
+ * video en vez de mover un foco que no hay.
+ */
+type RawHandler = (dir: Direction | 'enter') => boolean | void;
+const rawHandlers: RawHandler[] = [];
+export function pushRawHandler(handler: RawHandler): () => void {
+  rawHandlers.push(handler);
+  return () => {
+    const i = rawHandlers.lastIndexOf(handler);
+    if (i !== -1) rawHandlers.splice(i, 1);
+  };
+}
+
 /**
  * Registra que hacer al pulsar Atras. El ultimo registrado manda (modales
  * primero). Devuelve la funcion para darse de baja.
@@ -107,7 +139,25 @@ function onKeyDown(event: KeyboardEvent) {
     return;
   }
 
+  const media = MEDIA_BY_CODE[code];
+  if (media) {
+    event.preventDefault();
+    for (let i = mediaHandlers.length - 1; i >= 0; i--) {
+      if (mediaHandlers[i](media) !== false) return;
+    }
+    return;
+  }
+
   const dir = DIR_BY_CODE[code] || DIR_BY_KEY[event.key];
+  if (dir && rawHandlers.length) {
+    const top = rawHandlers[rawHandlers.length - 1];
+    if (top(dir)) { event.preventDefault(); return; }
+  }
+  if ((ENTER_CODES.has(code) || event.key === 'Enter') && rawHandlers.length) {
+    const top = rawHandlers[rawHandlers.length - 1];
+    if (top('enter')) { event.preventDefault(); return; }
+  }
+
   if (dir) {
     const target = event.target as HTMLElement | null;
     const typing = !!target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA');
