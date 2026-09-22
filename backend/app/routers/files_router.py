@@ -92,18 +92,51 @@ async def list_files(subpath: str = "", user: Annotated[str, Depends(get_current
             continue
         items.append({"name": entry, "is_dir": False, "size": format_size(os.path.getsize(full)), "path": full, "is_series": False, "clean_name": clean_title(entry)})
 
+    # Dueño de cada elemento (por la carpeta de la descarga) y si esta cuenta
+    # puede borrarlo: solo el dueño o un admin.
+    from app.database.downloads import owners_by_path
+    from app.database.users import get_user_by_username
+    owners = await owners_by_path()
+    me = await get_user_by_username(user) if user else None
+    is_admin = bool(me and me.get("role") == "admin")
+    for it in items:
+        row = _owner_row(owners, it["path"])
+        it["owner"] = row["owner"] if row else "admin"
+        it["can_delete"] = is_admin or bool(row and me and row["owner_id"] == me["id"])
     return {"files": items, "path": target, "parent": subpath}
+
+
+def _owner_row(owners: dict, path: str):
+    best = None
+    for folder, row in owners.items():
+        if path == folder or path.startswith(folder + os.sep):
+            if best is None or len(folder) > len(best[0]):
+                best = (folder, row)
+    return best[1] if best else None
 
 
 @router.delete("/files")
 async def delete_file(req: DeleteRequest, user: Annotated[str, Depends(get_current_user)] = None):
     from app.routers.download import config
+    from app.database.downloads import owner_of_path, delete_download, set_download_status, dir_size
+    from app.database.users import get_user_by_username
     base_dir = os.path.realpath(config["extract_path"])
     target = os.path.realpath(req.path)
     if not target.startswith(base_dir + os.sep) and target != base_dir:
         return {"error": "Ruta no permitida"}
     if not os.path.exists(target):
         return {"error": "El archivo o carpeta no existe"}
+
+    # Solo borra quien lo descargo (o un admin). Lo que no tiene fila es del admin.
+    me = await get_user_by_username(user) if user else None
+    row = await owner_of_path(target)
+    is_admin = bool(me and me.get("role") == "admin")
+    if not is_admin and not (row and me and row["owner_id"] == me["id"]):
+        owner = (row or {}).get("owner") or "admin"
+        return {"error": f"Solo {owner} puede borrarlo"}
+    if row and row["status"] in ("downloading", "paused"):
+        return {"error": "Esta descarga sigue en curso: cancélala antes de borrarla"}
+
     try:
         if os.path.isdir(target):
             shutil.rmtree(target)
@@ -114,7 +147,12 @@ async def delete_file(req: DeleteRequest, user: Annotated[str, Depends(get_curre
             parent = os.path.dirname(target)
             if parent != base_dir and os.path.isdir(parent) and not os.listdir(parent):
                 os.rmdir(parent)
-        logger.info("Borrado desde la app: %s", os.path.relpath(target, base_dir))
+        if row:
+            if os.path.exists(row["folder_path"]):
+                await set_download_status(row["folder_path"], row["status"], dir_size(row["folder_path"]))
+            else:
+                await delete_download(row["folder_path"])
+        logger.info("Borrado desde la app por %s: %s", user, os.path.relpath(target, base_dir))
         return {"deleted": req.path}
     except OSError as e:
         return {"error": str(e)}

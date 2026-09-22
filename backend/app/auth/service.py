@@ -87,6 +87,9 @@ async def authenticate(username: str, password: str) -> str | None:
     user = await get_user_by_username(username)
     if not user or not verify_password(password, user["password_hash"]):
         return None
+    if not user.get("active", True):
+        logger.info("Login rechazado: cuenta desactivada | user=%s", username)
+        return None
     if needs_rehash(user["password_hash"]):
         try:
             from app.database.users import update_password_hash

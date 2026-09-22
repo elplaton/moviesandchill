@@ -107,6 +107,19 @@ async def startup():
     from app.routers.download import init_download_router
     init_download_router(downloader, config)
 
+    # Lo que ya habia en disco antes de que las descargas tuvieran dueño pasa
+    # al admin: asi las cuotas y los permisos de borrado son uniformes.
+    try:
+        from app.database.connection import get_user_by_username as _get_user
+        from app.database.downloads import adopt_orphans
+        admin_row = await _get_user("admin")
+        if admin_row:
+            adopted = await adopt_orphans(config["extract_path"], admin_row["id"])
+            if adopted:
+                logger.info("Descargas sin dueño asignadas al admin: %d", adopted)
+    except Exception as e:
+        logger.warning("No se pudieron adoptar las descargas antiguas: %s", e)
+
     logger.info("Servidor iniciado | host=%s | port=%d | channels=%d",
                 config.get("server_host", "0.0.0.0"),
                 config.get("server_port", 8000),
@@ -167,6 +180,7 @@ from app.routers.ws_router import router as ws_router
 from app.routers.browse_router import router as browse_router
 from app.routers.tmdb_router import router as tmdb_router
 from app.routers.preferences_router import router as preferences_router
+from app.routers.admin_router import router as admin_router
 
 app.include_router(search_router)
 app.include_router(download_router)
@@ -180,6 +194,7 @@ app.include_router(ws_router)
 app.include_router(browse_router)
 app.include_router(tmdb_router)
 app.include_router(preferences_router)
+app.include_router(admin_router)
 
 
 @app.get("/health")

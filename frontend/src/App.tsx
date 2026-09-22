@@ -5,9 +5,8 @@ import Home from './pages/Home';
 import Movies from './pages/Movies';
 import Series from './pages/Series';
 import Onboarding from './pages/Onboarding';
-import Channels from './pages/Channels';
-import Settings from './pages/Settings';
-import Logs from './pages/Logs';
+import Admin from './pages/Admin';
+import Account from './pages/Account';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, isLoading } = useAuth();
@@ -44,9 +43,12 @@ export default function App() {
       </ProtectedRoute>} />
       <Route path="/movies" element={<ProtectedRoute><Movies /></ProtectedRoute>} />
       <Route path="/series" element={<ProtectedRoute><Series /></ProtectedRoute>} />
-      <Route path="/channels" element={<ProtectedRoute><Channels /></ProtectedRoute>} />
-      <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
-      <Route path="/logs" element={<ProtectedRoute><Logs /></ProtectedRoute>} />
+      <Route path="/admin" element={<ProtectedRoute><Admin /></ProtectedRoute>} />
+      <Route path="/admin/:tab" element={<ProtectedRoute><Admin /></ProtectedRoute>} />
+      <Route path="/cuenta" element={<ProtectedRoute><Account /></ProtectedRoute>} />
+      <Route path="/channels" element={<Navigate to="/admin/canales" replace />} />
+      <Route path="/settings" element={<Navigate to="/admin/ajustes" replace />} />
+      <Route path="/logs" element={<Navigate to="/admin/registros" replace />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );

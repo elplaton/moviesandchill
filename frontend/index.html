@@ -4,6 +4,16 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Movies & Chill</title>
+    <script>
+      // En un telefono se abre la PWA (/m/), salvo que se pida la web completa con ?desktop=1.
+      (function () {
+        var q = location.search;
+        if (/[?&]desktop=1/.test(q)) { try { localStorage.setItem('mc.desktop', '1'); } catch (e) {} return; }
+        var forced = false; try { forced = localStorage.getItem('mc.desktop') === '1'; } catch (e) {}
+        var phone = /Android|iPhone|iPod|Mobile/i.test(navigator.userAgent) && Math.min(screen.width, screen.height) < 768;
+        if (phone && !forced) location.replace('/m/');
+      })();
+    </script>
   </head>
   <body style="background:#141414">
     <div id="root"></div>

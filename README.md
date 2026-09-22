@@ -2,6 +2,17 @@
 
 Un servidor web autoalojado para buscar y descargar películas y series desde canales de Telegram. Diseñado para Raspberry Pi, funciona en cualquier Linux.
 
+## Dónde se usa
+
+| Cliente | Ruta / paquete | Para qué |
+|---|---|---|
+| Web de escritorio | `http://servidor/` | Todo, incluido el **panel de administración** (cuentas y cuotas, canales, ajustes, registros) |
+| PWA de móvil | `http://servidor/m/` (los teléfonos se redirigen solos) | Buscar, descargar, ver y gestionar; instalable en iPhone y Android; también con panel de administración |
+| Samsung TV (Tizen) | `tizen/` → `MoviesChill.wgt` | Ver desde el sofá con el mando |
+| LG TV (webOS) | `webos/` → `MoviesChill.ipk` | Lo mismo, mismo código |
+
+**Cuentas**: el administrador da de alta cuentas con una **cuota de disco**. Lo que descarga una cuenta lo ven todas, pero **solo su dueño (o un admin) puede borrarlo**, y nadie puede volver a descargar lo mismo. Las descargas se convierten a **MP4** para que se vean en cualquier dispositivo, iPhone incluido.
+
 ## Características
 
 - **Búsqueda multicanal** — busca en varios canales de Telegram a la vez

@@ -25,13 +25,16 @@ cd frontend && npm run dev
 
 ```
 Browser :80 → nginx (frontend) → proxy /api/* → :8000 (FastAPI backend)
+              ├─ /      web de escritorio (frontend/)
+              └─ /m/    PWA de móvil (mobile/), redirigida desde / en teléfonos
                                                     ↓
                                               PostgreSQL :5432
                                               Telegram API
                                               TMDB API
 ```
 
-- **frontend**: React 18 + Vite 5 + Tailwind 3. SPA served by nginx. Dev Vite proxy sends `/api`→`:8000`, `/ws`→`ws://localhost:8000`.
+- **frontend**: React 18 + Vite 5 + Tailwind 3. SPA served by nginx. La imagen se construye desde la raíz del repo (`context: .`) e incluye también `mobile/` en `/m/`.
+- **mobile**: PWA (React + Vite + Tailwind, `base: /m/`), manifest + service worker en `public/`. Pensada para el teléfono: pestañas abajo, ficha por ruta (`/m/t/:kind/:tmdbId`), `<video>` nativo. Dev Vite proxy sends `/api`→`:8000`, `/ws`→`ws://localhost:8000`.
 - **backend**: Python 3.12 + FastAPI + Telethon. Split into `app/routers/*`, `app/services/*`, `app/database/*`; `app/routers/download.py` is now just the wiring (`init_download_router`). Session file at `session/user.session` (gitignored — never commit it). Downloads go `downloads/` → extract → `movies/`.
 - **db**: PostgreSQL 16-alpine. Tables auto-created on startup. No migration framework.
 
@@ -51,7 +54,11 @@ Browser :80 → nginx (frontend) → proxy /api/* → :8000 (FastAPI backend)
 | `backend/app/database/browse.py` | Filas de la Home: muestreo aleatorio ponderado a lo reciente, novedades, añadidos recientemente. Solo `tmdb_valid` |
 | `backend/app/routers/search_router.py` | `/api/search` y `GET /api/media/{tmdb_id}/files` (archivos de un título; es lo que abren los modales de detalle) |
 | `backend/app/services/telegram_client.py` | Telethon wrapper, channel resolution (positive→`-100` prefix), multi-part detection |
-| `backend/app/auth/service.py` | JWT + password hashing |
+| `backend/app/auth/service.py` | JWT + password hashing; una cuenta `active = false` no entra |
+| `backend/app/routers/admin_router.py` | `/api/admin/users` (alta, rol, cuota, activar, contraseña, baja), `/api/admin/downloads`, `/api/admin/convert-library` |
+| `backend/app/database/downloads.py` | Tabla `downloads`: dueño, carpeta, tamaño y estado de cada descarga; `adopt_orphans()` asigna al admin lo que ya estaba en disco |
+| `backend/app/services/compat.py` | `make_compatible()`: todo a MP4 (H.264/HEVC + AAC, `-movflags +faststart`); `convert_library_job()` reempaqueta la biblioteca |
+| `frontend/src/pages/Admin.tsx` | Panel de administración (Usuarios · Descargas · Canales · Ajustes · Registros); solo admin, solo web |
 | `frontend/src/pages/Dashboard.tsx` | Main UI: search, Biblioteca, Explorar tabs. `parseTitle()`, `cleanTitle()`, grouping logic |
 | `frontend/src/services/api.ts` | HTTP client: auto JWT refresh on 401, redirects to `/login` on failure |
 
@@ -92,4 +99,6 @@ Default admin: `admin`/`admin` (o `TMD_ADMIN_PASSWORD`). Se crea al arrancar con
 - **Mensajes nuevos**: se indexan en tiempo real con un handler `events.NewMessage` de Telethon (`watch_new_messages()` → `index_live_message()`); el filtro de canal se evalúa en cada evento, así que los canales añadidos después también cuentan. `run_full_index` ya **no omite** los canales `done`: los escanea desde `last_message_id` (solo lo nuevo), al arrancar y en el barrido periódico (`periodic_rescan`, `TMD_RESCAN_HOURS`).
 - **Tareas de fondo**: usa `spawn()` de `app/tasks.py`, no `asyncio.create_task()` a secas. Este último se traga las excepciones y mantiene solo una referencia débil a la tarea; así estuvo roto el indexado al añadir un canal sin que apareciera nada en los logs.
 - **App de TV (`tizen/`, y `webos/` para LG)**: un solo código en `tizen/src`; `webos/` solo empaqueta (`appinfo.json`, `build.sh` genera el `.ipk` con `vite --mode webos`, objetivo Chromium 68, y `deploy.sh` instala con el CLI `ares-*` que va como devDependency de `tizen/`). Diferencias por plataforma ya resueltas en código: salida (`tizen.application.exit` / `window.close`), cursor (solo Tizen lo oculta; el Magic Remote de LG enfoca al pasar), nada de `gap` en flex (webOS 5/6 no lo soporta: `space-x`/`space-y`). Interfaz propia, no un calco de la web. Mide 1920×1080 fijos (px absolutos, sin breakpoints; `main.tsx` la escala en desarrollo). Estructura: `components/Rail` (navegación lateral, vive fuera de las rutas), `Screen` (columna de contenido con scroll por transform + `Hero`, el panel que describe la tarjeta enfocada vía `tv/featured.ts`), `Row`/`PosterCard` (carriles), `TitleDetail` (ficha a pantalla completa), `Player` (reproductor sin controles nativos; teclas en `focus/keys.ts` `pushRawHandler`/`pushMediaHandler`), `Keyboard` (teclado en pantalla). Los paneles a pantalla completa se montan por portal en `#overlays` (`components/Overlay`): dentro de la columna con transform, `position: fixed` no funciona. Un solo `DownloadsProvider` para descargas + índice de disco. Reglas de render: solo se animan transform/opacity, nada de backdrop-filter, el foco es una clase CSS. Los tests del motor de foco: `npm test`.
+- **Cuentas, cuotas y dueños**: `users.quota_bytes` (NULL = sin límite) y `users.active`. Cada descarga tiene dueño (`downloads.owner_id`); la cuota compara el disco que ocupan sus descargas vivas (`downloading|paused|done`) con `quota_bytes` antes de aceptar otra. **Una descarga la ve todo el mundo, solo la borra su dueño o un admin, y nadie puede volver a bajar lo mismo** (`POST /download` devuelve `already: true` con el dueño). `/files` devuelve `owner` y `can_delete`; `DELETE /files` los comprueba. Lo anterior a esta versión pasó al admin al arrancar.
+- **MP4 obligatorio**: iPhone/Safari no reproduce MKV, así que `make_compatible()` deja todo en MP4 (contenedor MKV ya no cuenta como compatible; HEVC se etiqueta `hvc1`; sin subtítulos porque MP4 no admite PGS/ASS). El interruptor sigue llamándose `convert_dts_to_ac3` por compatibilidad con el `.env`.
 - **No tests exist** (salvo `tizen/test`). No linting/typechecking in CI. No pre-commit hooks.

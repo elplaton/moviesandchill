@@ -18,3 +18,5 @@ backend/channels.json
 *.tsbuildinfo
 webos/dist/
 webos/*.ipk
+mobile/node_modules/
+mobile/dist/

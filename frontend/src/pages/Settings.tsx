@@ -1,9 +1,11 @@
 import { useState, useEffect } from 'react';
 import Layout from '../components/Layout';
+import { Embedded } from '../components/Layout';
 import { apiFetch } from '../services/api';
 import type { AppConfig } from '../types';
 
-export default function Settings() {
+export default function Settings({ embedded = false }: { embedded?: boolean } = {}) {
+  const Wrap = embedded ? Embedded : Layout;
   const [config, setConfig] = useState<AppConfig | null>(null);
   const [toast, setToast] = useState('');
 
@@ -24,11 +26,11 @@ export default function Settings() {
 
   if (!config) {
     return (
-      <Layout>
-        <div className="px-6 md:px-14 pt-24 flex items-center justify-center h-64">
+      <Wrap>
+        <div className="flex items-center justify-center h-64">
           <div className="animate-spin w-8 h-8 border-3 border-netflix-red border-t-transparent rounded-full" />
         </div>
-      </Layout>
+      </Wrap>
     );
   }
 
@@ -55,16 +57,13 @@ export default function Settings() {
   );
 
   return (
-    <Layout>
-      <div className="px-6 md:px-14 pt-24 pb-20 max-w-2xl mx-auto">
+    <Wrap>
+      <div className={embedded ? "max-w-2xl" : "px-6 md:px-14 pt-24 pb-20 max-w-2xl mx-auto"}>
         {toast && (
           <div className="fixed top-24 right-6 z-50 bg-green-600/90 backdrop-blur-xl border border-green-400/20 text-white px-5 py-3 rounded-2xl shadow-2xl text-sm font-medium animate-slide-up">
             {toast}
           </div>
         )}
-
-        <h1 className="text-white text-4xl font-bold mb-2 tracking-tight animate-fade-in">Ajustes</h1>
-        <p className="text-gray-400 text-sm mb-10 animate-fade-in">Configuracion de la aplicacion</p>
 
         <div className="bg-white/5 backdrop-blur-md border border-white/10 rounded-2xl p-6 mb-6 shadow-xl">
           <h2 className="text-white font-semibold mb-3">Telegram API</h2>
@@ -96,6 +95,6 @@ export default function Settings() {
           Guardar configuracion
         </button>
       </div>
-    </Layout>
+    </Wrap>
   );
 }

@@ -7,6 +7,9 @@ interface AuthContextType {
   isLoading: boolean;
   username: string | null;
   isAdmin: boolean;
+  usedBytes: number;
+  quotaBytes: number | null;
+  refreshMe: () => Promise<void>;
   hasPreferences: boolean | null;
   login: (username: string, password: string) => Promise<string | null>;
   logout: () => void;
@@ -18,6 +21,9 @@ const AuthContext = createContext<AuthContextType>({
   isLoading: true,
   username: null,
   isAdmin: false,
+  usedBytes: 0,
+  quotaBytes: null,
+  refreshMe: async () => {},
   hasPreferences: null,
   login: async () => null,
   logout: () => {},
@@ -29,6 +35,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
   const [username, setUsername] = useState<string | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [usedBytes, setUsedBytes] = useState(0);
+  const [quotaBytes, setQuotaBytes] = useState<number | null>(null);
+
+  const refreshMe = async () => {
+    try {
+      const d = await (await apiFetch('/auth/me')).json();
+      setIsAdmin(d.role === 'admin');
+      setUsedBytes(d.used_bytes || 0);
+      setQuotaBytes(d.quota_bytes ?? null);
+    } catch {}
+  };
   const [hasPreferences, setHasPreferences] = useState<boolean | null>(null);
 
   const checkPreferences = async () => {
@@ -49,6 +66,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             setIsAuthenticated(true);
             setUsername(data.username);
             setIsAdmin(data.role === 'admin');
+            setUsedBytes(data.used_bytes || 0);
+            setQuotaBytes(data.quota_bytes ?? null);
             connectProgressWs();
             checkPreferences();
           } else {
@@ -74,9 +93,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setTokens(data.access_token, data.refresh_token);
       setIsAuthenticated(true);
       setUsername(user);
-      apiFetch('/auth/me')
-        .then((res) => res.json())
-        .then((d) => setIsAdmin(d.role === 'admin'));
+      await refreshMe();
       connectProgressWs();
       await checkPreferences();
       return null;
@@ -99,7 +116,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ isAuthenticated, isLoading, username, isAdmin, hasPreferences, login, logout, refreshPreferences }}>
+    <AuthContext.Provider value={{ isAuthenticated, isLoading, username, isAdmin, usedBytes, quotaBytes, refreshMe, hasPreferences, login, logout, refreshPreferences }}>
       {children}
     </AuthContext.Provider>
   );

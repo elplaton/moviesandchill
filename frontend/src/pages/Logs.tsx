@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react';
 import Layout from '../components/Layout';
+import { Embedded } from '../components/Layout';
 import { apiFetch } from '../services/api';
 
-export default function Logs() {
+export default function Logs({ embedded = false }: { embedded?: boolean } = {}) {
+  const Wrap = embedded ? Embedded : Layout;
   const [logs, setLogs] = useState<string[]>([]);
   const [lines, setLines] = useState(100);
   const [paused, setPaused] = useState(false);
@@ -23,10 +25,8 @@ export default function Logs() {
   }, [lines, paused]);
 
   return (
-    <Layout>
-      <div className="px-6 md:px-14 pt-24 pb-8">
-        <h1 className="text-white text-4xl font-bold mb-2 tracking-tight">Logs</h1>
-        <p className="text-gray-400 text-sm mb-8">Salida de journalctl -u telegram-movie</p>
+    <Wrap>
+      <div className={embedded ? "" : "px-6 md:px-14 pt-24 pb-8"}>
 
         <div className="flex gap-3 items-center mb-5 flex-wrap">
           <input type="number" value={lines} onChange={e => setLines(parseInt(e.target.value) || 100)}
@@ -58,6 +58,6 @@ export default function Logs() {
           )}
         </div>
       </div>
-    </Layout>
+    </Wrap>
   );
 }

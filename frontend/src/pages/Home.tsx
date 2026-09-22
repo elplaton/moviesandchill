@@ -14,7 +14,7 @@ import { useDownloads } from '../hooks/useDownloads';
 import type { BrowseRow, BrowseItem, TMDBMetadata, IndexChannelStatus, SeriesEpisode, SearchResult } from '../types';
 
 export default function Home() {
-  const { username, isAdmin } = useAuth();
+  const { username, isAdmin, refreshMe } = useAuth();
   const [rows, setRows] = useState<BrowseRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedSeries, setSelectedSeries] = useState<{ title: string; metadata: TMDBMetadata; channelId?: number; episodes: SeriesEpisode[]; tmdbId?: number } | null>(null);
@@ -116,8 +116,11 @@ export default function Home() {
     poster: r.tmdb_poster, backdrop: r.tmdb_backdrop, overview: r.tmdb_overview, media_type: r.media_type, genres: r.tmdb_genres,
   });
 
+  const [notice, setNotice] = useState('');
   const handleDownload = async (msgId: number, channelId?: number) => {
-    await download(msgId, channelId);
+    const err = await download(msgId, channelId);
+    if (err) { setNotice(err); setTimeout(() => setNotice(''), 5000); }
+    else refreshMe();
   };
 
   const openSearchSeries = async (group: any) => {
@@ -203,7 +206,7 @@ export default function Home() {
           metadata={selectedSeries.metadata}
           onClose={() => setSelectedSeries(null)}
           streamUrl={streamUrl}
-          onDownload={(msgId, channelId) => download(msgId, channelId)}
+          onDownload={handleDownload}
           onCancelDownload={(id) => cancelBatch(id)}
           downloadStates={downloadStates}
           tmdbId={selectedSeries.tmdbId}
@@ -216,10 +219,14 @@ export default function Home() {
           metadata={selectedMovie.metadata}
           results={selectedMovie.results}
           onClose={() => setSelectedMovie(null)}
-          onDownload={(msgId, channelId) => download(msgId, channelId)}
+          onDownload={handleDownload}
           onCancelDownload={(id) => cancelBatch(id)}
           downloadStates={downloadStates}
         />
+      )}
+
+      {notice && (
+        <div className="fixed top-24 right-6 z-[60] bg-netflix-dark border border-netflix-red/50 text-white px-5 py-3 rounded-2xl shadow-2xl text-sm max-w-md animate-slide-up">{notice}</div>
       )}
 
       {pausedBatches.length > 0 && (

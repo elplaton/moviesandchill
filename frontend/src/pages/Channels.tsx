@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Layout from '../components/Layout';
+import { Embedded } from '../components/Layout';
 import { apiFetch } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import type { Channel } from '../types';
@@ -25,7 +26,8 @@ interface ChannelProgress {
   phase?: string;
 }
 
-export default function Channels() {
+export default function Channels({ embedded = false }: { embedded?: boolean } = {}) {
+  const Wrap = embedded ? Embedded : Layout;
   const { isAdmin } = useAuth();
   const navigate = useNavigate();
   const [channels, setChannels] = useState<Channel[]>([]);
@@ -167,16 +169,13 @@ export default function Channels() {
   if (!isAdmin) return null;
 
   return (
-    <Layout>
-      <div className="px-6 md:px-14 pt-24 pb-20 max-w-4xl mx-auto">
+    <Wrap>
+      <div className={embedded ? "" : "px-6 md:px-14 pt-24 pb-20 max-w-4xl mx-auto"}>
         {toast && (
           <div className="fixed top-24 right-6 z-50 bg-green-600/90 backdrop-blur-xl border border-green-400/20 text-white px-5 py-3 rounded-2xl shadow-2xl text-sm font-medium animate-slide-up">
             {toast}
           </div>
         )}
-
-        <h1 className="text-white text-4xl font-bold mb-2 tracking-tight animate-fade-in">Canales</h1>
-        <p className="text-gray-400 text-sm mb-10 animate-fade-in">Canales de Telegram donde se busca contenido</p>
 
         {/* Index Stats */}
         {stats && (
@@ -369,6 +368,6 @@ export default function Channels() {
           Guardar
         </button>
       </div>
-    </Layout>
+    </Wrap>
   );
 }

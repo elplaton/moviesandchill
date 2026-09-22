@@ -104,6 +104,21 @@ async def _ensure_tables():
                 created_at    TIMESTAMP DEFAULT NOW()
             )
         """)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS downloads (
+                id          SERIAL PRIMARY KEY,
+                owner_id    INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                folder_name VARCHAR(500) NOT NULL,
+                folder_path VARCHAR(1000) NOT NULL UNIQUE,
+                base_name   VARCHAR(500),
+                message_id  INTEGER,
+                channel_id  BIGINT,
+                size_bytes  BIGINT DEFAULT 0,
+                status      VARCHAR(20) DEFAULT 'downloading',
+                created_at  TIMESTAMP DEFAULT NOW(),
+                updated_at  TIMESTAMP DEFAULT NOW()
+            )
+        """)
         await _migrate_tmdb_keys(conn)
         try:
             await conn.execute("ALTER TABLE index_progress ADD COLUMN IF NOT EXISTS total_scanned INTEGER DEFAULT 0")
@@ -111,6 +126,9 @@ async def _ensure_tables():
             await conn.execute("ALTER TABLE index_progress ADD COLUMN IF NOT EXISTS phase VARCHAR(20) DEFAULT 'pending'")
             await conn.execute("ALTER TABLE media_items ADD COLUMN IF NOT EXISTS tmdb_searched BOOLEAN DEFAULT FALSE")
             await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS role VARCHAR(20) DEFAULT 'user'")
+            # Cuota de disco por cuenta (NULL = sin limite) y si puede entrar.
+            await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS quota_bytes BIGINT")
+            await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS active BOOLEAN DEFAULT TRUE")
             await conn.execute("ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS liked_years INTEGER[] DEFAULT '{}'")
         except Exception:
             pass
@@ -149,7 +167,7 @@ async def _migrate_tmdb_keys(conn):
         logger.error("Migracion de tmdb_cache fallo: %s", e)
 
 
-from app.database.users import get_user_by_username, create_user
+from app.database.users import get_user_by_username, get_user_by_id, create_user, list_users, update_user, delete_user, update_password_hash
 from app.database.channels_db import get_all_channels, get_active_channels, upsert_channel, set_active_channels, remove_channel
 from app.database.media import (insert_media_item, insert_media_items, update_media_tmdb, update_media_tmdb_many,
     search_media, get_media_by_tmdb, get_media_without_tmdb, get_media_by_channel, mark_batch_tmdb_searched,
