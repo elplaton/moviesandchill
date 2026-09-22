@@ -4,7 +4,11 @@
 
 :root { --safe-b: env(safe-area-inset-bottom, 0px); --safe-t: env(safe-area-inset-top, 0px); }
 html { -webkit-text-size-adjust: 100%; }
-body { background: #141414; color: #fff; -webkit-font-smoothing: antialiased; overscroll-behavior-y: none; }
+html, body, #root { height: 100%; overflow: hidden; }
+body { background: #141414; color: #fff; -webkit-font-smoothing: antialiased; overscroll-behavior-y: none; position: fixed; inset: 0; }
+/* Armazon: alto real de la ventana (dvh sigue a la barra de Safari), contenido desplazable dentro. */
+.app-shell { display: flex; flex-direction: column; height: 100vh; height: 100dvh; }
+.app-main { flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; }
 ::-webkit-scrollbar { display: none; }
 .no-scrollbar { scrollbar-width: none; }
 .snap-row { scroll-snap-type: x mandatory; }

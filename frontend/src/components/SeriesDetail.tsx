@@ -74,7 +74,7 @@ function EpisodeRow({ ep, streamUrl, onDownload, onCancelDownload, downloadState
           <span className="text-white/60 text-[10px]">{ds.progress}%</span>
         </div>
       ) : ep.message_id ? (
-        <DownloadOrPlay fileName={ep.name} messageId={ep.message_id} channelId={ep.channel_id}
+        <DownloadOrPlay localPath={ep.local_path} owner={ep.owner} canDelete={ep.can_delete} fileName={ep.name} messageId={ep.message_id} channelId={ep.channel_id}
           season={parsed?.season} episode={parsed?.episode} downloadStates={downloadStates}
           onDownload={(id, ch) => onDownload?.(id, ch)} onCancelDownload={onCancelDownload} title={displayName} />
       ) : (
@@ -329,7 +329,7 @@ export default function SeriesDetail({ series, metadata, onClose, streamUrl, onD
                               <p className="text-gray-500 text-[11px]">{quality ? `${quality} · ` : ''}{info}</p>
                             </div>
                             {g.first.message_id ? (
-                              <DownloadOrPlay fileName={g.first.name} messageId={g.first.message_id!} channelId={g.first.channel_id} season={parseEpisode(g.first.name)?.season} episode={parseEpisode(g.first.name)?.episode} downloadStates={downloadStates} onDownload={(id, ch) => onDownload?.(id, ch)} onCancelDownload={onCancelDownload} title={metadata.title || series.name} metadata={metadata} small={false} />
+                              <DownloadOrPlay localPath={g.first.local_path} owner={g.first.owner} canDelete={g.first.can_delete} fileName={g.first.name} messageId={g.first.message_id!} channelId={g.first.channel_id} season={parseEpisode(g.first.name)?.season} episode={parseEpisode(g.first.name)?.episode} downloadStates={downloadStates} onDownload={(id, ch) => onDownload?.(id, ch)} onCancelDownload={onCancelDownload} title={metadata.title || series.name} metadata={metadata} small={false} />
                             ) : (
                               <span className="text-gray-600 text-[10px] shrink-0">No disponible</span>
                             )}
@@ -370,7 +370,7 @@ export default function SeriesDetail({ series, metadata, onClose, streamUrl, onD
                                       <p className="text-gray-500 text-[10px]">{info}</p>
                                     </div>
                                     {v.first.message_id ? (
-                                      <DownloadOrPlay fileName={v.first.name} messageId={v.first.message_id!} channelId={v.first.channel_id} season={parseEpisode(v.first.name)?.season} episode={parseEpisode(v.first.name)?.episode} downloadStates={downloadStates} onDownload={(id, ch) => onDownload?.(id, ch)} onCancelDownload={onCancelDownload} title={metadata.title || series.name} metadata={metadata} small={true} />
+                                      <DownloadOrPlay localPath={v.first.local_path} owner={v.first.owner} canDelete={v.first.can_delete} fileName={v.first.name} messageId={v.first.message_id!} channelId={v.first.channel_id} season={parseEpisode(v.first.name)?.season} episode={parseEpisode(v.first.name)?.episode} downloadStates={downloadStates} onDownload={(id, ch) => onDownload?.(id, ch)} onCancelDownload={onCancelDownload} title={metadata.title || series.name} metadata={metadata} small={true} />
                                     ) : (
                                       <span className="text-gray-600 text-[10px] shrink-0">No disponible</span>
                                     )}
@@ -407,7 +407,7 @@ export default function SeriesDetail({ series, metadata, onClose, streamUrl, onD
                         <p className="text-gray-500 text-[11px]">{quality ? `${quality} · ` : ''}{info}</p>
                       </div>
                       {g.first.message_id ? (
-                        <DownloadOrPlay fileName={g.first.name} messageId={g.first.message_id!} channelId={g.first.channel_id} season={parseEpisode(g.first.name)?.season} episode={parseEpisode(g.first.name)?.episode} downloadStates={downloadStates} onDownload={(id, ch) => onDownload?.(id, ch)} onCancelDownload={onCancelDownload} title={metadata.title || series.name} metadata={metadata} small={false} />
+                        <DownloadOrPlay localPath={g.first.local_path} owner={g.first.owner} canDelete={g.first.can_delete} fileName={g.first.name} messageId={g.first.message_id!} channelId={g.first.channel_id} season={parseEpisode(g.first.name)?.season} episode={parseEpisode(g.first.name)?.episode} downloadStates={downloadStates} onDownload={(id, ch) => onDownload?.(id, ch)} onCancelDownload={onCancelDownload} title={metadata.title || series.name} metadata={metadata} small={false} />
                       ) : (
                         <span className="text-gray-600 text-[10px] shrink-0">No disponible</span>
                       )}
@@ -447,7 +447,7 @@ export default function SeriesDetail({ series, metadata, onClose, streamUrl, onD
                                 <p className="text-gray-500 text-[10px]">{info}</p>
                               </div>
                               {v.first.message_id ? (
-                                <DownloadOrPlay fileName={v.first.name} messageId={v.first.message_id!} channelId={v.first.channel_id} season={parseEpisode(v.first.name)?.season} episode={parseEpisode(v.first.name)?.episode} downloadStates={downloadStates} onDownload={(id, ch) => onDownload?.(id, ch)} onCancelDownload={onCancelDownload} title={metadata.title || series.name} metadata={metadata} small={true} />
+                                <DownloadOrPlay localPath={v.first.local_path} owner={v.first.owner} canDelete={v.first.can_delete} fileName={v.first.name} messageId={v.first.message_id!} channelId={v.first.channel_id} season={parseEpisode(v.first.name)?.season} episode={parseEpisode(v.first.name)?.episode} downloadStates={downloadStates} onDownload={(id, ch) => onDownload?.(id, ch)} onCancelDownload={onCancelDownload} title={metadata.title || series.name} metadata={metadata} small={true} />
                               ) : (
                                 <span className="text-gray-600 text-[10px] shrink-0">No disponible</span>
                               )}

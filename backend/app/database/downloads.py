@@ -13,19 +13,49 @@ ACTIVE_STATES = ("downloading", "paused", "done")
 
 async def create_download(owner_id: int, folder_name: str, folder_path: str, base_name: str,
                           message_id: int, channel_id: int | None, size_bytes: int, status: str = "downloading"):
+    """Una fila por descarga. folder_path es lo que posee: la carpeta de una
+    pelicula o, en una serie, el archivo del episodio (varios episodios
+    comparten carpeta de temporada, asi que la ruta no puede ser unica)."""
     pool = get_pool()
     if not pool:
         return None
     async with pool.acquire() as conn:
+        if message_id:
+            await conn.execute("DELETE FROM downloads WHERE message_id = $1 AND channel_id IS NOT DISTINCT FROM $2",
+                               message_id, channel_id)
+        else:
+            await conn.execute("DELETE FROM downloads WHERE folder_path = $1", folder_path)
         return await conn.fetchval("""
             INSERT INTO downloads (owner_id, folder_name, folder_path, base_name, message_id, channel_id, size_bytes, status)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-            ON CONFLICT (folder_path) DO UPDATE SET
-                owner_id = EXCLUDED.owner_id, base_name = EXCLUDED.base_name, message_id = EXCLUDED.message_id,
-                channel_id = EXCLUDED.channel_id, size_bytes = EXCLUDED.size_bytes, status = EXCLUDED.status,
-                updated_at = NOW()
-            RETURNING id
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id
         """, owner_id, folder_name, folder_path, base_name, message_id, channel_id, size_bytes, status)
+
+
+async def move_download(old_path: str, new_path: str, status: str, size_bytes: int):
+    """Al terminar un episodio, la ruta pasa de la carpeta temporal al archivo final."""
+    pool = get_pool()
+    if not pool:
+        return
+    async with pool.acquire() as conn:
+        # folder_name (la etiqueta legible, "The Office 1x01") se conserva.
+        await conn.execute("""
+            UPDATE downloads SET folder_path=$2, status=$3, size_bytes=$4, updated_at=NOW()
+            WHERE folder_path=$1
+        """, old_path, new_path, status, size_bytes)
+
+
+async def downloads_by_message():
+    """{(channel_id, message_id): fila} de lo terminado, para marcar el catalogo."""
+    pool = get_pool()
+    if not pool:
+        return {}
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT d.message_id, d.channel_id, d.folder_path, d.owner_id, d.status, u.username AS owner
+            FROM downloads d LEFT JOIN users u ON u.id = d.owner_id
+            WHERE d.message_id > 0
+        """)
+        return {(r["channel_id"], r["message_id"]): dict(r) for r in rows}
 
 
 async def set_download_status(folder_path: str, status: str, size_bytes: int | None = None):
@@ -60,8 +90,8 @@ async def get_download_by_path(folder_path: str):
         return dict(row) if row else None
 
 
-async def find_existing(message_id: int, channel_id: int | None, folder_path: str):
-    """Descarga ya hecha o en curso del mismo archivo (o de la misma carpeta)."""
+async def find_existing(message_id: int, channel_id: int | None, folder_path: str | None = None):
+    """Descarga ya hecha o en curso del mismo archivo (o, en peliculas, de la misma carpeta)."""
     pool = get_pool()
     if not pool:
         return None
@@ -69,7 +99,7 @@ async def find_existing(message_id: int, channel_id: int | None, folder_path: st
         row = await conn.fetchrow("""
             SELECT d.*, u.username AS owner FROM downloads d LEFT JOIN users u ON u.id = d.owner_id
             WHERE d.status = ANY($4::text[])
-              AND ((d.message_id = $1 AND d.channel_id IS NOT DISTINCT FROM $2) OR d.folder_path = $3)
+              AND ((d.message_id = $1 AND d.channel_id IS NOT DISTINCT FROM $2) OR ($3::text IS NOT NULL AND d.folder_path = $3))
             ORDER BY d.created_at LIMIT 1
         """, message_id, channel_id, folder_path, list(ACTIVE_STATES))
         return dict(row) if row else None
@@ -160,7 +190,8 @@ async def adopt_orphans(extract_path: str, admin_id: int) -> int:
     async with pool.acquire() as conn:
         for entry in sorted(os.listdir(base)):
             full = os.path.join(base, entry)
-            if entry.startswith(".") or full in known:
+            # Una carpeta de serie con episodios ya adjudicados no se adopta entera.
+            if entry.startswith(".") or full in known or any(k.startswith(full + os.sep) for k in known):
                 continue
             if not (os.path.isdir(full) or os.path.isfile(full)):
                 continue

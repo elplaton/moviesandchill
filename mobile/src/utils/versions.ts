@@ -20,6 +20,10 @@ export interface Version {
   episode?: number;
   /** Ruta en disco cuando viene de la biblioteca. */
   path?: string;
+  /** Lo que dice el servidor: ruta final si esta descargado, y su dueño. */
+  localPath?: string | null;
+  owner?: string | null;
+  canDelete?: boolean;
 }
 
 export interface Episode {
@@ -76,6 +80,7 @@ export function groupVersions(files: SearchResult[]): Version[] {
       downloaded: !!first.downloaded,
       season: first.season ?? undefined,
       episode: first.episode ?? undefined,
+      localPath: first.local_path, owner: first.owner, canDelete: first.can_delete,
     };
   });
 }

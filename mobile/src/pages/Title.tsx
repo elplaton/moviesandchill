@@ -89,6 +89,8 @@ export default function Title() {
   }, [isSeries, tmdbId, active]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const stateOf = useCallback((v: Version): RowState => {
+    // Primero lo que dice el servidor (ruta y dueño en la tabla de descargas); si no, el indice local.
+    if (v.localPath) return { s: 'ready', f: { name: v.localPath.split('/').pop() || v.fileName, path: v.localPath, owner: v.owner || 'admin', canDelete: !!v.canDelete } };
     const f = localFor(v.fileName, v.season, v.episode); if (f) return { s: 'ready', f };
     const ds = states.get(v.messageId);
     if (ds && ['downloading', 'extracting', 'converting'].includes(ds.status)) return { s: 'busy', ds };
@@ -110,7 +112,7 @@ export default function Title() {
   }, [remove, refresh]);
 
   const playable = useMemo(() => {
-    const ready = versions.map(v => ({ v, f: localFor(v.fileName, v.season, v.episode) })).filter(x => x.f) as { v: Version; f: LocalFile }[];
+    const ready = versions.map(v => ({ v, f: v.localPath ? { name: v.fileName, path: v.localPath, owner: v.owner || 'admin', canDelete: !!v.canDelete } : localFor(v.fileName, v.season, v.episode) })).filter(x => x.f) as { v: Version; f: LocalFile }[];
     if (!ready.length) return null;
     const r = ready.find(x => resumePoint(x.f.path) > 0) || ready[0];
     return { path: r.f.path, resume: !!ready.find(x => resumePoint(x.f.path) > 0), subtitle: r.v.episode !== undefined ? `${r.v.season ?? ''}x${String(r.v.episode).padStart(2, '0')}` : undefined };

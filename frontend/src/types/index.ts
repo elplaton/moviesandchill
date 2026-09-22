@@ -16,6 +16,10 @@ export interface SearchResult {
   tmdb_id?: number;
   tmdb_type?: string;
   tmdb_valid?: boolean;
+  /** Ruta en el servidor si ya esta descargado (segun la tabla de descargas). */
+  local_path?: string | null;
+  owner?: string | null;
+  can_delete?: boolean;
   tmdb_title?: string;
   tmdb_year?: number;
   tmdb_rating?: number;
@@ -86,6 +90,9 @@ export interface SeriesEpisode {
   path: string;
   message_id?: number;
   channel_id?: number;
+  local_path?: string | null;
+  owner?: string | null;
+  can_delete?: boolean;
 }
 
 export interface TMDBMetadata {

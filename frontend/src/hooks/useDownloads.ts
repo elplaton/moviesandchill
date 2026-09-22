@@ -62,8 +62,24 @@ export function useDownloads() {
     loadPaused(); loadStatus();
   };
 
+  // Estado inicial y sondeo mientras haya algo en marcha: asi lo que lanza
+  // otra cuenta (o el movil) aparece en Actividad sin recargar.
+  useEffect(() => { loadStatus(); }, [loadStatus]);
+  const hayActivas = batches.some((b) => ['downloading', 'extracting', 'converting'].includes(b.status));
+  useEffect(() => {
+    const t = setInterval(loadStatus, hayActivas ? 4000 : 15000);
+    return () => clearInterval(t);
+  }, [hayActivas, loadStatus]);
+
   useEffect(() => {
     const unsub = onProgress((data: any) => {
+      if (data.type === 'batch_progress' && data.batch_id) {
+        setBatches(prev => {
+          if (!prev.some(b => b.batch_id === data.batch_id)) { loadStatus(); return prev; }
+          return prev.map(b => b.batch_id === data.batch_id ? { ...b, progress: data.overall_progress ?? b.progress } : b);
+        });
+      }
+      if (data.type === 'batch_status' && data.batch_id) loadStatus();
       if (data.type === 'batch_progress' && data.part_message_id) {
         setDownloadStates(prev => {
           const next = new Map(prev);
@@ -143,7 +159,7 @@ export function useDownloads() {
       }
     });
     return () => unsub();
-  }, []);
+  }, [loadStatus]);
 
   return { batches, pausedBatches, downloadStates, loadStatus, loadPaused, download, cancelBatch, pauseBatch, resumeBatch };
 }

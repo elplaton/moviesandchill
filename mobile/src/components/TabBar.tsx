@@ -16,7 +16,7 @@ export default function TabBar() {
     { to: '/perfil', label: 'Perfil', icon: <IUser /> },
   ];
   return (
-    <nav className="fixed bottom-0 left-0 right-0 z-40 bg-[#0A0A0A]/95 backdrop-blur border-t border-white/10" style={{ paddingBottom: 'var(--safe-b)' }}>
+    <nav className="shrink-0 z-40 bg-[#0A0A0A] border-t border-white/10" style={{ paddingBottom: 'var(--safe-b)' }}>
       <div className="flex">
         {tabs.map(t => (
           <NavLink key={t.to} to={t.to} end={t.to === '/'}

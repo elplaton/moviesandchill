@@ -7,6 +7,10 @@ import { getAccessToken } from '../services/api';
 import type { DownloadState, TMDBMetadata } from '../types';
 
 interface Props {
+  /** Datos del servidor sobre este archivo (ruta local, dueño), si los hay. */
+  localPath?: string | null;
+  owner?: string | null;
+  canDelete?: boolean;
   fileName: string;
   messageId: number;
   channelId?: number;
@@ -27,12 +31,14 @@ const streamUrl = (path: string) => `/api/stream?path=${encodeURIComponent(path)
  * el servidor) Ver y, solo para su dueño o un admin, Borrar. Si lo bajo otra
  * cuenta se indica y no se puede volver a descargar.
  */
-export default function DownloadOrPlay({ fileName, messageId, channelId, season, episode, downloadStates, onDownload, onCancelDownload, title, metadata, small }: Props) {
+export default function DownloadOrPlay({ localPath, owner, canDelete, fileName, messageId, channelId, season, episode, downloadStates, onDownload, onCancelDownload, title, metadata, small }: Props) {
   const { localFor, remove } = useLibrary();
   const { refreshMe } = useAuth();
   const [playing, setPlaying] = useState(false);
   const [busy, setBusy] = useState(false);
-  const local = localFor(fileName, season, episode);
+  const local = localPath
+    ? { name: localPath.split('/').pop() || fileName, path: localPath, size: undefined as string | undefined, owner: owner || 'admin', canDelete: !!canDelete }
+    : localFor(fileName, season, episode);
   const ds = downloadStates?.get(messageId);
   const pad = small ? 'px-2.5 py-1 text-xs' : 'px-3 py-1.5 text-xs';
 

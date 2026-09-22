@@ -3,7 +3,8 @@
  * iconos) para que abra al instante y funcione la instalacion; la API y el
  * video van siempre a la red (son datos vivos y rangos de bytes).
  */
-const VERSION = 'mc-m-v1';
+// __BUILD__ lo sustituye el script de compilacion por la fecha del build.
+const VERSION = 'mc-m-__BUILD__';
 const SHELL = ['/m/', '/m/index.html', '/m/manifest.webmanifest', '/m/icons/icon-192.png', '/m/icons/icon-512.png'];
 
 self.addEventListener('install', (event) => {

@@ -169,7 +169,7 @@ export default function MovieDetail({ title, metadata, results, onClose, onDownl
                         <p className="text-white text-sm truncate">{cleanFileName(g.baseName)}</p>
                         <p className="text-gray-500 text-[11px]">{g.parts[0].channel_name} · {g.parts.length} partes · {formatBytes(g.totalSize)}</p>
                       </div>
-                      <DownloadOrPlay fileName={g.parts[0].file_name} messageId={g.firstId} channelId={g.channelId} downloadStates={downloadStates} onDownload={onDownload} onCancelDownload={onCancelDownload} title={metadata.title || title} metadata={metadata} />
+                      <DownloadOrPlay localPath={g.parts[0].local_path} owner={g.parts[0].owner} canDelete={g.parts[0].can_delete} fileName={g.parts[0].file_name} messageId={g.firstId} channelId={g.channelId} downloadStates={downloadStates} onDownload={onDownload} onCancelDownload={onCancelDownload} title={metadata.title || title} metadata={metadata} />
                     </div>
                   ))}
                   {mpSingles.map((r, idx) => (
@@ -179,7 +179,7 @@ export default function MovieDetail({ title, metadata, results, onClose, onDownl
                         <p className="text-white text-sm truncate">{cleanFileName(r.file_name)}</p>
                         <p className="text-gray-500 text-[11px]">{r.channel_name} · {r.size_str}</p>
                       </div>
-                      <DownloadOrPlay fileName={r.file_name} messageId={r.id} channelId={r.channel_id} downloadStates={downloadStates} onDownload={onDownload} onCancelDownload={onCancelDownload} title={metadata.title || title} metadata={metadata} />
+                      <DownloadOrPlay localPath={r.local_path} owner={r.owner} canDelete={r.can_delete} fileName={r.file_name} messageId={r.id} channelId={r.channel_id} downloadStates={downloadStates} onDownload={onDownload} onCancelDownload={onCancelDownload} title={metadata.title || title} metadata={metadata} />
                     </div>
                   ))}
                 </div>

@@ -10,6 +10,7 @@ from pydantic import BaseModel
 
 from app.auth.dependencies import get_current_user, get_current_account
 from app.services.compat import make_compatible
+from app.services.layout import plan as plan_layout, finalize_episode
 from app.services.extractor import extract_archive, find_first_archive
 from app.services.storage import format_size, get_free_space, suggest_folder_name, create_movie_folder
 from app.services.storage import save_paused_batch, load_paused_batches, delete_paused_batch
@@ -59,15 +60,25 @@ async def download(req: DownloadRequest, background_tasks: BackgroundTasks, acco
     if not parts:
         return {"error": "No se encontro el mensaje o no tiene archivo adjunto"}
 
-    folder_path = create_movie_folder(config["extract_path"], folder_name or "descarga")
+    # El message_id solo es unico dentro de un canal: sin el prefijo, dos canales
+    # distintos con el mismo id pisarian el batch del otro.
+    batch_id = f"{req.channel_id or 0}_{req.message_id}"
+
+    # Carpeta segun el catalogo: Serie/Temporada N/ para episodios, Titulo (Año)/ para peliculas.
+    from app.database.media import get_media_item
+    catalog = await get_media_item(req.channel_id, req.message_id)
+    layout = plan_layout(config["extract_path"], parts[0]["file_name"], catalog, batch_id)
+    folder_path = layout["work_dir"]
+    folder_name = layout["folder_name"]
     total_size = sum(p.get("size", 0) for p in parts)
 
     # Una descarga por archivo para todo el mundo: si ya esta en disco (de
     # quien sea) se ofrece ver, no volver a bajar.
-    existing = await find_existing(req.message_id, req.channel_id, folder_path)
+    existing = await find_existing(req.message_id, req.channel_id, layout["final_dir"] if layout["kind"] == "movie" else None)
     if existing and existing["status"] == "done" and os.path.exists(existing["folder_path"]):
         return {"error": f"Ya está descargado por {existing.get('owner') or 'admin'}", "already": True,
-                "owner": existing.get("owner"), "folder_name": existing["folder_name"]}
+                "owner": existing.get("owner"), "folder_name": existing["folder_name"], "local_path": existing["folder_path"]}
+    os.makedirs(folder_path, exist_ok=True)
 
     # Cuota de disco de la cuenta: lo que ya ocupa (incluido lo que esta bajando) mas esto.
     quota = account.get("quota_bytes")
@@ -78,17 +89,15 @@ async def download(req: DownloadRequest, background_tasks: BackgroundTasks, acco
                              f"y esto ocupa {format_size(total_size)}", "quota_exceeded": True,
                     "used_bytes": used, "quota_bytes": quota}
 
-    # El message_id solo es unico dentro de un canal: sin el prefijo, dos canales
-    # distintos con el mismo id pisarian el batch del otro.
-    batch_id = f"{req.channel_id or 0}_{req.message_id}"
-    await create_download(account["id"], os.path.basename(folder_path), folder_path, base_name or folder_name or "",
+    await create_download(account["id"], folder_name, folder_path, base_name or folder_name or "",
                           req.message_id, req.channel_id, total_size, "downloading")
 
     dl.active_batches[batch_id] = {
         "batch_id": batch_id, "base_name": base_name or folder_name or "",
         "owner": account["username"], "owner_id": account["id"],
-        "folder_name": os.path.basename(folder_path), "folder_path": folder_path,
-        "parts": [{"message_id": p["message_id"], "file_name": p["file_name"], "part_num": p.get("part_num", 0), "size": p.get("size", 0), "size_str": format_size(p.get("size", 0)), "downloaded": 0, "progress": 0, "status": "pending"} for p in parts],
+        "kind": layout["kind"], "final_dir": layout["final_dir"], "final_stem": layout.get("final_stem"),
+        "folder_name": folder_name, "folder_path": folder_path,
+        "parts": [{"message_id": p["message_id"], "channel_id": p.get("channel_id", req.channel_id), "file_name": p["file_name"], "part_num": p.get("part_num", 0), "size": p.get("size", 0), "size_str": format_size(p.get("size", 0)), "downloaded": 0, "progress": 0, "status": "pending"} for p in parts],
         "total_parts": len(parts), "downloaded_parts": 0, "total_size": total_size, "total_size_str": format_size(total_size),
         "downloaded_size": 0, "progress": 0, "status": "downloading", "extracted_files": [], "error": None,
     }
@@ -97,7 +106,7 @@ async def download(req: DownloadRequest, background_tasks: BackgroundTasks, acco
     task.add_done_callback(lambda _, bid=batch_id: _batch_tasks.pop(bid, None))
     _batch_tasks[batch_id] = task
 
-    return {"status": "started", "batch_id": batch_id, "folder_name": os.path.basename(folder_path), "folder_path": folder_path, "total_parts": len(parts), "parts": [{"message_id": p["message_id"], "file_name": p["file_name"]} for p in parts]}
+    return {"status": "started", "batch_id": batch_id, "folder_name": folder_name, "folder_path": folder_path, "total_parts": len(parts), "parts": [{"message_id": p["message_id"], "file_name": p["file_name"]} for p in parts]}
 
 
 def _may_manage(batch: dict, account: dict) -> bool:
@@ -163,7 +172,8 @@ async def resume(req: PauseRequest, background_tasks: BackgroundTasks, account: 
         return {"error": f"Solo {row.get('owner') or 'su dueño'} puede reanudarla"}
     await set_download_status(saved["folder_path"], "downloading")
     batch = {"batch_id": saved["batch_id"], "base_name": saved.get("base_name", ""), "folder_name": saved["folder_name"], "folder_path": saved["folder_path"], "parts": saved["parts"], "total_parts": saved["total_parts"], "downloaded_parts": saved.get("downloaded_parts", 0), "total_size": saved.get("total_size", 0), "total_size_str": saved.get("total_size_str", ""), "downloaded_size": saved.get("downloaded_size", 0), "progress": 0, "status": "downloading", "extracted_files": [], "error": None,
-             "owner": (row or {}).get("owner") or account["username"], "owner_id": (row or {}).get("owner_id") or account["id"]}
+             "owner": (row or {}).get("owner") or account["username"], "owner_id": (row or {}).get("owner_id") or account["id"],
+             "kind": saved.get("kind", "movie"), "final_dir": saved.get("final_dir", saved["folder_path"]), "final_stem": saved.get("final_stem")}
     dl.active_batches[req.batch_id] = batch
     delete_paused_batch(req.batch_id)
     task = asyncio.create_task(_download_batch(req.batch_id))
@@ -210,13 +220,13 @@ async def _download_batch(batch_id):
 
                 def make_progress_cb(msg_id):
                     def cb(_msg_id, current, total):
-                        pct = int(current / total * 100) if total else 0
+                        pct = min(100, int(current / total * 100)) if total else 0
                         for p in batch["parts"]:
                             if p["message_id"] == msg_id:
                                 p["downloaded"] = current; p["progress"] = pct; break
                         total_downloaded = sum(p["downloaded"] for p in batch["parts"])
                         batch["downloaded_size"] = total_downloaded
-                        batch["progress"] = int(total_downloaded / batch["total_size"] * 100) if batch["total_size"] else 0
+                        batch["progress"] = min(100, int(total_downloaded / batch["total_size"] * 100)) if batch["total_size"] else 0
                         now = time.monotonic()
                         if now - batch["_last_broadcast"] >= 1.0:
                             batch["_last_broadcast"] = now
@@ -224,7 +234,8 @@ async def _download_batch(batch_id):
                     return cb
 
                 try:
-                    await dl.download_to_folder(part["message_id"], folder, progress_callback=make_progress_cb(part["message_id"]))
+                    await dl.download_to_folder(part["message_id"], folder, progress_callback=make_progress_cb(part["message_id"]),
+                                                channel_id=part.get("channel_id"))
                     part["status"] = "done"; part["progress"] = 100; batch["downloaded_parts"] += 1
                 except asyncio.CancelledError:
                     raise
@@ -274,9 +285,21 @@ async def _download_batch(batch_id):
             all_extracted = convert_task.result()
             batch["extracted_files"] = all_extracted
 
+        from app.database.downloads import set_download_status, move_download, dir_size
+        if batch.get("final_stem"):
+            # De la carpeta temporal al sitio definitivo con su nombre:
+            #   series    -> Serie/Temporada N/<N>x<EE>.<ext>   (se posee el archivo)
+            #   peliculas -> Titulo (Año)/Titulo (Año).<ext>     (se posee la carpeta)
+            finals = await asyncio.get_event_loop().run_in_executor(None, finalize_episode, folder, batch["final_dir"], batch["final_stem"])
+            all_extracted = finals or all_extracted
+            owned = (finals[0] if finals else folder) if batch.get("kind") == "series" else batch["final_dir"]
+            size = sum(os.path.getsize(f) for f in finals if os.path.isfile(f)) if batch.get("kind") == "series" else dir_size(batch["final_dir"])
+            await move_download(folder, owned, "done", size)
+            batch["folder_path"] = owned
+        else:
+            await set_download_status(folder, "done", dir_size(folder))
         batch["status"] = "done"
-        from app.database.downloads import set_download_status, dir_size
-        await set_download_status(folder, "done", dir_size(folder))
+        batch["extracted_files"] = all_extracted
         logger.info("Batch complete | %s | %d files", batch.get("folder_name", ""), len(all_extracted))
         await broadcast_progress({"type": "batch_status", "batch_id": batch_id, "status": "done", "folder_name": batch["folder_name"], "folder_path": batch["folder_path"], "extracted_files": [os.path.basename(f) for f in all_extracted]})
 
@@ -295,18 +318,31 @@ async def _download_batch(batch_id):
             batch["status"] = "cancelled"
             logger.info("Batch cancelled | %s", batch.get("folder_name", ""))
             _cleanup_partial_files(batch.get("folder_path", ""), {p["file_name"] for p in batch["parts"]})
+            _prune_work_dir(batch)
             from app.database.downloads import delete_download
             await delete_download(batch.get("folder_path", ""))
             await broadcast_progress({"type": "batch_status", "batch_id": batch_id, "status": "cancelled", "folder_name": batch.get("folder_name", "")})
     except Exception as e:
         batch["status"] = "error"; batch["error"] = str(e)
         logger.error("Batch failed | %s | %s", batch.get("folder_name", ""), e)
+        _prune_work_dir(batch)
         from app.database.downloads import delete_download
         await delete_download(batch.get("folder_path", ""))
         await broadcast_progress({"type": "batch_status", "batch_id": batch_id, "status": "error", "error": str(e), "folder_name": batch["folder_name"], "parts": [{"message_id": p["message_id"], "file_name": p["file_name"], "status": p["status"], "error": p.get("error")} for p in batch["parts"]]})
 
     await asyncio.sleep(10)
     downloader.active_batches.pop(batch_id, None)
+
+
+def _prune_work_dir(batch):
+    """Sin lote no hay carpeta temporal que mantener; y si la carpeta de la
+    pelicula o la temporada se queda vacia, tampoco."""
+    from app.services.layout import prune_empty_dirs
+    work = batch.get("folder_path", "")
+    if work and os.path.basename(work).startswith(".dl_"):
+        shutil.rmtree(work, ignore_errors=True)
+        # Desde la carpeta temporal (ya borrada) hacia arriba: pelicula o temporada y serie.
+        prune_empty_dirs(work, config.get("extract_path", "/app/movies"))
 
 
 def _cleanup_partial_files(folder, target_files=None, remove_empty_dir=True):

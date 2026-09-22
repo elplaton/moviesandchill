@@ -183,6 +183,7 @@ export default function TitleDetail({ input, onClose }: Props) {
 
   const pathOf = useCallback((v: Version): string | undefined => {
     if (v.path) return v.path;
+    if (v.localPath) return v.localPath;
     return rutaEpisodio(v.fileName, v.season, v.episode) || rutaDe(v.fileName);
   }, [rutaDe, rutaEpisodio]);
 

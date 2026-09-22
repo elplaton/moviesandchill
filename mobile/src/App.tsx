@@ -21,8 +21,11 @@ export default function App() {
   if (!me) return location.pathname === '/login' ? <Login /> : <Navigate to="/login" replace />;
   if (location.pathname === '/login') return <Navigate to="/" replace />;
   const fullscreen = location.pathname.startsWith('/t/');
+  // Armazon fijo: la pagina no se desplaza (se desplaza <main>), asi la barra
+  // de Safari no se pliega ni mueve la barra de pestañas.
   return (
-    <div className={fullscreen ? '' : 'pb-[calc(56px+var(--safe-b))]'}>
+    <div className="app-shell">
+      <main className="app-main" key={location.pathname}>
       <Routes>
         <Route path="/" element={<Home />} />
         <Route path="/buscar" element={<Search />} />
@@ -33,6 +36,7 @@ export default function App() {
         <Route path="/admin/:tab" element={me.role === 'admin' ? <Admin /> : <Navigate to="/" replace />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
+      </main>
       {!fullscreen && <TabBar />}
       <Toasts />
     </div>

@@ -123,8 +123,12 @@ def save_paused_batch(batch_id, batch_data):
         "total_size_str": batch_data.get("total_size_str", ""),
         "downloaded_parts": batch_data["downloaded_parts"],
         "downloaded_size": batch_data.get("downloaded_size", 0),
+        "kind": batch_data.get("kind", "movie"),
+        "final_dir": batch_data.get("final_dir", batch_data["folder_path"]),
+        "final_stem": batch_data.get("final_stem"),
         "parts": [{
             "message_id": p["message_id"],
+            "channel_id": p.get("channel_id"),
             "file_name": p["file_name"],
             "part_num": p.get("part_num", 0),
             "size": p.get("size", 0),

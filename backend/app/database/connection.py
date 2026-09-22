@@ -109,7 +109,7 @@ async def _ensure_tables():
                 id          SERIAL PRIMARY KEY,
                 owner_id    INTEGER REFERENCES users(id) ON DELETE SET NULL,
                 folder_name VARCHAR(500) NOT NULL,
-                folder_path VARCHAR(1000) NOT NULL UNIQUE,
+                folder_path VARCHAR(1000) NOT NULL,
                 base_name   VARCHAR(500),
                 message_id  INTEGER,
                 channel_id  BIGINT,
@@ -119,6 +119,13 @@ async def _ensure_tables():
                 updated_at  TIMESTAMP DEFAULT NOW()
             )
         """)
+        # Varios episodios comparten carpeta de temporada: la ruta ya no es unica.
+        try:
+            await conn.execute("ALTER TABLE downloads DROP CONSTRAINT IF EXISTS downloads_folder_path_key")
+            await conn.execute("CREATE INDEX IF NOT EXISTS idx_downloads_path ON downloads (folder_path)")
+            await conn.execute("CREATE INDEX IF NOT EXISTS idx_downloads_msg ON downloads (channel_id, message_id)")
+        except Exception as e:
+            logger.warning("Migracion de downloads: %s", e)
         await _migrate_tmdb_keys(conn)
         try:
             await conn.execute("ALTER TABLE index_progress ADD COLUMN IF NOT EXISTS total_scanned INTEGER DEFAULT 0")

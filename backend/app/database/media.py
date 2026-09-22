@@ -183,3 +183,19 @@ async def get_missing_cache_pairs():
             WHERE mi.tmdb_id IS NOT NULL AND mi.tmdb_type IS NOT NULL AND tc.tmdb_id IS NULL
         """)
         return [(r["tmdb_id"], r["tmdb_type"]) for r in rows]
+
+
+async def get_media_item(channel_id: int | None, message_id: int):
+    """Fila del catalogo de un mensaje, con el titulo de TMDB si lo tiene."""
+    pool = get_pool()
+    if not pool:
+        return None
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(f"""
+            SELECT mi.*, {_TMDB_COLS}
+            FROM media_items mi
+            LEFT JOIN tmdb_cache tc ON tc.tmdb_id = mi.tmdb_id AND tc.media_type = mi.tmdb_type
+            WHERE mi.message_id = $1 AND ($2::bigint IS NULL OR mi.channel_id = $2)
+            LIMIT 1
+        """, message_id, channel_id)
+        return dict(row) if row else None
