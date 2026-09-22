@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { getCurrentFocusId, subscribe } from '../focus/engine';
+import { applyFocus, getCurrentFocusId, subscribe } from '../focus/engine';
 import { FocusScope, useFocusItem } from '../focus/react';
 import { requestContentFocus } from '../tv/intent';
 import { IconDownload, IconFilm, IconGear, IconHome, IconSearch, IconTv } from './Icons';
@@ -18,7 +18,7 @@ function RailItem({ path, label, icon, index, active, badge }: {
   path: string; label: string; icon: ReactNode; index: number; active: boolean; badge?: string;
 }) {
   const navigate = useNavigate();
-  const { ref } = useFocusItem<HTMLDivElement>({
+  const { ref, focusKey: id } = useFocusItem<HTMLDivElement>({
     focusKey: `rail-${path}`,
     index,
     onEnter: () => {
@@ -27,7 +27,7 @@ function RailItem({ path, label, icon, index, active, badge }: {
     },
   });
   return (
-    <div ref={ref} className={`tv-rail-item ${active ? 'is-active' : ''} relative flex items-center h-[64px] rounded-lg mx-3 px-[14px] overflow-hidden`}>
+    <div ref={ref} onMouseEnter={() => applyFocus(id)} onClick={() => { requestContentFocus(); navigate(path); }} className={`tv-rail-item ${active ? 'is-active' : ''} relative flex items-center h-[64px] rounded-lg mx-3 px-[14px] overflow-hidden`}>
       <span className="w-9 h-9 shrink-0 flex items-center justify-center">{icon}</span>
       <span className="tv-rail-label ml-5 text-body font-semibold whitespace-nowrap">{label}</span>
       {badge && (
@@ -71,7 +71,7 @@ export default function Rail({ downloadBadge }: Props) {
           <div className="absolute top-[44px] left-0 right-0 px-[18px]">
             <span className="text-tv-red font-bold text-[30px] tracking-tighter leading-none">M&amp;C</span>
           </div>
-          <nav className="flex flex-col gap-2">
+          <nav className="flex flex-col space-y-2">
             {RAIL_ITEMS.map((it, i) => (
               <RailItem key={it.path} {...it} index={i}
                 active={location.pathname === it.path}

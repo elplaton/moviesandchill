@@ -73,7 +73,7 @@ function PosterCard({ item, index, focusKey, autoFocus, onSelect, caption, downl
         )}
 
         {downloading !== undefined && (
-          <div className="absolute inset-0 bg-black/70 flex flex-col items-center justify-center gap-3">
+          <div className="absolute inset-0 bg-black/70 flex flex-col items-center justify-center space-y-3">
             <div className="relative w-[72px] h-[72px]">
               <svg viewBox="0 0 36 36" className="w-full h-full -rotate-90">
                 <circle cx="18" cy="18" r="15.5" fill="none" stroke="rgba(255,255,255,0.2)" strokeWidth="3" />

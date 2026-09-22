@@ -65,16 +65,16 @@ export default function Hero({ fallback, heading }: Props) {
         {featured && (
           <>
             <h1 className="text-hero font-bold tracking-tight line-clamp-2 drop-shadow-lg">{featured.title}</h1>
-            <div className="mt-4 flex items-center gap-4 text-lead text-tv-text2">
+            <div className="mt-4 flex items-center space-x-4 text-lead text-tv-text2">
               {featured.rating ? (
-                <span className="inline-flex items-center gap-2 text-white">
-                  <span className="w-6 h-6 text-tv-warn"><IconStar /></span>{featured.rating.toFixed(1)}
+                <span className="inline-flex items-center space-x-2 text-white">
+                  <span className="w-6 h-6 text-tv-warn"><IconStar /></span><span>{featured.rating.toFixed(1)}</span>
                 </span>
               ) : null}
               {meta.map((m, i) => (
-                <span key={i} className="inline-flex items-center gap-4">
+                <span key={i} className="inline-flex items-center space-x-4">
                   {(i > 0 || featured.rating) ? <span className="w-[6px] h-[6px] rounded-full bg-tv-text3" /> : null}
-                  {m}
+                  <span>{m}</span>
                 </span>
               ))}
             </div>

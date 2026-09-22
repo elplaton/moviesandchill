@@ -2,6 +2,8 @@
 
 App para Samsung TV que usa el backend de `moviesandchill` como servidor de streaming.
 
+> Este mismo código se empaqueta también para **LG (webOS)** desde `../webos` (`./deploy.sh` allí). Los cambios de interfaz se hacen aquí una sola vez.
+
 ## Requisitos
 
 - Samsung TV con Tizen (2018+ recomendado)

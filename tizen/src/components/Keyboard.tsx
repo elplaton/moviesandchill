@@ -1,5 +1,6 @@
 import { useCallback, useState } from 'react';
 import { FocusScope, useFocusItem } from '../focus/react';
+import { applyFocus } from '../focus/engine';
 
 const COLUMNS = 6;
 const UPPER = 'ABCDEFGHIJKLMNOPQRSTUVWXYZÑ0123456789'.split('');
@@ -23,9 +24,9 @@ interface Props {
 function Key({ label, onPress, index, wide, autoFocus, active }: {
   label: string; onPress: () => void; index: number; wide?: boolean; autoFocus?: boolean; active?: boolean;
 }) {
-  const { ref } = useFocusItem<HTMLDivElement>({ index, onEnter: onPress, autoFocus });
+  const { ref, focusKey: id } = useFocusItem<HTMLDivElement>({ index, onEnter: onPress, autoFocus });
   return (
-    <div ref={ref} onClick={onPress}
+    <div ref={ref} onClick={onPress} onMouseEnter={() => applyFocus(id)}
       className={`tv-key flex items-center justify-center rounded-lg select-none font-semibold ${wide ? 'h-[64px] px-5 text-body' : 'w-[76px] h-[64px] text-lead'} ${active ? 'ring-2 ring-tv-red' : ''}`}>
       {label}
     </div>
@@ -58,13 +59,13 @@ export default function Keyboard({ value, onChange, onDone, index, autoFocus, se
       <FocusScope index={0} orientation="grid" columns={COLUMNS} className="grid grid-cols-6 gap-[8px] mb-3">
         {keys.map((c, i) => <Key key={i} label={c} index={i} onPress={() => press(c)} autoFocus={autoFocus && i === 0} />)}
       </FocusScope>
-      <FocusScope index={1} orientation="horizontal" className="flex gap-[8px] mb-[8px]">
+      <FocusScope index={1} orientation="horizontal" className="flex space-x-[8px] mb-[8px]">
         <Key label="ABC" index={0} wide active={mode === 'upper'} onPress={() => setMode('upper')} />
         <Key label="abc" index={1} wide active={mode === 'lower'} onPress={() => setMode('lower')} />
         <Key label="#+=" index={2} wide active={mode === 'symbols'} onPress={() => setMode('symbols')} />
         <Key label="Espacio" index={3} wide onPress={() => press(' ')} />
       </FocusScope>
-      <FocusScope index={2} orientation="horizontal" className="flex gap-[8px]">
+      <FocusScope index={2} orientation="horizontal" className="flex space-x-[8px]">
         <Key label="Borrar" index={0} wide onPress={backspace} />
         <Key label="Limpiar" index={1} wide onPress={clear} />
         {onDone && <Key label="Listo" index={2} wide onPress={onDone} />}

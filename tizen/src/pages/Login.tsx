@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { FocusScope, useFocusItem } from '../focus/react';
+import { applyFocus } from '../focus/engine';
 import { getApiBase } from '../services/api';
 import Keyboard from '../components/Keyboard';
 import TvButton from '../components/TvButton';
@@ -9,9 +10,9 @@ import TvButton from '../components/TvButton';
 function Field({ label, value, secret, index, active, onSelect }: {
   label: string; value: string; secret?: boolean; index: number; active: boolean; onSelect: () => void;
 }) {
-  const { ref } = useFocusItem<HTMLDivElement>({ index, onEnter: onSelect, onFocus: onSelect });
+  const { ref, focusKey: id } = useFocusItem<HTMLDivElement>({ index, onEnter: onSelect, onFocus: onSelect });
   return (
-    <div ref={ref} onClick={onSelect}
+    <div ref={ref} onMouseEnter={() => applyFocus(id)} onClick={onSelect}
       className={`tv-field flex flex-col justify-center h-[84px] px-6 rounded-lg mb-4 ${active ? 'ring-2 ring-tv-red' : ''}`}>
       <span className="text-caption text-tv-text3">{label}</span>
       <span className={`text-lead font-semibold ${value ? 'text-white' : 'text-tv-text3'}`}>

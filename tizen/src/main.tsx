@@ -6,8 +6,9 @@ import { FocusRoot } from './focus/react';
 import { startRemoteConsole } from './debug/remote';
 import './index.css';
 
-// Fuera de la TV (navegador de escritorio) conviene ver el cursor.
-if (!/Tizen|SMART-TV|SmartTV/i.test(navigator.userAgent)) document.body.classList.add('has-pointer');
+// Solo Tizen (mando sin puntero) oculta el cursor. En LG el Magic Remote es
+// un puntero de verdad que se dibuja como cursor CSS: ocultarlo lo dejaria ciego.
+if (!/Tizen/i.test(navigator.userAgent)) document.body.classList.add('has-pointer');
 
 // La interfaz mide 1920x1080 fijos. Si la ventana (o la tele: algun modelo
 // usa 1280x720) no mide eso, se escala entera y se centra, con bandas negras

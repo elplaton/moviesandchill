@@ -118,8 +118,13 @@ function goBack() {
 
 export function exitApp() {
   try {
-    const tizen = (window as unknown as { tizen?: any }).tizen;
-    tizen?.application?.getCurrentApplication?.()?.exit?.();
+    const w = window as unknown as { tizen?: any };
+    if (w.tizen?.application) {
+      w.tizen.application.getCurrentApplication?.()?.exit?.();
+      return;
+    }
+    // webOS: cerrar la ventana termina la app (documentado por LG).
+    window.close();
   } catch {
     /* fuera de la TV no hay nada que cerrar */
   }

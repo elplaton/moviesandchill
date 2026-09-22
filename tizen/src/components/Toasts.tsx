@@ -6,7 +6,7 @@ export default function Toasts() {
   if (!list.length) return null;
   return (
     <Overlay>
-    <div className="fixed top-[40px] right-[96px] z-[90] flex flex-col gap-3 pointer-events-none">
+    <div className="fixed top-[40px] right-[96px] z-[90] flex flex-col space-y-3 pointer-events-none">
       {list.map((t) => (
         <div key={t.id}
           className={`px-7 py-4 rounded-xl text-body font-medium shadow-2xl bg-[#1F1F1F] border ${

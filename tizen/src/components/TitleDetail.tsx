@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { getElement, setFocus } from '../focus/engine';
+import { applyFocus, getElement, setFocus } from '../focus/engine';
 import { FocusScope, useBackHandler, useFocusItem } from '../focus/react';
 import { apiFetch, streamUrl } from '../services/api';
 import { useDownloadsCtx } from '../contexts/DownloadsContext';
@@ -36,18 +36,18 @@ function stateLabel(ds: DownloadState): string {
 }
 
 function Chip({ label, index, selected, onSelect }: { label: string; index: number; selected: boolean; onSelect: () => void }) {
-  const { ref } = useFocusItem<HTMLDivElement>({ index, onEnter: onSelect, onFocus: onSelect });
+  const { ref, focusKey: id } = useFocusItem<HTMLDivElement>({ index, onEnter: onSelect, onFocus: onSelect });
   return (
-    <div ref={ref} className={`tv-chip ${selected ? 'is-selected' : ''} relative px-5 h-[52px] flex items-center rounded-lg text-body font-semibold whitespace-nowrap`}>
+    <div ref={ref} onMouseEnter={() => applyFocus(id)} onClick={onSelect} className={`tv-chip ${selected ? 'is-selected' : ''} relative px-5 h-[52px] flex items-center rounded-lg text-body font-semibold whitespace-nowrap`}>
       {label}
     </div>
   );
 }
 
 function DeleteButton({ focusKey, onDelete }: { focusKey: string; onDelete: () => void }) {
-  const { ref } = useFocusItem<HTMLDivElement>({ index: 1, focusKey, onEnter: onDelete });
+  const { ref, focusKey: id } = useFocusItem<HTMLDivElement>({ index: 1, focusKey, onEnter: onDelete });
   return (
-    <div ref={ref} onClick={(e) => { e.stopPropagation(); onDelete(); }}
+    <div ref={ref} onMouseEnter={() => applyFocus(id)} onClick={(e) => { e.stopPropagation(); onDelete(); }}
       className="tv-row-item shrink-0 w-[84px] h-[84px] rounded-lg mb-[10px] flex flex-col items-center justify-center text-tv-text2">
       <span className="w-7 h-7"><IconTrash /></span>
       <span className="text-[14px] font-semibold mt-1">Borrar</span>
@@ -65,7 +65,7 @@ function ListRow({ index, focusKey, label, title, meta, state, variants, onEnter
   onEnter: () => void; onDelete?: () => void; autoFocus?: boolean;
 }) {
   return (
-    <FocusScope index={index} orientation="horizontal" className="flex items-stretch gap-[10px]">
+    <FocusScope index={index} orientation="horizontal" className="flex items-stretch space-x-[10px]">
       <MainCell focusKey={focusKey} label={label} title={title} meta={meta} state={state} variants={variants} onEnter={onEnter} autoFocus={autoFocus} />
       {state.status === 'ready' && onDelete && <DeleteButton focusKey={`${focusKey}-del`} onDelete={onDelete} />}
     </FocusScope>
@@ -76,9 +76,9 @@ function MainCell({ focusKey, label, title, meta, state, variants, onEnter, auto
   focusKey: string; label: string; title: string; meta: string; state: RowState; variants: number;
   onEnter: () => void; autoFocus?: boolean;
 }) {
-  const { ref } = useFocusItem<HTMLDivElement>({ index: 0, focusKey, onEnter, autoFocus });
+  const { ref, focusKey: id } = useFocusItem<HTMLDivElement>({ index: 0, focusKey, onEnter, autoFocus });
   return (
-    <div ref={ref} onClick={onEnter} className="tv-row-item flex-1 min-w-0 flex items-center gap-5 h-[84px] rounded-lg px-5 mb-[10px]">
+    <div ref={ref} onMouseEnter={() => applyFocus(id)} onClick={onEnter} className="tv-row-item flex-1 min-w-0 flex items-center space-x-5 h-[84px] rounded-lg px-5 mb-[10px]">
       <span className="tv-dim w-[76px] shrink-0 text-lead font-semibold tabular-nums text-tv-text2">{label}</span>
       <div className="flex-1 min-w-0">
         <p className="text-body font-semibold truncate">{title}</p>
@@ -88,8 +88,8 @@ function MainCell({ focusKey, label, title, meta, state, variants, onEnter, auto
       </div>
       <div className="shrink-0 w-[190px] flex justify-end">
         {state.status === 'ready' && (
-          <span className="tv-pill inline-flex items-center gap-2 px-4 h-[40px] rounded-full bg-tv-ok/20 text-tv-ok text-caption font-bold">
-            <span className="w-5 h-5"><IconPlay /></span>Reproducir
+          <span className="tv-pill inline-flex items-center space-x-2 px-4 h-[40px] rounded-full bg-tv-ok/20 text-tv-ok text-caption font-bold">
+            <span className="w-5 h-5"><IconPlay /></span><span>Reproducir</span>
           </span>
         )}
         {state.status === 'busy' && (
@@ -101,8 +101,8 @@ function MainCell({ focusKey, label, title, meta, state, variants, onEnter, auto
           </span>
         )}
         {state.status === 'idle' && (
-          <span className="tv-pill inline-flex items-center gap-2 px-4 h-[40px] rounded-full bg-white/10 text-caption font-bold">
-            <span className="w-5 h-5"><IconDownload /></span>Descargar
+          <span className="tv-pill inline-flex items-center space-x-2 px-4 h-[40px] rounded-full bg-white/10 text-caption font-bold">
+            <span className="w-5 h-5"><IconDownload /></span><span>Descargar</span>
           </span>
         )}
       </div>
@@ -321,24 +321,24 @@ export default function TitleDetail({ input, onClose }: Props) {
         <FocusScope index={0} orientation="vertical" className="absolute left-[96px] top-[96px] w-[700px] z-10">
           <p className="text-caption text-tv-text3 font-semibold tracking-wide mb-3">{kind === 'series' ? 'SERIE' : 'PELÍCULA'}</p>
           <h1 className="text-hero font-bold tracking-tight line-clamp-2">{meta.title}</h1>
-          <div className="mt-4 flex items-center gap-4 text-lead text-tv-text2">
-            {meta.rating ? <span className="inline-flex items-center gap-2 text-white"><span className="w-6 h-6 text-tv-warn"><IconStar /></span>{meta.rating.toFixed(1)}</span> : null}
+          <div className="mt-4 flex items-center space-x-4 text-lead text-tv-text2">
+            {meta.rating ? <span className="inline-flex items-center space-x-2 text-white"><span className="w-6 h-6 text-tv-warn"><IconStar /></span><span>{meta.rating.toFixed(1)}</span></span> : null}
             {infoParts.map((p, i) => (
-              <span key={i} className="inline-flex items-center gap-4">
-                {(i > 0 || meta.rating) ? <span className="w-[6px] h-[6px] rounded-full bg-tv-text3" /> : null}{p}
+              <span key={i} className="inline-flex items-center space-x-4">
+                {(i > 0 || meta.rating) ? <span className="w-[6px] h-[6px] rounded-full bg-tv-text3" /> : null}<span>{p}</span>
               </span>
             ))}
           </div>
           {meta.overview && <p className="mt-6 text-body text-tv-text2 leading-relaxed line-clamp-4">{meta.overview}</p>}
-          <div className="mt-8 flex items-center gap-4">
+          <div className="mt-8 flex items-center space-x-4">
             {playable && (
               <TvButton index={0} focusKey="detail-play" primary icon={<IconPlay />} onClick={() => play(playable.path, playable.subtitle)}>
                 {playable.resume ? 'Continuar viendo' : 'Reproducir'}
               </TvButton>
             )}
             {readyCount > 0 && (
-              <span className="inline-flex items-center gap-2 text-caption text-tv-ok font-semibold">
-                <span className="w-5 h-5"><IconCheck /></span>{readyCount} en disco
+              <span className="inline-flex items-center space-x-2 text-caption text-tv-ok font-semibold">
+                <span className="w-5 h-5"><IconCheck /></span><span>{readyCount} en disco</span>
               </span>
             )}
           </div>
@@ -350,7 +350,7 @@ export default function TitleDetail({ input, onClose }: Props) {
         {/* columna derecha */}
         <FocusScope index={1} orientation="vertical" className="absolute left-[880px] right-[96px] top-[96px] bottom-0 z-10">
           {kind === 'series' && seasons.length > 1 && (
-            <FocusScope index={0} orientation="horizontal" className="flex gap-2 mb-6 overflow-hidden">
+            <FocusScope index={0} orientation="horizontal" className="flex space-x-2 mb-6 overflow-hidden">
               {seasons.map((s, i) => (
                 <Chip key={String(s)} index={i} label={seasonLabel(s)} selected={s === activeSeason} onSelect={() => setSeason(s)} />
               ))}

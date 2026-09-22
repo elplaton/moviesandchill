@@ -42,7 +42,7 @@ export default function Settings() {
             </div>
           ))}
         </div>
-        <FocusScope id="settings-actions" index={0} orientation="horizontal" className="flex gap-4">
+        <FocusScope id="settings-actions" index={0} orientation="horizontal" className="flex space-x-4">
           <TvButton index={0} icon={<IconLogout />} onClick={() => setConfirm('logout')}>Cerrar sesión</TvButton>
           <TvButton index={1} onClick={() => setConfirm('exit')}>Salir de la app</TvButton>
         </FocusScope>

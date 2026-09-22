@@ -192,7 +192,7 @@ export default function Player({ src, path, title, subtitle, poster, backdrop, o
             <p className="text-h1 font-bold truncate">{title}</p>
             {subtitle && <p className="text-lead text-tv-text2 truncate mt-1">{subtitle}</p>}
           </div>
-          <div className="flex items-center gap-4 text-lead text-tv-text2 shrink-0 ml-10">
+          <div className="flex items-center space-x-4 text-lead text-tv-text2 shrink-0 ml-10">
             <span className="w-8 h-8 text-white">{playing ? <IconPlay /> : <IconPause />}</span>
             <span className="text-white font-semibold tabular-nums">{fmt(time)}</span>
             <span>/</span>

@@ -16,3 +16,5 @@ frontend/dist/
 backend/app/**/__pycache__/
 backend/channels.json
 *.tsbuildinfo
+webos/dist/
+webos/*.ipk

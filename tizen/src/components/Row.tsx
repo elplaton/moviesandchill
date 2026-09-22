@@ -42,7 +42,7 @@ export default function Row({ title, children, index, id, minHeight, inset }: Pr
       <h2 className="text-row font-semibold text-tv-text mb-3" style={{ paddingLeft: left }}>{title}</h2>
       {/* pt/pb dejan sitio a la escala de la tarjeta enfocada (sube ~17 px) sin recortarla ni pisar el titulo */}
       <div className="relative overflow-hidden" style={{ minHeight: minHeight ?? 340, paddingLeft: left }}>
-        <div ref={trackRef} className="rail-track flex gap-[18px] pt-[30px] pb-6" style={{ transform: 'translate3d(0,0,0)' }}>
+        <div ref={trackRef} className="rail-track flex space-x-[18px] pt-[30px] pb-6" style={{ transform: 'translate3d(0,0,0)' }}>
           {children}
         </div>
       </div>
