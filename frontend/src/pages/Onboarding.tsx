@@ -2,8 +2,10 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { apiFetch } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
-import Layout from '../components/Layout';
-import MovieCard from '../components/MovieCard';
+import Shell from '../components/Shell';
+import Card from '../components/Card';
+import Button from '../components/ui/Button';
+import { IconCheck } from '../components/ui/Icon';
 
 interface Pick {
   id: string;
@@ -109,80 +111,61 @@ export default function Onboarding() {
   const canAdvance = (isMovies ? selectedMovies : selectedSeries).size >= 3;
 
   return (
-    <Layout>
-      <div className="pt-20 pb-2 px-6 md:px-14">
-        <h1 className="text-white text-3xl md:text-4xl font-bold mb-2 tracking-tight animate-fade-in">
-          {isMovies ? 'Elige películas que te gusten (máx. 10)' : 'Elige series que te gusten (máx. 10)'}
+    <Shell>
+      <div className="px-gutter pb-6">
+        <h1 className="text-page font-bold">
+          {isMovies ? 'Elige películas que te gusten' : 'Elige series que te gusten'}
         </h1>
-        <p className="text-gray-400 text-base md:text-lg mb-4 animate-fade-in">
+        <p className="mt-2 max-w-[640px] text-md text-nf-dim">
           {isMovies
-            ? 'Selecciona al menos 3 películas que hayas visto. Con esto personalizaremos tu inicio.'
-            : 'Selecciona al menos 3 series que hayas visto. Con esto personalizaremos tu inicio.'}
+            ? 'Marca al menos 3 películas que hayas visto. Con eso se arma tu portada.'
+            : 'Marca al menos 3 series que hayas visto. Con eso se arma tu portada.'}
         </p>
-        <div className="flex items-center justify-between">
-          <p className="text-gray-500 text-sm">{selected.size}/10 seleccionadas (mín. 3)</p>
+        <div className="mt-6 flex items-center justify-between">
+          <p className="text-base text-nf-faint">{selected.size} de 10 seleccionadas (mínimo 3)</p>
           {isMovies ? (
-            <button onClick={handleNext} disabled={!canAdvance}
-              className={`px-8 py-3 rounded-xl font-semibold transition-all ${
-                canAdvance ? 'bg-netflix-red hover:bg-netflix-red-hover text-white hover:scale-105 shadow-lg' : 'bg-white/10 text-gray-500 cursor-not-allowed'
-              }`}>
-              Siguiente
-            </button>
+            <Button variant="primary" size="lg" onClick={handleNext} disabled={!canAdvance}>Siguiente</Button>
           ) : (
-            <button onClick={handleSave} disabled={!canAdvance || saving}
-              className={`px-8 py-3 rounded-xl font-semibold transition-all ${
-                canAdvance && !saving ? 'bg-netflix-red hover:bg-netflix-red-hover text-white hover:scale-105 shadow-lg' : 'bg-white/10 text-gray-500 cursor-not-allowed'
-              }`}>
-              {saving ? 'Guardando...' : 'Guardar y empezar'}
-            </button>
+            <Button variant="primary" size="lg" onClick={handleSave} disabled={!canAdvance || saving}>
+              {saving ? 'Guardando…' : 'Guardar y empezar'}
+            </Button>
           )}
         </div>
       </div>
 
       {loading && currentPicks.length === 0 ? (
-        <div className="px-6 md:px-14 py-20 text-center text-gray-500">Cargando...</div>
+        <p className="px-gutter py-20 text-base text-nf-faint">Cargando…</p>
       ) : (
-        <div className="px-6 md:px-14 mb-8">
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 md:gap-4">
-            {currentPicks.map(item => (
-              <div key={item.id} className="relative cursor-pointer [&>div]:!w-full" onClick={() => toggle(item.tmdb_id)}>
-                <MovieCard
-                  name={item.title}
-                  posterUrl={item.poster}
-                  year={item.year}
-                  rating={item.rating}
-                  hoverLabel={selected.has(item.tmdb_id) ? 'Quitar' : 'Seleccionar'}
-                  actions="click"
-                  onClick={() => {}}
-                />
-                {selected.has(item.tmdb_id) && (
-                  <div className="absolute inset-0 flex items-center justify-center z-20 pointer-events-none">
-                    <div className="w-12 h-12 rounded-full bg-netflix-red/90 flex items-center justify-center shadow-2xl">
-                      <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-                      </svg>
-                    </div>
-                  </div>
-                )}
-              </div>
-            ))}
+        <div className="px-gutter pb-8">
+          <div className="grid gap-x-[var(--row-gap)] gap-y-7 [grid-template-columns:repeat(auto-fill,minmax(var(--card-w),1fr))]">
+            {currentPicks.map(item => {
+              const on = selected.has(item.tmdb_id);
+              return (
+                <div key={item.id} className={`relative rounded-card transition-shadow ${on ? 'ring-2 ring-nf-red ring-offset-2 ring-offset-nf-bg' : ''}`}>
+                  <Card title={item.title} poster={item.poster} rating={item.rating}
+                    meta={item.year ? String(item.year) : undefined}
+                    onOpen={() => toggle(item.tmdb_id)}
+                    actions={<span className="rounded bg-white px-3 py-1.5 text-xs font-semibold text-black">{on ? 'Quitar' : 'Seleccionar'}</span>} />
+                  {on && (
+                    <span className="pointer-events-none absolute right-2 top-2 grid h-8 w-8 place-items-center rounded-full bg-nf-red">
+                      <span className="w-4 h-4"><IconCheck /></span>
+                    </span>
+                  )}
+                </div>
+              );
+            })}
           </div>
 
           {hasMore && (
-            <div ref={sentinelRef} className="py-8 text-center text-gray-600 text-sm">
-              {loadMore ? 'Cargando más...' : 'Baja para ver más'}
+            <div ref={sentinelRef} className="py-10 text-center text-base text-nf-faint">
+              {loadMore ? 'Cargando más…' : 'Baja para ver más'}
             </div>
           )}
-
           {!hasMore && currentPicks.length > 0 && (
-            <div className="py-4 text-center text-gray-600 text-sm">No hay más contenido</div>
+            <p className="py-10 text-center text-base text-nf-faint">No hay más contenido.</p>
           )}
         </div>
       )}
-
-      <div className="px-6 md:px-14 py-4 text-center text-gray-600 text-sm">
-        {hasMore ? (loadMore ? 'Cargando más...' : 'Baja para ver más') : 'No hay más contenido'}
-      </div>
-    </Layout>
+    </Shell>
   );
 }

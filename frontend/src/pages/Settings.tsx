@@ -1,11 +1,11 @@
 import { useState, useEffect } from 'react';
-import Layout from '../components/Layout';
-import { Embedded } from '../components/Layout';
+import Shell from '../components/Shell';
+import { Embedded } from '../components/Shell';
 import { apiFetch } from '../services/api';
 import type { AppConfig } from '../types';
 
 export default function Settings({ embedded = false }: { embedded?: boolean } = {}) {
-  const Wrap = embedded ? Embedded : Layout;
+  const Wrap = embedded ? Embedded : Shell;
   const [config, setConfig] = useState<AppConfig | null>(null);
   const [toast, setToast] = useState('');
 
@@ -28,7 +28,7 @@ export default function Settings({ embedded = false }: { embedded?: boolean } = 
     return (
       <Wrap>
         <div className="flex items-center justify-center h-64">
-          <div className="animate-spin w-8 h-8 border-3 border-netflix-red border-t-transparent rounded-full" />
+          <div className="animate-spin w-8 h-8 border-3 border-nf-red border-t-transparent rounded-full" />
         </div>
       </Wrap>
     );
@@ -36,7 +36,7 @@ export default function Settings({ embedded = false }: { embedded?: boolean } = 
 
   const field = (label: string, key: string, type: string = 'text') => (
     <div className="flex flex-col sm:flex-row sm:items-center gap-3 py-4 border-b border-white/5 last:border-0">
-      <label className="text-gray-300 text-sm sm:w-48 shrink-0">{label}</label>
+      <label className="text-nf-dim text-sm sm:w-48 shrink-0">{label}</label>
       <input
         type={type}
         value={(config as any)[key] ?? ''}
@@ -48,9 +48,9 @@ export default function Settings({ embedded = false }: { embedded?: boolean } = 
 
   const toggle = (label: string, key: string) => (
     <div className="flex items-center justify-between py-4 border-b border-white/5 last:border-0">
-      <span className="text-gray-300 text-sm">{label}</span>
+      <span className="text-nf-dim text-sm">{label}</span>
       <button onClick={() => update(key, !(config as any)[key])}
-        className={`w-14 h-7 rounded-full transition-all duration-300 relative ${(config as any)[key] ? 'bg-netflix-red shadow-lg shadow-netflix-red/30' : 'bg-white/10'}`}>
+        className={`w-14 h-7 rounded-full transition-all duration-300 relative ${(config as any)[key] ? 'bg-nf-red shadow-lg shadow-nf-red/30' : 'bg-white/10'}`}>
         <span className={`absolute top-0.5 w-6 h-6 rounded-full bg-white shadow-md transition-all duration-300 ${(config as any)[key] ? 'translate-x-7' : 'translate-x-0.5'}`} />
       </button>
     </div>
@@ -91,7 +91,7 @@ export default function Settings({ embedded = false }: { embedded?: boolean } = 
           {toggle('Convertir DTS a AC3', 'convert_dts_to_ac3')}
         </div>
 
-        <button onClick={save} className="bg-netflix-red hover:bg-netflix-red-hover text-white px-8 py-3.5 rounded-xl font-semibold transition-all hover:scale-105 shadow-lg shadow-netflix-red/20">
+        <button onClick={save} className="bg-nf-red hover:bg-nf-red-dark text-white px-8 py-3.5 rounded-xl font-semibold transition-all hover:scale-105 shadow-lg shadow-nf-red/20">
           Guardar configuracion
         </button>
       </div>

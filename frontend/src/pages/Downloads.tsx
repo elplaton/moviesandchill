@@ -1,180 +1,259 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import Layout from '../components/Layout';
-import MovieRow from '../components/MovieRow';
-import MovieCard from '../components/MovieCard';
-import PlayDetail from '../components/PlayDetail';
-import SeriesDetail from '../components/SeriesDetail';
-import DownloadBar from '../components/DownloadBar';
-import { apiFetch, getAccessToken } from '../services/api';
+import Shell from '../components/Shell';
+import Card from '../components/Card';
+import Player from '../components/Player';
+import Button from '../components/ui/Button';
+import { apiFetch } from '../services/api';
 import { fetchMetadataBatch } from '../services/tmdb';
-import { useDownloads } from '../hooks/useDownloads';
-import { useLibrary } from '../contexts/LibraryContext';
 import { useAuth } from '../contexts/AuthContext';
+import { useLibrary } from '../contexts/LibraryContext';
+import { useDownloads } from '../hooks/useDownloads';
 import { cleanTitle } from '../utils/text';
-import type { FileItem, TMDBMetadata } from '../types';
-
-interface Item extends FileItem { owner?: string; can_delete?: boolean }
+import { IconChevronD, IconPlay, IconTrash } from '../components/ui/Icon';
+import type { TMDBMetadata } from '../types';
 
 const gb = (b: number) => `${(b / 1024 ** 3).toFixed(1)} GB`;
-const epOf = (n: string) => /(\d{1,2})x(\d{2,3})|[sS]\d{1,2}[eE]\d{1,3}/.test(n);
-const seriesName = (f: Item) => {
-  const parts = f.path.split('/'); const folder = parts[parts.length - 2] || '';
-  return cleanTitle(folder).replace(/^S\d{1,2}\s*[-–]\s*|\s*S\d{1,2}$/gi, '').trim() || cleanTitle(f.name);
-};
+
+interface Ep { name: string; path: string; size: string; season?: number; episode?: number; owner?: string; can_delete?: boolean }
+interface Title {
+  name: string; path: string; size: string; cleanName: string; isSeries: boolean;
+  owner: string; canDelete: boolean; episodes: Ep[];
+}
+
+const epLabel = (e: Ep) => e.episode != null ? `${e.season ?? 1}x${String(e.episode).padStart(2, '0')}` : '';
+
+/** Una serie con sus temporadas plegables. */
+function SeriesPanel({ t, meta, onPlay, onDelete }: {
+  t: Title; meta?: TMDBMetadata; onPlay: (e: Ep, title: string) => void; onDelete: (e: Ep, label: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const seasons = useMemo(() => {
+    const m = new Map<number, Ep[]>();
+    for (const e of t.episodes) { const s = e.season ?? 1; if (!m.has(s)) m.set(s, []); m.get(s)!.push(e); }
+    for (const l of m.values()) l.sort((a, b) => (a.episode ?? 0) - (b.episode ?? 0));
+    return [...m.entries()].sort((a, b) => a[0] - b[0]);
+  }, [t.episodes]);
+  const owners = [...new Set(t.episodes.map(e => e.owner || t.owner))];
+
+  return (
+    <div className="overflow-hidden rounded-panel border border-nf-line bg-nf-surface">
+      <button onClick={() => setOpen(o => !o)} className="flex w-full items-center gap-4 p-4 text-left hover:bg-white/[0.04]">
+        <div className="h-[84px] w-[56px] shrink-0 overflow-hidden rounded bg-nf-raised">
+          {meta?.poster && <img src={meta.poster} alt="" className="h-full w-full object-cover" />}
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-md font-semibold">{meta?.title || t.cleanName}</p>
+          <p className="mt-0.5 text-base text-nf-faint">
+            {t.episodes.length} {t.episodes.length === 1 ? 'episodio' : 'episodios'}
+            {seasons.length > 1 ? ` · ${seasons.length} temporadas` : ''} · {owners.length === 1 ? owners[0] : `${owners.length} cuentas`}
+          </p>
+        </div>
+        <span className={`w-5 h-5 shrink-0 text-nf-faint transition-transform ${open ? 'rotate-180' : ''}`}><IconChevronD /></span>
+      </button>
+
+      {open && (
+        <div className="border-t border-nf-line">
+          {seasons.map(([n, eps]) => (
+            <div key={n}>
+              <p className="bg-white/[0.03] px-4 py-1.5 text-xs font-semibold uppercase tracking-wide text-nf-faint">Temporada {n}</p>
+              {eps.map(e => (
+                <div key={e.path} className="group flex items-center gap-4 px-4 py-2.5 hover:bg-white/[0.05]">
+                  <span className="w-14 shrink-0 text-base font-semibold tabular-nums text-nf-faint">{epLabel(e)}</span>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-base">{e.size}</p>
+                    <p className="truncate text-xs text-nf-faint">{e.owner || t.owner}</p>
+                  </div>
+                  <Button variant="light" size="sm" icon={<IconPlay />} onClick={() => onPlay(e, meta?.title || t.cleanName)}>Ver</Button>
+                  {(e.can_delete ?? t.canDelete) && (
+                    <button onClick={() => onDelete(e, `${epLabel(e)} · ${meta?.title || t.cleanName}`)} title="Borrar del servidor"
+                      className="grid h-8 w-8 place-items-center rounded text-nf-faint opacity-0 hover:bg-nf-red/25 hover:text-white group-hover:opacity-100">
+                      <span className="w-4 h-4"><IconTrash /></span>
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 /**
- * Descargas: lo que está bajando, lo pausado y lo que hay en el servidor
- * (de todas las cuentas). Se puede ver todo; borrar, solo lo propio (o todo
- * si eres admin). Arriba, la cuota de la cuenta.
+ * Descargas: lo que está bajando, lo pausado y lo que hay en el servidor.
+ *
+ * Las series se pliegan por temporada en vez de listar todos los episodios
+ * sueltos; las películas van en rejilla, que es lo que mejor aprovecha una
+ * pantalla ancha.
  */
 export default function Downloads() {
   const { username, isAdmin, usedBytes, quotaBytes, refreshMe } = useAuth();
-  const { reload: reloadIndex } = useLibrary();
+  const { reload: reloadIndex, version } = useLibrary();
   const { batches, pausedBatches, downloadStates, loadPaused, loadStatus, cancelBatch, pauseBatch, resumeBatch } = useDownloads();
-  const [files, setFiles] = useState<Item[]>([]);
+  const [titles, setTitles] = useState<Title[]>([]);
   const [metas, setMetas] = useState<Map<string, TMDBMetadata>>(new Map());
   const [loading, setLoading] = useState(true);
   const [notice, setNotice] = useState('');
-  const [playing, setPlaying] = useState<Item | null>(null);
-  const [series, setSeries] = useState<{ item: Item; meta: TMDBMetadata } | null>(null);
+  const [playing, setPlaying] = useState<{ path: string; title: string; subtitle?: string } | null>(null);
   const [filter, setFilter] = useState<'all' | 'mine'>('all');
+
+  const say = (m: string) => { setNotice(m); setTimeout(() => setNotice(''), 4000); };
 
   const load = useCallback(async () => {
     try {
       const d = await (await apiFetch('/files')).json();
-      const raw: Item[] = (d.files || []).filter((f: Item) => !f.is_dir || f.is_series);
-      // Un episodio suelto en una carpeta de temporada se agrupa como serie.
-      const out: Item[] = []; const byFolder = new Map<string, Item>();
-      for (const f of raw) {
-        if (f.is_series || !epOf(f.name)) { out.push(f); continue; }
-        const key = seriesName(f).toLowerCase();
-        let g = byFolder.get(key);
-        if (!g) { g = { ...f, name: seriesName(f), is_dir: true, is_series: true, clean_name: seriesName(f), episodes: [], path: f.path.split('/').slice(0, -1).join('/') }; byFolder.set(key, g); out.push(g); }
-        g.episodes!.push({ name: f.name, size: f.size, path: f.path });
-      }
-      setFiles(out);
-      const names = [...new Set(out.map(f => f.clean_name || cleanTitle(f.name)).filter(Boolean))];
+      const list: Title[] = (d.files || []).map((f: any) => ({
+        name: f.name, path: f.path, size: f.size || '', cleanName: f.clean_name || cleanTitle(f.name),
+        isSeries: !!f.is_series, owner: f.owner || 'admin', canDelete: !!f.can_delete, episodes: f.episodes || [],
+      }));
+      setTitles(list);
+      const names = [...new Set(list.map(t => t.cleanName).filter(Boolean))];
       if (names.length) setMetas(await fetchMetadataBatch(names));
-    } catch {} finally { setLoading(false); }
+    } catch { /* sin conexión */ } finally { setLoading(false); }
   }, []);
 
-  useEffect(() => { load(); loadStatus(); loadPaused(); }, [load]); // eslint-disable-line react-hooks/exhaustive-deps
-  // Al terminar una descarga aparece en la lista sin recargar la pagina.
-  useEffect(() => {
-    const done = batches.filter(b => b.status === 'done').length;
-    if (done) { load(); reloadIndex(); refreshMe(); }
-  }, [batches]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { load(); loadStatus(); loadPaused(); }, [load, version]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const metaFor = (f: Item): TMDBMetadata => metas.get(f.clean_name || cleanTitle(f.name)) || { title: f.clean_name || cleanTitle(f.name) };
-  const visible = files.filter(f => filter === 'all' || f.owner === username);
-  const seriesItems = visible.filter(f => f.is_series);
-  const movieItems = visible.filter(f => !f.is_series);
-  const active = batches.filter(b => ['downloading', 'extracting', 'converting'].includes(b.status));
-  const streamUrl = (path: string) => `/api/stream?path=${encodeURIComponent(path)}&token=${encodeURIComponent(getAccessToken() || '')}`;
-  const pct = quotaBytes ? Math.min(100, Math.round((usedBytes / quotaBytes) * 100)) : 0;
-
-  const remove = async (path: string, label: string) => {
+  const del = async (path: string, label: string) => {
     if (!confirm(`¿Borrar "${label}" del servidor?`)) return;
     const d = await (await apiFetch('/files', { method: 'DELETE', body: JSON.stringify({ path }) })).json();
-    if (d.error) { setNotice(d.error); setTimeout(() => setNotice(''), 4000); return; }
-    setPlaying(null); setSeries(null);
+    if (d.error) { say(d.error); return; }
+    setPlaying(null);
     await load(); reloadIndex(); refreshMe();
   };
 
+  const mine = (t: Title) => t.isSeries ? t.episodes.some(e => (e.owner || t.owner) === username) : t.owner === username;
+  const visible = titles.filter(t => filter === 'all' || mine(t));
+  const series = visible.filter(t => t.isSeries).sort((a, b) => a.cleanName.localeCompare(b.cleanName));
+  const movies = visible.filter(t => !t.isSeries).sort((a, b) => a.cleanName.localeCompare(b.cleanName));
+  const active = batches.filter(b => ['downloading', 'extracting', 'converting'].includes(b.status));
+  const metaFor = (t: Title) => metas.get(t.cleanName);
+  const pct = quotaBytes ? Math.min(100, Math.round((usedBytes / quotaBytes) * 100)) : 0;
+
   return (
-    <Layout>
-      <div className="pt-20 pb-4 px-6 md:px-14 flex flex-wrap items-end justify-between gap-6">
-        <div>
-          <h1 className="text-white text-4xl md:text-5xl font-bold mb-2 tracking-tight animate-fade-in">Descargas</h1>
-          <p className="text-gray-400 text-base md:text-lg animate-fade-in">
-            {loading ? 'Cargando…' : `${files.length} ${files.length === 1 ? 'título' : 'títulos'} en el servidor`}
-          </p>
+    <Shell>
+      <div className="px-gutter">
+        <div className="mb-8 flex flex-wrap items-end justify-between gap-6">
+          <div>
+            <h1 className="text-page font-bold">Descargas</h1>
+            <p className="mt-1 text-base text-nf-dim">
+              {loading ? 'Cargando…' : `${titles.length} ${titles.length === 1 ? 'título' : 'títulos'} en el servidor`}
+            </p>
+          </div>
+          <div className="w-[320px]">
+            <div className="mb-1.5 flex justify-between text-xs text-nf-dim">
+              <span>{quotaBytes != null ? `${gb(usedBytes)} de ${gb(quotaBytes)}` : `${gb(usedBytes)} · sin límite`}</span>
+              {quotaBytes != null && <span>{pct} %</span>}
+            </div>
+            <div className="h-1.5 overflow-hidden rounded-full bg-white/12">
+              <div className={`h-full ${pct >= 90 ? 'bg-nf-red' : 'bg-nf-ok'}`} style={{ width: `${quotaBytes ? pct : 5}%` }} />
+            </div>
+            <div className="mt-3 flex w-max rounded-pill bg-white/10 p-0.5 text-xs">
+              <button onClick={() => setFilter('all')} className={`rounded-pill px-3.5 py-1.5 ${filter === 'all' ? 'bg-white text-black' : 'text-nf-dim'}`}>Todo</button>
+              <button onClick={() => setFilter('mine')} className={`rounded-pill px-3.5 py-1.5 ${filter === 'mine' ? 'bg-white text-black' : 'text-nf-dim'}`}>Lo mío</button>
+            </div>
+          </div>
         </div>
-        <div className="w-72">
-          <div className="flex justify-between text-xs text-gray-400 mb-1.5">
-            <span>{quotaBytes != null ? `${gb(usedBytes)} de ${gb(quotaBytes)}` : `${gb(usedBytes)} · sin límite`}</span>
-            {quotaBytes != null && <span>{pct} %</span>}
+
+        {active.length > 0 && (
+          <section className="mb-10">
+            <h2 className="mb-3 text-lg font-semibold">Descargando</h2>
+            <div className="space-y-2">
+              {active.map(b => {
+                const ds = [...downloadStates.values()].find(s => s.batchId === b.batch_id);
+                const label = b.status === 'extracting' ? 'Extrayendo' : b.status === 'converting' ? 'Convirtiendo' : `${b.downloaded_parts}/${b.total_parts} partes`;
+                const canManage = isAdmin || !b.owner || b.owner === username;
+                return (
+                  <div key={b.batch_id} className="rounded-panel border border-nf-line bg-nf-surface px-5 py-4">
+                    <div className="flex items-center justify-between gap-4">
+                      <div className="min-w-0">
+                        <p className="truncate text-base font-medium">{cleanTitle(b.folder_name)}</p>
+                        <p className="text-xs text-nf-faint">{label}{ds?.speed ? ` · ${ds.speed}` : ''}{b.owner && b.owner !== username ? ` · ${b.owner}` : ''}</p>
+                      </div>
+                      <div className="flex shrink-0 items-center gap-3">
+                        <span className="text-base tabular-nums text-nf-dim">{b.progress} %</span>
+                        {canManage && b.status === 'downloading' && (
+                          <>
+                            <Button size="sm" onClick={() => pauseBatch(b.batch_id)}>Pausar</Button>
+                            <Button size="sm" variant="danger" onClick={() => cancelBatch(b.batch_id)}>Cancelar</Button>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                    <div className="mt-3 h-1 overflow-hidden rounded-full bg-white/12">
+                      <div className="h-full bg-nf-red transition-[width] duration-500" style={{ width: `${b.progress}%` }} />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        )}
+
+        {pausedBatches.length > 0 && (
+          <section className="mb-10">
+            <h2 className="mb-3 text-lg font-semibold">Pausadas</h2>
+            <div className="flex flex-wrap gap-3">
+              {pausedBatches.map((b: any) => (
+                <div key={b.batch_id} className="rounded-panel border border-nf-line bg-nf-surface px-5 py-4">
+                  <p className="text-base font-medium">{cleanTitle(b.folder_name)}</p>
+                  <p className="mb-3 mt-0.5 text-xs text-nf-faint">{b.total_parts} partes · {b.total_size_str}</p>
+                  <Button size="sm" variant="primary" onClick={() => resumeBatch(b.batch_id)}>Reanudar</Button>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {series.length > 0 && (
+          <section className="mb-10">
+            <h2 className="mb-3 text-lg font-semibold">Series</h2>
+            <div className="space-y-2">
+              {series.map(t => (
+                <SeriesPanel key={t.path} t={t} meta={metaFor(t)}
+                  onPlay={(e, title) => setPlaying({ path: e.path, title, subtitle: epLabel(e) || undefined })}
+                  onDelete={(e, label) => del(e.path, label)} />
+              ))}
+            </div>
+          </section>
+        )}
+
+        {movies.length > 0 && (
+          <section className="mb-10">
+            <h2 className="mb-4 text-lg font-semibold">Películas</h2>
+            <div className="grid gap-x-[var(--row-gap)] gap-y-7 [grid-template-columns:repeat(auto-fill,minmax(var(--card-w),1fr))]">
+              {movies.map(t => {
+                const m = metaFor(t);
+                return (
+                  <Card key={t.path} title={m?.title || t.cleanName} poster={m?.poster} rating={m?.rating}
+                    meta={`${t.size} · ${t.owner}`} badge="En disco" badgeTone="ok"
+                    onOpen={() => setPlaying({ path: t.path, title: m?.title || t.cleanName })}
+                    actions={
+                      <>
+                        <Button variant="light" size="sm" icon={<IconPlay />} onClick={() => setPlaying({ path: t.path, title: m?.title || t.cleanName })}>Ver</Button>
+                        {t.canDelete && <Button variant="ghost" size="sm" onClick={() => del(t.path, m?.title || t.cleanName)}>Borrar</Button>}
+                      </>
+                    } />
+                );
+              })}
+            </div>
+          </section>
+        )}
+
+        {!loading && titles.length === 0 && active.length === 0 && (
+          <div className="py-16">
+            <p className="text-lg text-nf-dim">Todavía no has descargado nada.</p>
+            <p className="mt-1 text-base text-nf-faint">Entra en una película o serie y pulsa Descargar.</p>
           </div>
-          <div className="h-1.5 rounded-full bg-white/10 overflow-hidden">
-            <div className={`h-full rounded-full ${pct >= 90 ? 'bg-netflix-red' : 'bg-green-500'}`} style={{ width: `${quotaBytes ? pct : 5}%` }} />
-          </div>
-          <div className="mt-3 flex rounded-full bg-white/10 p-0.5 text-xs w-max">
-            <button onClick={() => setFilter('all')} className={`px-3 py-1 rounded-full transition-all ${filter === 'all' ? 'bg-white text-black' : 'text-gray-300'}`}>Todo</button>
-            <button onClick={() => setFilter('mine')} className={`px-3 py-1 rounded-full transition-all ${filter === 'mine' ? 'bg-white text-black' : 'text-gray-300'}`}>Lo mío</button>
-          </div>
-        </div>
+        )}
       </div>
 
-      {notice && <div className="fixed top-24 right-6 z-[60] bg-netflix-dark border border-netflix-red/50 text-white px-5 py-3 rounded-2xl shadow-2xl text-sm max-w-md animate-slide-up">{notice}</div>}
-
-      {active.length > 0 && (
-        <MovieRow title="Descargando">
-          {active.map(b => {
-            const name = cleanTitle(b.folder_name).replace(/^S\d{1,2}\s*[-–]\s*/i, '');
-            const meta = metas.get(name);
-            const ds = { messageId: 0, batchId: b.batch_id, progress: b.progress, status: (b.status === 'downloading' ? 'downloading' : b.status) as any };
-            const mine = isAdmin || !b.owner || b.owner === username;
-            return (
-              <MovieCard key={b.batch_id} name={name} posterUrl={meta?.poster} year={meta?.year} rating={meta?.rating}
-                subtitle={`${b.progress}% · ${b.downloaded_parts}/${b.total_parts} partes${b.owner && b.owner !== username ? ` · ${b.owner}` : ''}`}
-                downloadState={ds} onCancelDownload={mine ? () => cancelBatch(b.batch_id) : undefined} actions="click" />
-            );
-          })}
-        </MovieRow>
+      <div className="h-16" />
+      {notice && (
+        <div className="fixed bottom-6 left-1/2 z-[60] -translate-x-1/2 rounded bg-nf-raised px-5 py-3 text-base shadow-panel animate-slide-up">{notice}</div>
       )}
-
-      {pausedBatches.length > 0 && (
-        <div className="px-6 md:px-14 mb-10">
-          <h2 className="text-white text-lg font-medium mb-3">Pausadas</h2>
-          <div className="flex gap-3 flex-wrap">
-            {pausedBatches.map((b: any) => (
-              <div key={b.batch_id} className="bg-white/5 border border-white/10 rounded-xl px-5 py-4">
-                <p className="text-white text-sm font-medium">{cleanTitle(b.folder_name)}</p>
-                <p className="text-gray-500 text-xs mt-1 mb-3">{b.total_parts} partes · {b.total_size_str}</p>
-                <button onClick={() => resumeBatch(b.batch_id)} className="bg-netflix-red hover:bg-netflix-red-hover text-white text-xs px-4 py-2 rounded-lg transition-colors font-medium">Reanudar</button>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {seriesItems.length > 0 && (
-        <MovieRow title="Series">
-          {seriesItems.map(f => { const m = metaFor(f); return (
-            <MovieCard key={f.path} name={m.title} posterUrl={m.poster} year={m.year} rating={m.rating}
-              subtitle={`${f.episodes?.length || 0} ${(f.episodes?.length || 0) === 1 ? 'episodio' : 'episodios'} · ${f.owner || 'admin'}`}
-              onClick={() => setSeries({ item: f, meta: m })} hoverLabel="Ver episodios" actions="click" />
-          ); })}
-        </MovieRow>
-      )}
-
-      {movieItems.length > 0 && (
-        <MovieRow title="Películas">
-          {movieItems.map(f => { const m = metaFor(f); return (
-            <MovieCard key={f.path} name={m.title} posterUrl={m.poster} year={m.year} rating={m.rating}
-              subtitle={`${f.size} · ${f.owner || 'admin'}`} downloaded
-              onClick={() => setPlaying(f)} hoverLabel="Reproducir" actions="click" />
-          ); })}
-        </MovieRow>
-      )}
-
-      {!loading && files.length === 0 && active.length === 0 && (
-        <div className="px-6 md:px-14 py-16 text-center">
-          <p className="text-gray-500 text-lg mb-2">Todavía no hay nada descargado</p>
-          <p className="text-gray-600 text-sm">Busca una película o serie y pulsa Descargar</p>
-        </div>
-      )}
-
-      {playing && (
-        <PlayDetail name={playing.name} size={playing.size} path={playing.path} metadata={metaFor(playing)} streamUrl={streamUrl}
-          onClose={() => setPlaying(null)} onDelete={playing.can_delete ? () => remove(playing.path, metaFor(playing).title) : undefined} />
-      )}
-      {series && (
-        <SeriesDetail series={series.item} metadata={series.meta} streamUrl={streamUrl} onClose={() => setSeries(null)}
-          downloadStates={downloadStates} tmdbId={(series.meta as any).tmdb_id} />
-      )}
-
-      <DownloadBar batches={batches} onPause={pauseBatch} onCancel={cancelBatch} downloadStates={downloadStates} />
-    </Layout>
+      {playing && <Player path={playing.path} title={playing.title} subtitle={playing.subtitle} onClose={() => setPlaying(null)} />}
+    </Shell>
   );
 }

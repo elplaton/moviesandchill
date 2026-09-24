@@ -33,7 +33,7 @@ Browser :80 → nginx (frontend) → proxy /api/* → :8000 (FastAPI backend)
                                               TMDB API
 ```
 
-- **frontend**: React 18 + Vite 5 + Tailwind 3. SPA served by nginx. La imagen se construye desde la raíz del repo (`context: .`) e incluye también `mobile/` en `/m/`.
+- **frontend**: React 18 + Vite 5 + Tailwind 3. SPA served by nginx. La imagen se construye desde la raíz del repo (`context: .`) e incluye también `mobile/` en `/m/`. Interfaz pensada para ratón y teclado: `Shell` (barra + contenido + `ActivityDock`), `TopBar` con buscador («/» lo abre), `Hero` de portada, `Rail` (carril con flechas, porque en escritorio no hay swipe), `Card` (carátula limpia, acciones al pasar el ratón), `TitleSheet` (ficha ancha única para película y serie) y `Player` (controles propios: espacio, ← →, ↑ ↓, F, M, Esc). Tokens en `tailwind.config.js` (paleta `nf-*`, escala tipográfica, `--gutter`).
 - **mobile**: PWA (React + Vite + Tailwind, `base: /m/`), manifest + service worker en `public/`. Pensada para el teléfono: armazón fijo con `<main>` desplazable (la barra de pestañas no se mueve con la de Safari), ficha por ruta (`/m/t/:kind/:tmdbId`), `<video>` nativo que entra en pantalla completa al arrancar y se cierra al salir de ella. **Se actualiza sola**: `scripts/stamp-sw.mjs` marca `dist/sw.js` con la fecha del build; el SW hace `skipWaiting`+`claim` y `main.tsx` recarga una vez en `controllerchange`. Dev Vite proxy sends `/api`→`:8000`, `/ws`→`ws://localhost:8000`.
 - **backend**: Python 3.12 + FastAPI + Telethon. Split into `app/routers/*`, `app/services/*`, `app/database/*`; `app/routers/download.py` is now just the wiring (`init_download_router`). Session file at `session/user.session` (gitignored — never commit it). Downloads go `downloads/` → extract → `movies/`.
 - **db**: PostgreSQL 16-alpine. Tables auto-created on startup. No migration framework.
@@ -59,7 +59,8 @@ Browser :80 → nginx (frontend) → proxy /api/* → :8000 (FastAPI backend)
 | `backend/app/database/downloads.py` | Tabla `downloads`: dueño, carpeta, tamaño y estado de cada descarga; `adopt_orphans()` asigna al admin lo que ya estaba en disco |
 | `backend/app/services/compat.py` | `make_compatible()`: todo a MP4 (H.264/HEVC + AAC, `-movflags +faststart`); `convert_library_job()` reempaqueta la biblioteca |
 | `frontend/src/pages/Admin.tsx` | Panel de administración (Usuarios · Descargas · Canales · Ajustes · Registros); solo admin, solo web |
-| `frontend/src/pages/Dashboard.tsx` | Main UI: search, Biblioteca, Explorar tabs. `parseTitle()`, `cleanTitle()`, grouping logic |
+| `frontend/src/pages/Catalog.tsx` | Portada, Películas y Series: los tres son carriles sobre `useCatalog()` |
+| `frontend/src/components/TitleSheet.tsx` | Ficha de un título (episodios por temporada o versiones), con descargar / ver / borrar |
 | `frontend/src/services/api.ts` | HTTP client: auto JWT refresh on 401, redirects to `/login` on failure |
 
 ## Config
@@ -81,7 +82,7 @@ Default admin: `admin`/`admin` (o `TMD_ADMIN_PASSWORD`). Se crea al arrancar con
 - **Session path**: `_session_path()` searches cwd, then package root, then falls back to `cwd/session/`. Docker mounts `./session:/app/session`. CLSetup sets `session_dir` explicitly to `../session/` (project root). Both must agree.
 - **Channel IDs**: stored as positive in DB (`entity.id`), but Telethon needs `-100XXXXXXXXXX`. `_resolve_channel_id()` adds prefix.
 - **Multi-part archives**: detected by `storage.py` regex (`\.partN\.rar`, `\.rNN`, `\.7z\.NNN`, `\.\d{3,}$`). Backend's `find_related_parts()` searches all channels for matching base name.
-- **Frontend grouping**: `groupSearchResults()` en `utils/search.ts` (web y tizen) agrupa resultados de búsqueda por `tmdb_id` si lo hay, y si no por el nombre de serie que va delante del `1x01`. `parseTitle()` en Dashboard sigue existiendo para la vista antigua.
+- **Frontend grouping**: `groupSearchResults()` en `utils/search.ts` (web, móvil y tizen) agrupa resultados de búsqueda por `tmdb_id` si lo hay, y si no por el nombre de serie que va delante del `1x01`. 
 - **Detalle por tmdb_id**: los modales de película/serie cargan `GET /api/media/{tmdb_id}/files`, nunca `/api/search` con el título. Con `ILIKE` del título en español de TMDB, 2 de cada 3 series salían sin episodios ("Cómo conocí a vuestra madre" vs "How I Met Your Mother 1x01").
 - **Clasificación película/serie**: la decide `title_parser.parse_filename()` (`1x01`, `S01E01`, `T01E10`, `[S05.E06]`, `Temporada N`, `episodio N`, `Nombre - 89`, `Nombre_149_...`). El texto que se manda a TMDB es solo el nombre de la serie (lo de delante del marcador), no el título del episodio; antes "Suits La vida útil" emparejaba con la película "La vida me sienta bien". `tmdb_valid` = tipo detectado == tipo TMDB y **solo lo válido sale en la Home**. Tras cambiar el parser: `POST /api/index/reclassify` (botón "Reclasificar catálogo" en Canales) re-parsea y re-busca lo que estaba sin emparejar o con el tipo equivocado.
 - **"Descargar" en el modal**: el número que antes salía entre paréntesis eran *partes* del mismo archivo comprimido, no opciones; al pulsar se bajan todas las partes y se extraen. Ahora el botón dice solo "Descargar" y la fila muestra "N partes · tamaño".

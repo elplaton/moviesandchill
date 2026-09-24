@@ -16,6 +16,8 @@ export interface LocalFile {
 }
 
 interface Ctx {
+  /** Sube en cada recarga: quien dependa del disco lo pone en sus dependencias. */
+  version: number;
   byName: Map<string, LocalFile>;
   byFolder: Map<string, LocalFile[]>;
   reload: () => Promise<void>;
@@ -53,6 +55,7 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
   const [byName, setByName] = useState<Map<string, LocalFile>>(new Map());
   const [byFolder, setByFolder] = useState<Map<string, LocalFile[]>>(new Map());
   const [byEpisode, setByEpisode] = useState<Map<string, LocalFile>>(new Map());
+  const [version, setVersion] = useState(0);
 
   const reload = useCallback(async () => {
     try {
@@ -79,6 +82,7 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
         for (const ep of it.episodes || []) add(ep, ep.owner || owner, ep.can_delete ?? can, it.clean_name || it.name);
       }
       setByName(names); setByFolder(folders); setByEpisode(eps);
+      setVersion(v => v + 1);
     } catch {}
   }, []);
 
@@ -116,7 +120,7 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
     } catch { return 'No se ha podido borrar'; }
   }, [reload]);
 
-  return <LibraryCtx.Provider value={{ byName, byFolder, reload, localFor, remove }}>{children}</LibraryCtx.Provider>;
+  return <LibraryCtx.Provider value={{ version, byName, byFolder, reload, localFor, remove }}>{children}</LibraryCtx.Provider>;
 }
 
 export function useLibrary(): Ctx {

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import Layout from '../components/Layout';
-import { Embedded } from '../components/Layout';
+import Shell from '../components/Shell';
+import { Embedded } from '../components/Shell';
 import { apiFetch } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import type { Channel } from '../types';
@@ -27,7 +27,7 @@ interface ChannelProgress {
 }
 
 export default function Channels({ embedded = false }: { embedded?: boolean } = {}) {
-  const Wrap = embedded ? Embedded : Layout;
+  const Wrap = embedded ? Embedded : Shell;
   const { isAdmin } = useAuth();
   const navigate = useNavigate();
   const [channels, setChannels] = useState<Channel[]>([]);
@@ -198,7 +198,7 @@ export default function Channels({ embedded = false }: { embedded?: boolean } = 
                   className="text-xs bg-white/10 hover:bg-white/20 text-white px-4 py-2 rounded-lg transition-all font-medium">
                   Reclasificar catálogo
                 </button>
-                <button onClick={scanAll} className="text-xs bg-netflix-red hover:bg-netflix-red-hover text-white px-4 py-2 rounded-lg transition-all font-medium">
+                <button onClick={scanAll} className="text-xs bg-nf-red hover:bg-nf-red-dark text-white px-4 py-2 rounded-lg transition-all font-medium">
                   Reescanear todo
                 </button>
               </div>
@@ -206,25 +206,25 @@ export default function Channels({ embedded = false }: { embedded?: boolean } = 
             <div className="grid grid-cols-4 gap-3 mb-4">
               <div className="bg-black/20 rounded-xl p-3 text-center">
                 <p className="text-white text-xl font-bold">{stats.total.toLocaleString()}</p>
-                <p className="text-gray-400 text-[11px]">Total</p>
+                <p className="text-nf-dim text-[11px]">Total</p>
               </div>
               <div className="bg-black/20 rounded-xl p-3 text-center">
                 <p className="text-white text-xl font-bold">{stats.movies.toLocaleString()}</p>
-                <p className="text-gray-400 text-[11px]">Películas</p>
+                <p className="text-nf-dim text-[11px]">Películas</p>
               </div>
               <div className="bg-black/20 rounded-xl p-3 text-center">
                 <p className="text-white text-xl font-bold">{stats.series.toLocaleString()}</p>
-                <p className="text-gray-400 text-[11px]">Series</p>
+                <p className="text-nf-dim text-[11px]">Series</p>
               </div>
               <div className="bg-black/20 rounded-xl p-3 text-center">
                 <p className="text-white text-xl font-bold">{stats.with_tmdb.toLocaleString()}</p>
-                <p className="text-gray-400 text-[11px]">Con TMDB</p>
+                <p className="text-nf-dim text-[11px]">Con TMDB</p>
               </div>
             </div>
 
             <div className="mb-4">
               <div className="flex items-center justify-between mb-1.5">
-                <span className="text-gray-400 text-xs flex items-center gap-2">
+                <span className="text-nf-dim text-xs flex items-center gap-2">
                   Progreso TMDB
                   {tmdbRunning && (
                     <span className="inline-flex items-center gap-1 text-yellow-400">
@@ -236,12 +236,12 @@ export default function Channels({ embedded = false }: { embedded?: boolean } = 
                     </span>
                   )}
                 </span>
-                <span className="text-gray-400 text-xs">
+                <span className="text-nf-dim text-xs">
                   {stats.with_tmdb.toLocaleString()} encontrados · {(stats.tmdb_searched || 0).toLocaleString()} / {stats.total.toLocaleString()} procesados ({Math.round(((stats.tmdb_searched || 0) / Math.max(stats.total, 1)) * 100)}%)
                 </span>
               </div>
               <div className="w-full bg-white/10 rounded-full h-2 overflow-hidden">
-                <div className="h-full bg-netflix-red rounded-full transition-all duration-1000" style={{
+                <div className="h-full bg-nf-red rounded-full transition-all duration-1000" style={{
                   width: `${((stats.tmdb_searched || 0) / Math.max(stats.total, 1)) * 100}%`,
                   background: (stats.tmdb_searched || 0) === stats.total ? '#2ECC40' : tmdbRunning ? '#F5A623' : '#E50914',
                 }} />
@@ -263,7 +263,7 @@ export default function Channels({ embedded = false }: { embedded?: boolean } = 
                         <span className={`text-[10px] px-2 py-0.5 rounded-full shrink-0 ml-2 ${
                           isScanning ? 'bg-yellow-500/20 text-yellow-400'
                           : prog.status === 'done' ? 'bg-green-500/20 text-green-400'
-                          : 'bg-gray-500/20 text-gray-400'
+                          : 'bg-gray-500/20 text-nf-dim'
                         }`}>
                           {isScanning ? 'Escaneando...' : prog.status === 'done' ? 'Completado' : prog.status === 'pending' ? 'Pendiente' : prog.status}
                         </span>
@@ -272,10 +272,10 @@ export default function Channels({ embedded = false }: { embedded?: boolean } = 
                       {(prog.total_estimate || 0) > 0 && (
                         <div className="mb-1.5">
                           <div className="flex items-center justify-between mb-1">
-                            <span className="text-gray-500 text-[10px]">
+                            <span className="text-nf-faint text-[10px]">
                               {(prog.total_scanned || 0).toLocaleString()} / {(prog.total_estimate || 0).toLocaleString()} msgs
                             </span>
-                            <span className="text-gray-400 text-[10px]">{pct}%</span>
+                            <span className="text-nf-dim text-[10px]">{pct}%</span>
                           </div>
                           <div className="w-full bg-white/10 rounded-full h-1.5 overflow-hidden">
                             <div className={`h-full rounded-full transition-all duration-700 ${isScanning ? 'bg-yellow-500' : prog.status === 'done' ? 'bg-green-500' : 'bg-gray-600'}`} style={{
@@ -288,10 +288,10 @@ export default function Channels({ embedded = false }: { embedded?: boolean } = 
                       <div className="flex items-center gap-4 text-[11px]">
                         <span className="text-green-400">{chCount.toLocaleString()} con media</span>
                         {prog.total_indexed != null && prog.total_indexed > 0 && (
-                          <span className="text-gray-500">{((prog.total_indexed || 0) - chCount).toLocaleString()} sin media</span>
+                          <span className="text-nf-faint">{((prog.total_indexed || 0) - chCount).toLocaleString()} sin media</span>
                         )}
                         {prog.total_scanned != null && prog.total_scanned > 0 && (
-                          <span className="text-gray-600">{prog.total_scanned?.toLocaleString()} total escaneados</span>
+                          <span className="text-nf-faint">{prog.total_scanned?.toLocaleString()} total escaneados</span>
                         )}
                       </div>
                     </div>
@@ -302,12 +302,12 @@ export default function Channels({ embedded = false }: { embedded?: boolean } = 
 
             <div className="flex items-center justify-between py-3 border-t border-white/5 mt-4">
               <div className="flex items-center gap-3">
-                <span className="text-gray-300 text-sm">TMDB</span>
+                <span className="text-nf-dim text-sm">TMDB</span>
                 <button onClick={toggleTmdb}
                   className={`w-11 h-6 rounded-full transition-colors duration-200 flex items-center px-0.5 ${tmdbEnabled ? 'bg-green-500 justify-end' : 'bg-white/20 justify-start'}`}>
                   <span className="w-5 h-5 rounded-full bg-white shadow transition-all duration-200" />
                 </button>
-                <span className={`text-xs ${tmdbEnabled ? 'text-green-400' : 'text-gray-500'}`}>
+                <span className={`text-xs ${tmdbEnabled ? 'text-green-400' : 'text-nf-faint'}`}>
                   {tmdbEnabled ? 'Activado' : 'Desactivado'}
                 </span>
               </div>
@@ -322,7 +322,7 @@ export default function Channels({ embedded = false }: { embedded?: boolean } = 
               placeholder="https://t.me/c/123456789 o https://t.me/NombreCanal"
               className="flex-1 bg-black/30 border border-white/10 rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-white/25 transition-all placeholder-gray-500" />
             <button onClick={addByUrl}
-              className="bg-netflix-red hover:bg-netflix-red-hover text-white px-6 py-3 rounded-xl font-medium text-sm transition-all hover:scale-105 shadow-lg shadow-netflix-red/20">
+              className="bg-nf-red hover:bg-nf-red-dark text-white px-6 py-3 rounded-xl font-medium text-sm transition-all hover:scale-105 shadow-lg shadow-nf-red/20">
               Anadir
             </button>
           </div>
@@ -339,9 +339,9 @@ export default function Channels({ embedded = false }: { embedded?: boolean } = 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
               {active.map(c => (
                 <button key={c.id} onClick={() => toggle(c.id)}
-                  className="flex items-center gap-3 bg-netflix-red/10 border border-netflix-red/20 rounded-xl px-4 py-3 hover:bg-netflix-red/15 transition-all text-left">
+                  className="flex items-center gap-3 bg-nf-red/10 border border-nf-red/20 rounded-xl px-4 py-3 hover:bg-nf-red/15 transition-all text-left">
                   <span className="text-white text-sm truncate font-medium">{c.name}</span>
-                  <span className="text-gray-400 text-[10px] shrink-0 ml-auto">{c.id}</span>
+                  <span className="text-nf-dim text-[10px] shrink-0 ml-auto">{c.id}</span>
                 </button>
               ))}
             </div>
@@ -355,8 +355,8 @@ export default function Channels({ embedded = false }: { embedded?: boolean } = 
               {inactive.map(c => (
                 <button key={c.id} onClick={() => toggle(c.id)}
                   className="flex items-center gap-3 bg-white/[0.03] border border-white/5 rounded-xl px-4 py-3 hover:bg-white/[0.06] transition-all text-left">
-                  <span className="text-gray-400 text-sm truncate">{c.name}</span>
-                  <span className="text-gray-500 text-[10px] shrink-0 ml-auto">{c.id}</span>
+                  <span className="text-nf-dim text-sm truncate">{c.name}</span>
+                  <span className="text-nf-faint text-[10px] shrink-0 ml-auto">{c.id}</span>
                 </button>
               ))}
             </div>
@@ -364,7 +364,7 @@ export default function Channels({ embedded = false }: { embedded?: boolean } = 
         )}
 
         <button onClick={saveChannels}
-          className="bg-netflix-red hover:bg-netflix-red-hover text-white px-8 py-3.5 rounded-xl font-semibold transition-all hover:scale-105 shadow-lg shadow-netflix-red/20">
+          className="bg-nf-red hover:bg-nf-red-dark text-white px-8 py-3.5 rounded-xl font-semibold transition-all hover:scale-105 shadow-lg shadow-nf-red/20">
           Guardar
         </button>
       </div>

@@ -36,7 +36,7 @@ export default function AdminDownloads({ onToast }: { onToast: (m: string) => vo
       <div className="bg-white/5 border border-white/10 rounded-2xl p-6 mb-6 shadow-xl flex flex-wrap items-center gap-4 justify-between">
         <div>
           <h2 className="text-white text-lg font-medium">Biblioteca en MP4</h2>
-          <p className="text-gray-500 text-xs mt-1 max-w-xl">
+          <p className="text-nf-faint text-xs mt-1 max-w-xl">
             Las descargas nuevas se convierten a MP4 (H.264/AAC), que reproducen iPhone, Android, Samsung y LG. Esto reempaqueta lo que ya estaba en MKV u otros contenedores.
             {conv?.running && ` En marcha: ${conv.done}/${conv.total} · ${conv.current}`}
           </p>
@@ -50,20 +50,20 @@ export default function AdminDownloads({ onToast }: { onToast: (m: string) => vo
       <div className="bg-white/5 border border-white/10 rounded-2xl p-6 shadow-xl">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-white text-lg font-medium">Descargas ({rows.length})</h2>
-          <span className="text-gray-400 text-sm">{fmtGB(total)} en disco</span>
+          <span className="text-nf-dim text-sm">{fmtGB(total)} en disco</span>
         </div>
         <div className="space-y-2">
           {rows.map(r => (
             <div key={r.id} className="flex flex-wrap items-center gap-4 bg-black/20 border border-white/5 rounded-xl px-4 py-3">
               <div className="flex-1 min-w-[240px]">
                 <p className="text-white text-sm font-medium truncate">{r.folder_name}</p>
-                <p className="text-gray-500 text-[11px]">{r.owner || 'admin'} · {label(r.status)} · {new Date(r.created_at).toLocaleDateString('es-ES')}</p>
+                <p className="text-nf-faint text-[11px]">{r.owner || 'admin'} · {label(r.status)} · {new Date(r.created_at).toLocaleDateString('es-ES')}</p>
               </div>
-              <span className="text-gray-300 text-sm w-24 text-right">{fmtGB(r.size_bytes)}</span>
-              <button onClick={() => remove(r)} disabled={r.status !== 'done'} className="text-xs bg-netflix-red/20 hover:bg-netflix-red/40 disabled:opacity-40 text-red-300 px-3 py-1.5 rounded-lg transition-all">Borrar</button>
+              <span className="text-nf-dim text-sm w-24 text-right">{fmtGB(r.size_bytes)}</span>
+              <button onClick={() => remove(r)} disabled={r.status !== 'done'} className="text-xs bg-nf-red/20 hover:bg-nf-red/40 disabled:opacity-40 text-red-300 px-3 py-1.5 rounded-lg transition-all">Borrar</button>
             </div>
           ))}
-          {rows.length === 0 && <p className="text-gray-500 text-sm">No hay descargas.</p>}
+          {rows.length === 0 && <p className="text-nf-faint text-sm">No hay descargas.</p>}
         </div>
       </div>
     </div>

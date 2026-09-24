@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import Layout from '../components/Layout';
+import Shell from '../components/Shell';
 import { apiFetch } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -23,20 +23,20 @@ export default function Account() {
   };
 
   return (
-    <Layout>
+    <Shell>
       <div className="px-6 md:px-14 pt-24 pb-20 max-w-2xl mx-auto">
         <h1 className="text-white text-4xl font-bold mb-2 tracking-tight">Mi cuenta</h1>
-        <p className="text-gray-400 text-sm mb-10">{username}{isAdmin ? ' · administrador' : ''}</p>
+        <p className="text-nf-dim text-sm mb-10">{username}{isAdmin ? ' · administrador' : ''}</p>
 
         <div className="bg-white/5 border border-white/10 rounded-2xl p-6 mb-6 shadow-xl">
           <h2 className="text-white font-semibold mb-3">Espacio en disco</h2>
-          <p className="text-gray-400 text-sm mb-3">
+          <p className="text-nf-dim text-sm mb-3">
             {quotaBytes != null ? `${gb(usedBytes)} usados de ${gb(quotaBytes)} (${pct} %)` : `${gb(usedBytes)} usados · sin límite`}
           </p>
           <div className="h-2 rounded-full bg-white/10 overflow-hidden">
-            <div className={`h-full rounded-full ${pct >= 90 ? 'bg-netflix-red' : 'bg-green-500'}`} style={{ width: `${quotaBytes ? pct : 5}%` }} />
+            <div className={`h-full rounded-full ${pct >= 90 ? 'bg-nf-red' : 'bg-green-500'}`} style={{ width: `${quotaBytes ? pct : 5}%` }} />
           </div>
-          <p className="text-gray-500 text-xs mt-3">Cuenta lo que has descargado y sigue en el servidor. Bórralo desde su ficha para liberar espacio.</p>
+          <p className="text-nf-faint text-xs mt-3">Cuenta lo que has descargado y sigue en el servidor. Bórralo desde su ficha para liberar espacio.</p>
         </div>
 
         <div className="bg-white/5 border border-white/10 rounded-2xl p-6 shadow-xl">
@@ -47,11 +47,11 @@ export default function Account() {
           </div>
           {msg && <p className={`mt-3 text-xs ${msg.ok ? 'text-green-400' : 'text-red-400'}`}>{msg.text}</p>}
           <button onClick={change} disabled={!current || next.length < 4}
-            className="mt-5 bg-netflix-red hover:bg-netflix-red-hover disabled:opacity-40 text-white px-6 py-2.5 rounded-xl font-medium text-sm transition-all">
+            className="mt-5 bg-nf-red hover:bg-nf-red-dark disabled:opacity-40 text-white px-6 py-2.5 rounded-xl font-medium text-sm transition-all">
             Guardar
           </button>
         </div>
       </div>
-    </Layout>
+    </Shell>
   );
 }
