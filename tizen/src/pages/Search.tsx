@@ -34,6 +34,9 @@ export default function Search() {
   const [movies, setMovies] = useState<[string, SearchResult[]][]>([]);
   const [detail, setDetail] = useState<DetailInput | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Numero de la peticion en vuelo: con el mando se teclea despacio y una
+  // respuesta atrasada pisaba los resultados de la letra siguiente.
+  const lastRequest = useRef(0);
   const resultsRef = useRef<HTMLDivElement>(null);
   const offset = useRef(0);
 
@@ -46,13 +49,15 @@ export default function Search() {
     if (q.length < 2) { setSeries([]); setMovies([]); setSearching(false); return; }
     setSearching(true);
     timer.current = setTimeout(async () => {
+      const mine = ++lastRequest.current;
       try {
         const res = await apiFetch('/search', { method: 'POST', body: JSON.stringify({ query: q, page_size: 100 }) });
         const data = await res.json();
+        if (mine !== lastRequest.current) return;
         const g = groupSearchResults(data.results || []);
         setSeries(g.groups);
         setMovies([...g.movieGroups.entries()]);
-      } catch { /* sin resultados */ } finally { setSearching(false); }
+      } catch { /* sin resultados */ } finally { if (mine === lastRequest.current) setSearching(false); }
     }, DEBOUNCE_MS);
     return () => { if (timer.current) clearTimeout(timer.current); };
   }, [query]);

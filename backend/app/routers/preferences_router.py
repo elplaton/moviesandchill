@@ -42,32 +42,41 @@ async def save_prefs(req: SavePreferencesRequest, user: Annotated[str, Depends(g
     genre_counter: Counter = Counter()
     liked_years: list[int] = []
 
+    import asyncio
+
     import aiohttp
     from app.services.tmdb import TMDB_BASE
 
-    async def fetch_info(tmdb_id: int, media_type: str):
-        if not api_key:
-            return
+    # Antes esto era un bucle secuencial y cada vuelta abria su propia
+    # ClientSession: con 20 titulos elegidos y 10 s de plazo cada uno, guardar
+    # las preferencias podia tardar minutos con el usuario mirando un boton
+    # que ponia "Guardando...". Ahora es una sola sesion y todo a la vez.
+    async def fetch_info(session, tmdb_id: int, media_type: str):
         url = f"{TMDB_BASE}/{media_type}/{tmdb_id}"
         params = {"api_key": api_key, "language": "es-ES"}
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=10)) as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        for g in data.get("genres", []):
-                            genre_counter[g["name"]] += 1
-                        year = data.get("release_date") or data.get("first_air_date", "")
-                        if year and len(year) >= 4:
-                            liked_years.append(int(year[:4]))
+            async with session.get(url, params=params) as resp:
+                if resp.status != 200:
+                    return
+                data = await resp.json()
         except Exception:
-            pass
+            return
+        for g in data.get("genres", []):
+            genre_counter[g["name"]] += 1
+        year = data.get("release_date") or data.get("first_air_date", "")
+        if year and len(year) >= 4:
+            try:
+                liked_years.append(int(year[:4]))
+            except ValueError:
+                pass
 
-    all_ids = req.movies + req.series
-    movie_ids = set(req.movies)
-    for tmdb_id in all_ids:
-        mtype = "movie" if tmdb_id in movie_ids else "tv"
-        await fetch_info(tmdb_id, mtype)
+    if api_key and (req.movies or req.series):
+        timeout = aiohttp.ClientTimeout(total=15)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            await asyncio.gather(
+                *[fetch_info(session, i, "movie") for i in req.movies],
+                *[fetch_info(session, i, "tv") for i in req.series],
+            )
 
     await db_save_prefs(db_user["id"], req.movies, req.series, dict(genre_counter), liked_years)
     return {"status": "saved", "genres": dict(genre_counter), "years": liked_years}

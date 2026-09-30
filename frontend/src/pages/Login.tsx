@@ -7,7 +7,8 @@ import Button from '../components/ui/Button';
 export default function Login() {
   const [username, setUsername] = useState(localStorage.getItem('saved_user') || '');
   const [password, setPassword] = useState('');
-  const [remember, setRemember] = useState(!!localStorage.getItem('saved_user'));
+  // Por defecto marcado: es lo que hacía antes (la sesión se guardaba siempre).
+  const [remember, setRemember] = useState(localStorage.getItem('remember_me') !== '0');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const { login } = useAuth();
@@ -17,9 +18,10 @@ export default function Login() {
     e.preventDefault();
     if (busy) return;
     setError(''); setBusy(true);
-    const err = await login(username.trim(), password);
+    const err = await login(username.trim(), password, remember);
     setBusy(false);
     if (err) { setError(err); return; }
+    localStorage.setItem('remember_me', remember ? '1' : '0');
     if (remember) localStorage.setItem('saved_user', username.trim());
     else localStorage.removeItem('saved_user');
     navigate('/');
@@ -52,9 +54,16 @@ export default function Login() {
           <label className="mb-1.5 block text-xs font-medium text-nf-dim">Contraseña</label>
           <input className={field} type="password" value={password} onChange={e => setPassword(e.target.value)} autoComplete="current-password" />
 
-          <label className="mt-5 flex cursor-pointer items-center gap-2.5 text-base text-nf-dim">
-            <input type="checkbox" checked={remember} onChange={e => setRemember(e.target.checked)} className="h-4 w-4 accent-nf-red" />
-            Recordar mi usuario
+          <label className="mt-5 flex cursor-pointer items-start gap-2.5 text-base text-nf-dim">
+            <input type="checkbox" checked={remember} onChange={e => setRemember(e.target.checked)} className="mt-1 h-4 w-4 accent-nf-red" />
+            <span>
+              Recuérdame
+              <span className="block text-xs text-nf-faint">
+                {remember
+                  ? 'No tendrás que volver a entrar en este equipo.'
+                  : 'La sesión se cerrará al cerrar el navegador.'}
+              </span>
+            </span>
           </label>
 
           <Button type="submit" variant="primary" size="lg" disabled={busy || !username.trim() || !password} className="mt-6 w-full">

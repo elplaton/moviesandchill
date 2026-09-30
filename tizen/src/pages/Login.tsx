@@ -22,15 +22,34 @@ function Field({ label, value, secret, index, active, onSelect }: {
   );
 }
 
+function Recuerdame({ index, value, onToggle }: { index: number; value: boolean; onToggle: () => void }) {
+  const { ref, focusKey: id } = useFocusItem<HTMLDivElement>({ index, onEnter: onToggle });
+  return (
+    <div ref={ref} onMouseEnter={() => applyFocus(id)} onClick={onToggle}
+      className="tv-field flex items-center h-[84px] px-6 rounded-lg mb-4 cursor-pointer">
+      <span className={`w-9 h-9 mr-5 shrink-0 rounded-md flex items-center justify-center text-[22px] font-bold ${
+        value ? 'bg-tv-red text-white' : 'border-2 border-tv-text3 text-transparent'}`}>✓</span>
+      <span className="flex flex-col">
+        <span className="text-lead font-semibold text-white">Recuerdame</span>
+        <span className="text-caption text-tv-text3">
+          {value ? 'No habra que volver a entrar en esta tele.' : 'Habra que entrar cada vez que se abra la app.'}
+        </span>
+      </span>
+    </div>
+  );
+}
+
 /**
  * Inicio de sesion pensado para el mando: los campos son botones y se escribe
- * con el teclado en pantalla de la derecha. La sesion se recuerda siempre (el
- * token de refresco vive 7 dias y se renueva al usar la app).
+ * con el teclado en pantalla de la derecha. Con «Recuerdame» la sesion queda
+ * guardada en la tele (el token de refresco vive 7 dias y se renueva al usar
+ * la app); sin el, se pierde al cerrar la aplicacion.
  */
 export default function Login() {
   const [username, setUsername] = useState(localStorage.getItem('saved_user') || '');
   const [password, setPassword] = useState('');
   const [field, setField] = useState<'user' | 'pass'>('user');
+  const [remember, setRemember] = useState(localStorage.getItem('remember_me') !== '0');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const { login } = useAuth();
@@ -42,10 +61,12 @@ export default function Login() {
     if (loading || !username || !password) return;
     setError('');
     setLoading(true);
-    const err = await login(username, password);
+    const err = await login(username, password, remember);
     setLoading(false);
     if (err) { setError(err); return; }
-    localStorage.setItem('saved_user', username);
+    localStorage.setItem('remember_me', remember ? '1' : '0');
+    if (remember) localStorage.setItem('saved_user', username);
+    else localStorage.removeItem('saved_user');
     navigate('/');
   };
 
@@ -69,8 +90,10 @@ export default function Login() {
           <Field label="Usuario" value={username} index={0} active={field === 'user'} onSelect={() => setField('user')} />
           <Field label="Contraseña" value={password} secret index={1} active={field === 'pass'} onSelect={() => setField('pass')} />
 
+          <Recuerdame index={2} value={remember} onToggle={() => setRemember(v => !v)} />
+
           <div className="mt-6">
-            <TvButton index={2} primary onClick={submit} disabled={!username || !password || loading}>
+            <TvButton index={3} primary onClick={submit} disabled={!username || !password || loading}>
               {loading ? 'Entrando…' : 'Entrar'}
             </TvButton>
           </div>

@@ -18,13 +18,30 @@ body { background: #141414; color: #fff; -webkit-font-smoothing: antialiased; ov
  */
 .app-shell {
   position: fixed;
-  top: 0;
+  top: var(--app-top, 0px);
   left: 0;
   right: 0;
   height: 100dvh;
   height: var(--app-h, 100dvh);
   display: flex;
   flex-direction: column;
+}
+/*
+ * Franja del color de la barra de pestañas pegada al borde real de la
+ * pantalla, por detras de todo. El alto visible y el de la pagina no siempre
+ * cuadran al pixel en iOS, y cualquier diferencia se veia como una banda mas
+ * clara debajo de la barra, que parecia no llegar al fondo.
+ */
+body::after {
+  content: '';
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 200px;
+  background: #0A0A0A;
+  z-index: -1;
+  pointer-events: none;
 }
 /* Lo unico que se desplaza. Con overscroll contain el rebote no arrastra la pagina. */
 .app-main { flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }

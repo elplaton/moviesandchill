@@ -11,7 +11,7 @@ interface AuthContextType {
   quotaBytes: number | null;
   refreshMe: () => Promise<void>;
   hasPreferences: boolean | null;
-  login: (username: string, password: string) => Promise<string | null>;
+  login: (username: string, password: string, remember?: boolean) => Promise<string | null>;
   logout: () => void;
   refreshPreferences: () => Promise<void>;
 }
@@ -81,7 +81,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const login = async (user: string, password: string): Promise<string | null> => {
+  const login = async (user: string, password: string, remember = true): Promise<string | null> => {
     try {
       const res = await fetch('/api/auth/login', {
         method: 'POST',
@@ -90,7 +90,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       });
       const data = await res.json();
       if (!res.ok) return data.detail || 'Error de login';
-      setTokens(data.access_token, data.refresh_token);
+      setTokens(data.access_token, data.refresh_token, remember);
       setIsAuthenticated(true);
       setUsername(user);
       await refreshMe();

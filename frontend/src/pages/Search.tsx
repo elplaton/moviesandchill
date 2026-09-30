@@ -32,8 +32,23 @@ export default function Search() {
   const [sheet, setSheet] = useState<SheetInput | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  // Último término que hemos escrito nosotros en la URL, y número de la
+  // petición en vuelo. Los dos sirven para lo mismo: que una respuesta que
+  // llega tarde no pise lo que el usuario está escribiendo ahora.
+  const pushed = useRef(q);
+  const lastRequest = useRef(0);
 
-  useEffect(() => { setText(q); }, [q]);
+  useEffect(() => {
+    // Cada búsqueda escribe el término en la URL, y eso volvía a entrar por
+    // aquí y reescribía el input: si seguías tecleando mientras la petición
+    // estaba en vuelo, al llegar la respuesta el campo daba un salto atrás al
+    // término viejo. Solo hay que hacer caso cuando el cambio viene de fuera
+    // (la lupa de la barra, un enlace, el botón atrás del navegador).
+    if (q === pushed.current) return;
+    pushed.current = q;
+    setText(q);
+  }, [q]);
+
   useEffect(() => { inputRef.current?.focus(); }, []);
 
   useEffect(() => {
@@ -42,11 +57,18 @@ export default function Search() {
     if (term.length < 2) { setResults([]); setBusy(false); return; }
     setBusy(true);
     timer.current = setTimeout(async () => {
+      const mine = ++lastRequest.current;
       try {
         const d = await (await apiFetch('/search', { method: 'POST', body: JSON.stringify({ query: term, page_size: 100 }) })).json();
+        // Mientras esta petición iba y volvía puede haberse lanzado otra con
+        // un término más nuevo; si es así, esta respuesta ya no interesa.
+        if (mine !== lastRequest.current) return;
         setResults(d.results || []);
+        pushed.current = term;
         setParams(term ? { q: term } : {}, { replace: true });
-      } catch { /* sin resultados */ } finally { setBusy(false); }
+      } catch { /* sin resultados */ } finally {
+        if (mine === lastRequest.current) setBusy(false);
+      }
     }, 320);
     return () => { if (timer.current) clearTimeout(timer.current); };
   }, [text]); // eslint-disable-line react-hooks/exhaustive-deps

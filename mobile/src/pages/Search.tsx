@@ -22,6 +22,9 @@ export default function Search() {
   const [busy, setBusy] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  // Número de la petición en vuelo: una respuesta lenta de un término viejo
+  // no debe pisar los resultados de lo que se está escribiendo ahora.
+  const lastRequest = useRef(0);
 
   useEffect(() => {
     sessionStorage.setItem('mc.q', q);
@@ -29,8 +32,13 @@ export default function Search() {
     if (q.trim().length < 2) { setResults([]); setBusy(false); return; }
     setBusy(true);
     timer.current = setTimeout(async () => {
-      try { const d = await (await apiFetch('/search', { method: 'POST', body: JSON.stringify({ query: q.trim(), page_size: 100 }) })).json(); setResults(d.results || []); }
-      catch {} finally { setBusy(false); }
+      const mine = ++lastRequest.current;
+      try {
+        const d = await (await apiFetch('/search', { method: 'POST', body: JSON.stringify({ query: q.trim(), page_size: 100 }) })).json();
+        if (mine !== lastRequest.current) return;
+        setResults(d.results || []);
+      }
+      catch {} finally { if (mine === lastRequest.current) setBusy(false); }
     }, 350);
     return () => { if (timer.current) clearTimeout(timer.current); };
   }, [q]);

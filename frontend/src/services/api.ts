@@ -1,20 +1,56 @@
 const API_BASE = '/api';
 
-let accessToken: string | null = localStorage.getItem('access_token');
-let refreshToken: string | null = localStorage.getItem('refresh_token');
+const ACCESS = 'access_token';
+const REFRESH = 'refresh_token';
 
-export function setTokens(access: string, refresh: string) {
+/** Los dos almacenes, tolerando que el navegador los tenga capados. */
+function leer(key: string): string | null {
+  try {
+    return sessionStorage.getItem(key) ?? localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+let accessToken: string | null = leer(ACCESS);
+let refreshToken: string | null = leer(REFRESH);
+
+// Con «recuérdame» la sesión vive en localStorage y aguanta cerrar el
+// navegador; sin él va a sessionStorage y se pierde al cerrar la pestaña.
+// De dónde salieron los tokens al arrancar es lo que dice cuál se eligió,
+// así que la decisión sobrevive a recargar la página.
+let recordar = (() => {
+  try {
+    return sessionStorage.getItem(ACCESS) === null;
+  } catch {
+    return true;
+  }
+})();
+
+export function setTokens(access: string, refresh: string, remember?: boolean) {
+  // Al renovar el token no se vuelve a decidir: se respeta lo elegido al entrar.
+  if (remember !== undefined) recordar = remember;
   accessToken = access;
   refreshToken = refresh;
-  localStorage.setItem('access_token', access);
-  localStorage.setItem('refresh_token', refresh);
+  try {
+    const destino = recordar ? localStorage : sessionStorage;
+    const otro = recordar ? sessionStorage : localStorage;
+    otro.removeItem(ACCESS);
+    otro.removeItem(REFRESH);
+    destino.setItem(ACCESS, access);
+    destino.setItem(REFRESH, refresh);
+  } catch { /* modo privado: la sesión dura lo que dure la pestaña */ }
 }
 
 export function clearTokens() {
   accessToken = null;
   refreshToken = null;
-  localStorage.removeItem('access_token');
-  localStorage.removeItem('refresh_token');
+  try {
+    localStorage.removeItem(ACCESS);
+    localStorage.removeItem(REFRESH);
+    sessionStorage.removeItem(ACCESS);
+    sessionStorage.removeItem(REFRESH);
+  } catch { /* nada que limpiar */ }
 }
 
 export function getAccessToken() {

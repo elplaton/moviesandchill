@@ -40,7 +40,15 @@ function trackViewportHeight() {
   const vv = window.visualViewport;
   const apply = () => {
     const h = vv?.height ?? window.innerHeight;
-    document.documentElement.style.setProperty('--app-h', `${Math.round(h)}px`);
+    // El armazon es `position: fixed`, o sea que se coloca respecto al
+    // viewport de maquetacion, mientras que el alto medido es el del viewport
+    // visible. Cuando Safari pliega o despliega sus barras los dos dejan de
+    // coincidir y el armazon quedaba corto: por debajo de la barra de
+    // pestañas asomaba el fondo de la pagina. `offsetTop` es la diferencia.
+    const top = vv?.offsetTop ?? 0;
+    const root = document.documentElement;
+    root.style.setProperty('--app-h', `${Math.round(h)}px`);
+    root.style.setProperty('--app-top', `${Math.round(top)}px`);
   };
   apply();
   vv?.addEventListener('resize', apply);

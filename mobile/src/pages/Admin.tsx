@@ -113,18 +113,32 @@ function Channels() {
   const [channels, setChannels] = useState<{ id: number; name: string }[]>([]);
   const [url, setUrl] = useState(''); const [msg, setMsg] = useState('');
   const [progress, setProgress] = useState<any[]>([]);
-  const load = () => { apiFetch('/channels').then(r => r.json()).then(d => setChannels(d.channels || [])).catch(() => {}); apiFetch('/index/progress').then(r => r.json()).then(d => setProgress(d.channels || [])).catch(() => {}); };
+  const [stats, setStats] = useState<any>(null);
+  const load = () => { apiFetch('/channels').then(r => r.json()).then(d => setChannels(d.channels || [])).catch(() => {}); apiFetch('/index/progress').then(r => r.json()).then(d => setProgress(d.channels || [])).catch(() => {}); apiFetch('/index/stats').then(r => r.json()).then(setStats).catch(() => {}); };
   useEffect(() => { load(); const t = setInterval(load, 5000); return () => clearInterval(t); }, []);
   const add = async () => { setMsg('Resolviendo…'); const d = await (await apiFetch('/channels/add', { method: 'POST', body: JSON.stringify({ url: url.trim() }) })).json(); setMsg(d.error || `${d.status === 'added' ? 'Añadido' : 'Actualizado'}: ${d.channel?.name}`); if (!d.error) setUrl(''); load(); };
   const rescan = async (id: number) => { await apiFetch(`/index/channel/${id}`, { method: 'POST' }); toast('Reescaneando canal'); };
   const reclass = async () => { const d = await (await apiFetch('/index/reclassify', { method: 'POST' })).json(); toast(d.status === 'already_running' ? 'Ya está en marcha' : 'Reclasificando catálogo…'); };
+  // Mismo orden que en escritorio: primero lo indexado, luego los canales y
+  // el añadir al final. En el movil estaba justo al reves.
+  const Cifra = ({ n, label }: { n?: number; label: string }) => (
+    <div className="flex-1 rounded-xl bg-black/25 py-3 text-center">
+      <p className="text-[19px] font-bold leading-none">{(n ?? 0).toLocaleString('es-ES')}</p>
+      <p className="text-[11px] text-nf-text3 mt-1">{label}</p>
+    </div>
+  );
+
   return (
     <div>
       <section className="rounded-2xl bg-white/5 p-4 mb-4">
-        <p className="text-[13px] font-semibold text-nf-text2 mb-2">Añadir canal</p>
-        <input className={input} placeholder="https://t.me/…" autoCapitalize="none" value={url} onChange={e => setUrl(e.target.value)} />
-        <button onClick={add} disabled={!url.trim()} className="mt-2 w-full h-11 rounded-xl bg-nf-red disabled:opacity-40 text-[15px] font-semibold">Añadir</button>
-        {msg && <p className="text-[12px] text-nf-text2 mt-2">{msg}</p>}
+        <p className="text-[13px] font-semibold text-nf-text2 mb-3">Contenido indexado</p>
+        <div className="flex gap-2">
+          <Cifra n={stats?.total} label="Total" />
+          <Cifra n={stats?.movies} label="Películas" />
+          <Cifra n={stats?.series} label="Series" />
+          <Cifra n={stats?.with_tmdb} label="Con ficha" />
+        </div>
+        <button onClick={reclass} className="mt-3 w-full h-11 rounded-xl bg-white/10 text-[15px] font-medium">Reclasificar catálogo</button>
       </section>
       {channels.map(c => {
         const p = progress.find((x: any) => x.channel_id === c.id);
@@ -136,7 +150,12 @@ function Channels() {
           </div>
         );
       })}
-      <button onClick={reclass} className="mt-2 w-full h-11 rounded-xl bg-white/10 text-[15px] font-medium">Reclasificar catálogo</button>
+      <section className="rounded-2xl bg-white/5 p-4 mt-4">
+        <p className="text-[13px] font-semibold text-nf-text2 mb-2">Añadir canal</p>
+        <input className={input} placeholder="https://t.me/…" autoCapitalize="none" value={url} onChange={e => setUrl(e.target.value)} />
+        <button onClick={add} disabled={!url.trim()} className="mt-2 w-full h-11 rounded-xl bg-nf-red disabled:opacity-40 text-[15px] font-semibold">Añadir</button>
+        {msg && <p className="text-[12px] text-nf-text2 mt-2">{msg}</p>}
+      </section>
     </div>
   );
 }
