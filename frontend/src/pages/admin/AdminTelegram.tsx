@@ -207,8 +207,9 @@ export default function AdminTelegram({ onToast }: { onToast: (m: string) => voi
             </div>
             <p className="text-nf-dim text-sm mb-6 leading-relaxed">
               El servidor no puede leer los canales hasta que inicies sesión con{' '}
-              <span className="text-nf-text">{status.phone}</span>. Telegram te mandará un código
-              a la app; escríbelo aquí. Solo hay que hacerlo una vez: la sesión queda guardada.
+              <span className="text-nf-text">{status.phone}</span>. El código llega como un
+              mensaje del propio Telegram dentro de la app, no por SMS, si tienes la sesión
+              abierta en otro dispositivo. Escríbelo aquí; solo hay que hacerlo una vez.
             </p>
 
             {error && (
@@ -257,6 +258,10 @@ export default function AdminTelegram({ onToast }: { onToast: (m: string) => voi
                     Mandar otro código
                   </button>
                 </div>
+                <p className="text-nf-dim text-xs leading-relaxed">
+                  Si el código no llega, espera unos minutos antes de pedir otro: Telegram
+                  limita los envíos por número y acaba rechazándolos.
+                </p>
               </div>
             )}
           </>

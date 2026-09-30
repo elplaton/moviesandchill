@@ -20,9 +20,13 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from telethon import TelegramClient
 from telethon.errors import (
+    AuthRestartError,
+    FloodWaitError,
+    PhoneCodeEmptyError,
     PhoneCodeExpiredError,
     PhoneCodeInvalidError,
     PhoneNumberInvalidError,
+    SendCodeUnavailableError,
     SessionPasswordNeededError,
 )
 
@@ -33,8 +37,43 @@ logger = logging.getLogger("tmd")
 router = APIRouter(prefix="/api/admin/telegram", tags=["telegram"])
 
 # Hash que devuelve send_code_request y que hay que presentar al canjear el
-# codigo. Vive en memoria porque solo tiene sentido entre las dos peticiones.
+# codigo: Telegram exige las dos cosas juntas. Se guarda en la base de datos
+# porque vivir solo en memoria dejaba tirado al usuario en cuanto se
+# redesplegaba: llegaba el codigo al movil y ya no habia con que canjearlo.
+PENDING_PHONE_KEY = "telegram_pending_phone"
+PENDING_HASH_KEY = "telegram_pending_hash"
+PENDING_AT_KEY = "telegram_pending_at"
+
 _pending: dict = {}
+
+
+async def _get_pending() -> dict:
+    """Lo que haya pendiente, de memoria o de la base de datos."""
+    global _pending
+    if _pending:
+        return _pending
+    from app.database.connection import get_app_settings
+    saved = await get_app_settings()
+    phone, code_hash = saved.get(PENDING_PHONE_KEY), saved.get(PENDING_HASH_KEY)
+    if phone and code_hash:
+        _pending = {"phone": phone, "hash": code_hash, "at": saved.get(PENDING_AT_KEY, "")}
+    return _pending
+
+
+async def _set_pending(phone: str, code_hash: str) -> None:
+    global _pending
+    import time
+    at = str(int(time.time()))
+    _pending = {"phone": phone, "hash": code_hash, "at": at}
+    from app.database.connection import set_app_settings
+    await set_app_settings({PENDING_PHONE_KEY: phone, PENDING_HASH_KEY: code_hash, PENDING_AT_KEY: at})
+
+
+async def _clear_pending() -> None:
+    global _pending
+    _pending = {}
+    from app.database.connection import set_app_settings
+    await set_app_settings({PENDING_PHONE_KEY: "", PENDING_HASH_KEY: "", PENDING_AT_KEY: ""})
 
 
 class SignInRequest(BaseModel):
@@ -54,6 +93,16 @@ def _mask_phone(phone: str) -> str:
     if len(phone) < 8:
         return phone
     return f"{phone[:3]}{'·' * (len(phone) - 7)}{phone[-4:]}"
+
+
+def _humanize(seconds: int) -> str:
+    if seconds < 60:
+        return f"{seconds} segundos"
+    minutes = seconds // 60
+    if minutes < 60:
+        return f"{minutes} minuto{'s' if minutes != 1 else ''}"
+    hours = minutes // 60
+    return f"{hours} hora{'s' if hours != 1 else ''}"
 
 
 def _mask_hash(value: str) -> str:
@@ -118,7 +167,7 @@ async def telegram_status(user: Annotated[str, Depends(get_current_admin)]):
     return {
         "configured": True,
         "authorized": authorized,
-        "code_sent": bool(_pending),
+        "code_sent": bool(await _get_pending()),
         "phone": _mask_phone(config.get("phone", "")),
         "channels_resolved": len(downloader.channels),
         "credentials": _credentials_out(config),
@@ -142,16 +191,40 @@ async def send_code(user: Annotated[str, Depends(get_current_admin)]):
                 "detail": "Esta sesion ya estaba iniciada."}
 
     phone = config["phone"]
+
+    # Telethon guarda el phone_code_hash y, si lo tiene, send_code_request deja
+    # de mandar un codigo nuevo y llama a ResendCodeRequest. Pulsando el boton
+    # dos veces se agotaban las vias de reenvio y Telegram respondia "all
+    # available options for this type of number were already used". Lo tiramos
+    # para que siempre sea un envio nuevo.
+    from telethon import utils as tl_utils
+    client._phone_code_hash.pop(tl_utils.parse_phone(phone) or phone, None)
+
     try:
         sent = await client.send_code_request(phone)
     except PhoneNumberInvalidError:
         raise HTTPException(status_code=400, detail=f"Telegram no acepta el numero {_mask_phone(phone)}.")
+    except FloodWaitError as e:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Telegram ha limitado los intentos. Hay que esperar {_humanize(e.seconds)} "
+                   "antes de pedir otro codigo.",
+        )
+    except SendCodeUnavailableError:
+        raise HTTPException(
+            status_code=429,
+            detail="Telegram ya ha gastado todas las vias de envio para este numero (SMS, llamada). "
+                   "Espera unos minutos y vuelve a intentarlo, o inicia sesion desde la app de "
+                   "Telegram en otro dispositivo para que te llegue por ahi.",
+        )
+    except AuthRestartError:
+        raise HTTPException(status_code=503,
+                            detail="Telegram ha pedido reiniciar el proceso. Vuelve a darle al boton.")
     except Exception as e:
         logger.error("Error pidiendo el codigo de Telegram: %s", e)
         raise HTTPException(status_code=502, detail=f"Telegram no ha aceptado la peticion: {e}")
 
-    _pending.clear()
-    _pending.update({"phone": phone, "hash": sent.phone_code_hash})
+    await _set_pending(phone, sent.phone_code_hash)
     logger.info("Codigo de Telegram enviado a %s", _mask_phone(phone))
 
     return {"authorized": False, "code_sent": True, "phone": _mask_phone(phone),
@@ -162,7 +235,8 @@ async def send_code(user: Annotated[str, Depends(get_current_admin)]):
 async def sign_in(req: SignInRequest, user: Annotated[str, Depends(get_current_admin)]):
     downloader, config = _ctx()
 
-    if not _pending:
+    pending = await _get_pending()
+    if not pending:
         raise HTTPException(status_code=409,
                             detail="No hay ningun codigo pendiente. Pide uno nuevo.")
 
@@ -170,7 +244,7 @@ async def sign_in(req: SignInRequest, user: Annotated[str, Depends(get_current_a
     code = req.code.strip().replace(" ", "").replace("-", "")
 
     try:
-        await client.sign_in(_pending["phone"], code, phone_code_hash=_pending["hash"])
+        await client.sign_in(pending["phone"], code, phone_code_hash=pending["hash"])
     except SessionPasswordNeededError:
         # Cuenta con verificacion en dos pasos: el codigo era correcto pero
         # falta la contrasena. Se pide en una segunda vuelta del formulario.
@@ -183,16 +257,16 @@ async def sign_in(req: SignInRequest, user: Annotated[str, Depends(get_current_a
             await client.sign_in(password=req.password)
         except Exception as e:
             raise HTTPException(status_code=401, detail=f"Contrasena de dos pasos incorrecta: {e}")
-    except PhoneCodeInvalidError:
+    except (PhoneCodeInvalidError, PhoneCodeEmptyError):
         raise HTTPException(status_code=400, detail="El codigo no es correcto.")
     except PhoneCodeExpiredError:
-        _pending.clear()
+        await _clear_pending()
         raise HTTPException(status_code=400, detail="El codigo ha caducado. Pide uno nuevo.")
     except Exception as e:
         logger.error("Error iniciando sesion en Telegram: %s", e)
         raise HTTPException(status_code=502, detail=f"Telegram ha rechazado el acceso: {e}")
 
-    _pending.clear()
+    await _clear_pending()
     logger.info("Sesion de Telegram iniciada desde el panel de administracion")
 
     resolved, indexing = await _after_login(downloader, config, created)
@@ -283,7 +357,7 @@ async def save_credentials(req: CredentialsRequest, user: Annotated[str, Depends
     downloader.api_hash = api_hash
     downloader.phone = phone
 
-    _pending.clear()
+    await _clear_pending()
 
     if app_changed:
         await _reset_client(downloader)
