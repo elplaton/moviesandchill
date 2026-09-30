@@ -185,13 +185,18 @@ export default function Onboarding() {
             {currentPicks.map(item => {
               const on = selected.has(item.tmdb_id);
               return (
-                <div key={item.id} className={`relative rounded-card transition-shadow ${on ? 'ring-2 ring-nf-red ring-offset-2 ring-offset-nf-bg' : ''}`}>
+                // El aro va sobre la carátula, no sobre el contenedor: este
+                // incluye el título y el año, así que el recuadro rojo
+                // rodeaba también el texto y dejaba un hueco muerto debajo.
+                <div key={item.id} className={`relative ${on
+                  ? '[&_.card-media]:outline [&_.card-media]:outline-2 [&_.card-media]:outline-nf-red [&_.card-media]:outline-offset-2'
+                  : ''}`}>
                   <Card title={item.title} poster={item.poster} rating={item.rating}
                     meta={item.year ? String(item.year) : undefined}
                     onOpen={() => toggle(item.tmdb_id)}
                     actions={<span className="rounded bg-white px-3 py-1.5 text-xs font-semibold text-black">{on ? 'Quitar' : 'Seleccionar'}</span>} />
                   {on && (
-                    <span className="pointer-events-none absolute right-2 top-2 grid h-8 w-8 place-items-center rounded-full bg-nf-red">
+                    <span className="pointer-events-none absolute right-2 top-2 grid h-8 w-8 place-items-center rounded-full bg-nf-red ring-2 ring-black/45">
                       <span className="w-4 h-4"><IconCheck /></span>
                     </span>
                   )}
