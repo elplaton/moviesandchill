@@ -95,6 +95,16 @@ async def _ensure_tables():
                 status          VARCHAR(20) DEFAULT 'pending'
             )
         """)
+        # Ajustes que se editan desde el panel. Viven en la BD y no en el .env
+        # porque en un despliegue tipo Coolify el .env lo regenera la plataforma
+        # en cada redespliegue: lo que se guarde aqui es lo unico que sobrevive.
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS app_settings (
+                key        VARCHAR(100) PRIMARY KEY,
+                value      TEXT,
+                updated_at TIMESTAMP DEFAULT NOW()
+            )
+        """)
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS user_preferences (
                 user_id       INTEGER PRIMARY KEY REFERENCES users(id),
@@ -181,3 +191,36 @@ from app.database.media import (insert_media_item, insert_media_items, update_me
     fetch_all_media_for_reclassify, bulk_update_parsed, reset_tmdb_for_ids, get_missing_cache_pairs)
 from app.database.tmdb_cache import get_tmdb_cached, upsert_tmdb_cache
 from app.database.index_progress import get_index_progress, upsert_index_progress, bump_index_progress, get_index_stats, set_index_phase, reset_all_index_progress, get_index_status
+
+
+# ---------------------------------------------------------------------------
+# app_settings: ajustes editables desde el panel de administracion
+# ---------------------------------------------------------------------------
+
+async def get_app_settings() -> dict[str, str]:
+    """Todo lo guardado desde el panel. Devuelve {} si aun no hay pool o tabla:
+    lo llama el arranque, antes de que nada este garantizado."""
+    if not _pool:
+        return {}
+    try:
+        async with _pool.acquire() as conn:
+            rows = await conn.fetch("SELECT key, value FROM app_settings")
+        return {r["key"]: r["value"] for r in rows}
+    except Exception as e:
+        logger.warning("No se pudieron leer los ajustes guardados: %s", e)
+        return {}
+
+
+async def set_app_settings(values: dict[str, str]) -> None:
+    if not _pool or not values:
+        return
+    async with _pool.acquire() as conn:
+        for key, value in values.items():
+            await conn.execute(
+                """
+                INSERT INTO app_settings (key, value, updated_at)
+                VALUES ($1, $2, NOW())
+                ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = NOW()
+                """,
+                key, str(value),
+            )

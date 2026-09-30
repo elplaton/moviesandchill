@@ -122,3 +122,33 @@ def _env_json(key: str, default):
         except (json.JSONDecodeError, ValueError):
             logger.warning("JSON invalido para %s: %s", key, val)
     return default
+
+
+# Ajustes que el panel de administracion puede sobrescribir y que se guardan en
+# la tabla `app_settings`. Mandan sobre el .env a proposito: en un despliegue
+# tipo Coolify el .env lo regenera la plataforma en cada redespliegue, asi que
+# lo guardado en la base de datos es lo ultimo que dijo el usuario.
+SAVED_SETTING_KEYS = ("api_id", "api_hash", "phone")
+
+
+async def apply_saved_settings(cfg: dict) -> dict:
+    """Vuelca sobre `cfg` lo que haya guardado el panel. Si la tabla aun no
+    existe o esta vacia, `cfg` se queda como estaba."""
+    from app.database.connection import get_app_settings
+
+    saved = await get_app_settings()
+    for key in SAVED_SETTING_KEYS:
+        value = saved.get(key)
+        if not value:
+            continue
+        if key == "api_id":
+            try:
+                cfg[key] = int(value)
+            except ValueError:
+                logger.warning("api_id guardado invalido: %s", value)
+                continue
+        else:
+            cfg[key] = value
+    if saved:
+        logger.info("Ajustes cargados desde la BD: %s", ", ".join(sorted(saved)))
+    return cfg

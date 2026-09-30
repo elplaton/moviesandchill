@@ -62,6 +62,11 @@ async def startup():
             f"No se pudo conectar a PostgreSQL tras 10 intentos ({config['database_url'].rsplit('@', 1)[-1]})"
         )
 
+    # Credenciales de Telegram guardadas desde el panel. Van despues del pool
+    # y antes de crear el downloader: si no, arrancaria con las del .env.
+    from app.config import apply_saved_settings
+    await apply_saved_settings(config)
+
     from app.auth.service import hash_password
     admin_password = os.getenv("TMD_ADMIN_PASSWORD", "admin")
     try:
