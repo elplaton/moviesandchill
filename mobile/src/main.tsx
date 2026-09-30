@@ -37,6 +37,24 @@ if ('serviceWorker' in navigator && !import.meta.env.DEV) {
  * en --app-h, que es lo que usa .app-shell.
  */
 function trackViewportHeight() {
+  const root = document.documentElement;
+
+  // Instalada en la pantalla de inicio no hay barras de navegador que se
+  // plieguen, asi que no hay nada que medir. Y medir hacia falta no hacia:
+  // en iOS, `visualViewport.height` viene ya SIN la franja del indicador de
+  // inicio, de modo que el armazon quedaba unos 60 px corto y la barra de
+  // pestañas flotaba por encima del borde; encima la barra se aparta otra vez
+  // esa misma franja con su `padding-bottom`, asi que los iconos subian el
+  // doble. Con 100dvh el armazon llega al borde real y el padding hace lo
+  // unico que tiene que hacer: dejar los iconos por encima del indicador.
+  const instalada = window.matchMedia?.('(display-mode: standalone)').matches
+    || (navigator as unknown as { standalone?: boolean }).standalone === true;
+  if (instalada) {
+    root.style.setProperty('--app-h', '100dvh');
+    root.style.setProperty('--app-top', '0px');
+    return;
+  }
+
   const vv = window.visualViewport;
   const apply = () => {
     const h = vv?.height ?? window.innerHeight;
@@ -46,7 +64,6 @@ function trackViewportHeight() {
     // coincidir y el armazon quedaba corto: por debajo de la barra de
     // pestañas asomaba el fondo de la pagina. `offsetTop` es la diferencia.
     const top = vv?.offsetTop ?? 0;
-    const root = document.documentElement;
     root.style.setProperty('--app-h', `${Math.round(h)}px`);
     root.style.setProperty('--app-top', `${Math.round(top)}px`);
   };
