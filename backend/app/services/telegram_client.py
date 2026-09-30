@@ -70,10 +70,28 @@ class TelegramDownloader:
         return 0
 
     async def start(self):
+        """Conecta con la sesion que haya guardada. Si no hay, se queda
+        conectado pero sin autenticar y lo dice.
+
+        Antes esto llamaba a `client.start(phone=...)`, que en un contenedor
+        hacia dos destrozos: pedia el codigo por consola (y moria con un EOF,
+        sin sesion igualmente) y, de camino, **gastaba un envio de codigo en
+        cada arranque**. Con varios redespliegues seguidos Telegram acababa
+        respondiendo "all available options for this type of number were
+        already used", y el hash que dejaba cacheado convertia la siguiente
+        peticion del panel en un reenvio en vez de un envio nuevo.
+        """
         session_file = self._session_path()
         os.makedirs(os.path.dirname(session_file), exist_ok=True)
         self.client = TelegramClient(session_file, self.api_id, self.api_hash)
-        await self.client.start(phone=self.phone)
+        await self.client.connect()
+
+        if not await self.client.is_user_authorized():
+            logger.warning("Sin sesion de Telegram: inicia sesion en el panel de "
+                           "administracion, pestaña Telegram. No se pide ningun codigo "
+                           "desde aqui para no gastar los envios disponibles.")
+            return
+
         for ch in self.channel_ids:
             try:
                 ref = self._resolve_channel_id(ch["id"])
