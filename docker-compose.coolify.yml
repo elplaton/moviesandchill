@@ -1,0 +1,86 @@
+# Despliegue en Coolify.
+#
+# Diferencias con docker-compose.yml (el de casa):
+#  - No hay servicio `db`: se usa el PostgreSQL que ya vive en Coolify, via
+#    TMD_DATABASE_URL. Para que el backend resuelva su hostname interno hay que
+#    activar "Connect To Predefined Network" en los ajustes de la aplicacion.
+#  - No se publican puertos en el host: el 80 lo ocupa el proxy de Coolify y
+#    el bind fallaba, dejando el contenedor en bucle de reinicio.
+#  - Healthchecks propios: el de por defecto de Coolify usa curl y ni
+#    nginx:alpine ni python:slim lo traen, asi que el deploy se quedaba
+#    esperando "health" para siempre.
+#  - Sin container_name: Coolify recrea contenedores y el nombre fijo choca.
+
+services:
+  backend:
+    build:
+      context: ./backend
+    restart: unless-stopped
+    expose:
+      - "8000"
+    environment:
+      # --- Telegram (obligatorio) ---
+      TMD_API_ID: ${TMD_API_ID}
+      TMD_API_HASH: ${TMD_API_HASH}
+      TMD_PHONE: ${TMD_PHONE}
+      # --- Seguridad (obligatorio: sin secreto el arranque aborta) ---
+      TMD_JWT_SECRET: ${TMD_JWT_SECRET}
+      TMD_ADMIN_PASSWORD: ${TMD_ADMIN_PASSWORD:-admin}
+      # --- PostgreSQL externo ---
+      TMD_DATABASE_URL: ${TMD_DATABASE_URL}
+      # --- Rutas dentro del contenedor ---
+      TMD_DOWNLOAD_PATH: /app/downloads
+      TMD_EXTRACT_PATH: /app/movies
+      TMD_STATE_DIR: /app/state
+      # --- Canales ---
+      # Solo se usan si la tabla `channels` esta vacia (primer arranque contra
+      # una BD nueva); despues manda la BD.
+      TMD_CHANNELS: ${TMD_CHANNELS:-[]}
+      # --- Resto ---
+      TMD_CORS_ORIGINS: ${TMD_CORS_ORIGINS:-*}
+      TMD_TMBD_API_KEY: ${TMD_TMBD_API_KEY:-}
+      TMD_TMDB_ENABLED: ${TMD_TMDB_ENABLED:-false}
+      TMD_RESCAN_HOURS: ${TMD_RESCAN_HOURS:-6}
+      TMD_DOWNLOAD_PARALLEL: ${TMD_DOWNLOAD_PARALLEL:-3}
+      TMD_STREAM_MAX: ${TMD_STREAM_MAX:-3}
+      TMD_CONVERT_DTS: ${TMD_CONVERT_DTS:-true}
+      TMD_DELETE_ARCHIVES: ${TMD_DELETE_ARCHIVES:-true}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    volumes:
+      - session:/app/session
+      - downloads:/app/downloads
+      - movies:/app/movies
+      - state:/app/state
+    healthcheck:
+      # start_period generoso: si la BD tarda, el arranque reintenta 10 veces.
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5)"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 120s
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    restart: unless-stopped
+    environment:
+      # Coolify genera el dominio y enruta al puerto 80 de este servicio.
+      SERVICE_FQDN_FRONTEND_80: /
+    expose:
+      - "80"
+    depends_on:
+      backend:
+        condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+
+volumes:
+  session:
+  downloads:
+  movies:
+  state:
