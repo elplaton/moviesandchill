@@ -95,6 +95,27 @@ async def _ensure_tables():
                 status          VARCHAR(20) DEFAULT 'pending'
             )
         """)
+        # Registro de novedades: que ha llegado en vivo a cada canal y si se ha
+        # indexado o no. Sirve para comprobar de un vistazo que la escucha de
+        # mensajes nuevos funciona, cosa que antes solo se veia en los logs.
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS novedades (
+                id           SERIAL PRIMARY KEY,
+                channel_id   BIGINT,
+                channel_name VARCHAR(255),
+                message_id   INTEGER,
+                file_name    VARCHAR(500),
+                media_type   VARCHAR(10),
+                season       INTEGER,
+                episode      INTEGER,
+                clean_title  VARCHAR(300),
+                indexed      BOOLEAN DEFAULT FALSE,
+                reason       VARCHAR(120),
+                created_at   TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_novedades_fecha ON novedades (created_at DESC)")
+
         # Ajustes que se editan desde el panel. Viven en la BD y no en el .env
         # porque en un despliegue tipo Coolify el .env lo regenera la plataforma
         # en cada redespliegue: lo que se guarde aqui es lo unico que sobrevive.
@@ -224,3 +245,68 @@ async def set_app_settings(values: dict[str, str]) -> None:
                 """,
                 key, str(value),
             )
+
+
+# ---------------------------------------------------------------------------
+# novedades: que ha ido llegando en vivo a los canales
+# ---------------------------------------------------------------------------
+
+NOVEDADES_MAX = 2000
+
+
+async def log_novedad(channel_id: int, channel_name: str, message_id: int, file_name: str,
+                      indexed: bool, reason: str = "", media_type: str = None,
+                      season: int = None, episode: int = None, clean_title: str = None) -> None:
+    """Deja constancia de un mensaje nuevo, se haya indexado o no. El motivo
+    del descarte es justo lo que hacia falta para saber por que una pelicula
+    no aparecia: sin el, un mensaje ignorado no dejaba ni rastro."""
+    if not _pool:
+        return
+    try:
+        async with _pool.acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO novedades (channel_id, channel_name, message_id, file_name,
+                                       media_type, season, episode, clean_title, indexed, reason)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                """,
+                channel_id, channel_name, message_id, (file_name or "")[:500], media_type,
+                season, episode, (clean_title or None), indexed, (reason or "")[:120],
+            )
+            # Se poda de vez en cuando para que la tabla no crezca sin fin.
+            if message_id % 50 == 0:
+                await conn.execute(
+                    """
+                    DELETE FROM novedades WHERE id < (
+                        SELECT MIN(id) FROM (
+                            SELECT id FROM novedades ORDER BY id DESC LIMIT $1
+                        ) AS ultimas
+                    )
+                    """,
+                    NOVEDADES_MAX,
+                )
+    except Exception as e:
+        logger.warning("No se pudo registrar la novedad: %s", e)
+
+
+async def get_novedades(limit: int = 100, only_indexed: bool = False) -> list[dict]:
+    if not _pool:
+        return []
+    where = "WHERE n.indexed" if only_indexed else ""
+    async with _pool.acquire() as conn:
+        rows = await conn.fetch(
+            f"""
+            SELECT n.*, c.title AS tmdb_title, c.poster, c.year
+            FROM novedades n
+            LEFT JOIN media_items mi
+                   ON mi.channel_id = n.channel_id AND mi.message_id = n.message_id
+            -- Por las dos columnas: tv/606 y movie/606 son titulos distintos.
+            LEFT JOIN tmdb_cache c
+                   ON c.tmdb_id = mi.tmdb_id AND c.media_type = mi.tmdb_type
+            {where}
+            ORDER BY n.created_at DESC
+            LIMIT $1
+            """,
+            limit,
+        )
+    return [dict(r) for r in rows]

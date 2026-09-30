@@ -396,6 +396,14 @@ async def _enrich_loop(api_key: str, broadcast=None):
     t_start = time.time()
     idle_logged = False
 
+    # Margen antes de cerrar el bucle. ensure_enrich_worker() no arranca otro
+    # mientras este siga vivo, asi que un mensaje que llegue justo cuando este
+    # iba a salir se quedaria sin enriquecer; y como en la Home solo sale lo
+    # `tmdb_valid`, esa pelicula no aparece hasta el siguiente barrido (horas).
+    GRACE_CHECKS = 4
+    GRACE_SLEEP = 5
+    grace_left = GRACE_CHECKS
+
     while True:
         from app.database.connection import get_media_without_tmdb
         items = await get_media_without_tmdb(limit=300)
@@ -406,9 +414,15 @@ async def _enrich_loop(api_key: str, broadcast=None):
                     logger.info("TMDB: al dia, esperando al escaneo en curso")
                     idle_logged = True
                 await asyncio.sleep(5)
+                grace_left = GRACE_CHECKS
+                continue
+            if grace_left > 0:
+                grace_left -= 1
+                await asyncio.sleep(GRACE_SLEEP)
                 continue
             break
         idle_logged = False
+        grace_left = GRACE_CHECKS
 
         batch_num += 1
         logger.info("TMDB: batch %d — %d items pendientes", batch_num, len(items))
@@ -516,20 +530,55 @@ async def refresh_missing_cache(api_key: str) -> int:
 
 
 async def index_live_message(downloader, channel_id: int, msg, api_key: str = "", broadcast=None):
-    """Indexa un mensaje recien publicado en un canal (evento de Telethon)."""
-    from app.database.connection import bump_index_progress
+    """Indexa un mensaje recien publicado en un canal (evento de Telethon).
 
+    Todo lo que llega queda anotado en la tabla `novedades`, se indexe o no, y
+    con el motivo del descarte: sin eso, un mensaje ignorado no dejaba ni
+    rastro y no habia forma de saber por que una pelicula no aparecia.
+    """
+    from app.database.connection import bump_index_progress, log_novedad
+
+    name = downloader.channel_name(channel_id)
     indexed = False
-    if msg.media:
+    reason = ""
+    item = None
+
+    if not msg.media:
+        reason = "mensaje sin archivo"
+    else:
         file_name = downloader._get_file_name(msg)
-        if file_name and downloader._is_downloadable(file_name):
+        if not file_name:
+            reason = "archivo sin nombre"
+        elif not downloader._is_downloadable(file_name):
+            reason = "extension no admitida"
+        else:
             size = downloader._get_file_size(msg)
-            if size:
-                name = downloader.channels.get(channel_id, {}).get("name", "")
-                await insert_media_items([_item_from_message(downloader, channel_id, name, msg, file_name, size)])
+            if not size:
+                reason = "archivo sin tamaño"
+            else:
+                item = _item_from_message(downloader, channel_id, name, msg, file_name, size)
+                await insert_media_items([item])
                 indexed = True
-                logger.info("Nuevo en %s: %s", name, file_name[:80])
+                logger.info("Nuevo en %s: %s (%s)", name, file_name[:80],
+                            item.get("media_type") or "sin clasificar")
                 ensure_enrich_worker(api_key, broadcast)
+
+    await log_novedad(
+        channel_id=channel_id, channel_name=name, message_id=msg.id,
+        file_name=(item or {}).get("file_name") or downloader._get_file_name(msg) or "",
+        indexed=indexed, reason=reason,
+        media_type=(item or {}).get("media_type"),
+        season=(item or {}).get("season"), episode=(item or {}).get("episode"),
+        clean_title=(item or {}).get("clean_title"),
+    )
+
+    if broadcast:
+        try:
+            await broadcast({"type": "novedad", "channel": name, "indexed": indexed,
+                             "file_name": (item or {}).get("file_name", ""), "reason": reason})
+        except Exception as e:
+            logger.warning("No se pudo anunciar la novedad: %s", e)
+
     await bump_index_progress(channel_id, msg.id, indexed)
 
 

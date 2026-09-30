@@ -5,6 +5,7 @@ import { useAuth } from '../contexts/AuthContext';
 import AdminUsers from './admin/AdminUsers';
 import AdminDownloads from './admin/AdminDownloads';
 import AdminTelegram from './admin/AdminTelegram';
+import AdminNovedades from './admin/AdminNovedades';
 import Channels from './Channels';
 import Settings from './Settings';
 import Logs from './Logs';
@@ -13,6 +14,7 @@ const TABS = [
   { id: 'usuarios', label: 'Usuarios' },
   { id: 'descargas', label: 'Descargas' },
   { id: 'canales', label: 'Canales' },
+  { id: 'novedades', label: 'Novedades' },
   { id: 'telegram', label: 'Telegram' },
   { id: 'ajustes', label: 'Ajustes' },
   { id: 'registros', label: 'Registros' },
@@ -55,6 +57,7 @@ export default function Admin() {
         {tab === 'usuarios' && <AdminUsers onToast={show} />}
         {tab === 'descargas' && <AdminDownloads onToast={show} />}
         {tab === 'canales' && <Channels embedded />}
+        {tab === 'novedades' && <AdminNovedades />}
         {tab === 'telegram' && <AdminTelegram onToast={show} />}
         {tab === 'ajustes' && <Settings embedded />}
         {tab === 'registros' && <Logs embedded />}
