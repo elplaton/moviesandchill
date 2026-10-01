@@ -118,9 +118,15 @@ function goBack() {
 
 export function exitApp() {
   try {
-    const w = window as unknown as { tizen?: any };
+    const w = window as unknown as { tizen?: any; AndroidTV?: { exit?: () => void } };
     if (w.tizen?.application) {
       w.tizen.application.getCurrentApplication?.()?.exit?.();
+      return;
+    }
+    // Fire TV: el WebView no se cierra solo, lo cierra la Activity que lo
+    // contiene a traves del puente que inyecta la app de Android.
+    if (w.AndroidTV?.exit) {
+      w.AndroidTV.exit();
       return;
     }
     // webOS: cerrar la ventana termina la app (documentado por LG).
@@ -129,6 +135,10 @@ export function exitApp() {
     /* fuera de la TV no hay nada que cerrar */
   }
 }
+
+// En Android el boton Atras del mando no llega al WebView como un keydown:
+// se lo queda la Activity. Se expone aqui para que la app nativa lo reenvie.
+(window as unknown as { __tvBack?: () => void }).__tvBack = goBack;
 
 function onKeyDown(event: KeyboardEvent) {
   const code = event.keyCode;

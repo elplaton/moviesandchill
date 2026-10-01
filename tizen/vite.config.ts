@@ -22,7 +22,9 @@ export default defineConfig(({ mode }) => ({
     // defecto de Vite (chrome87) el paquete salia con sintaxis que una TV
     // anterior a 2022 no sabe leer, y la app quedaba en negro sin avisar.
     // webOS 5 (LG 2020) va por Chromium 68 y webOS 6 (2021) por 79.
-    target: mode === 'webos' ? 'chrome68' : 'chrome85',
+    // Fire OS 7 (los Fire TV Stick anteriores a 2023) monta un WebView por
+    // Chromium 70, asi que comparte suelo con webOS.
+    target: mode === 'webos' || mode === 'firetv' ? 'chrome68' : 'chrome85',
   },
   server: {
     proxy: {

@@ -20,3 +20,8 @@ webos/dist/
 webos/*.ipk
 mobile/node_modules/
 mobile/dist/
+
+# Fire TV: el APK y su firma se generan, no se versionan
+firetv/MoviesChill.apk
+firetv/MoviesChill.apk.idsig
+firetv/.build/
