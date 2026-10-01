@@ -192,6 +192,10 @@ async def delete_file(req: DeleteRequest, user: Annotated[str, Depends(get_curre
             shutil.rmtree(target)
         else:
             os.remove(target)
+            # Los subtitulos sueltos del video se van con el: si no, quedan
+            # .vtt huerfanos que luego salen en el selector de otro archivo.
+            from app.services.subs import limpiar_subtitulos
+            limpiar_subtitulos(target)
             # Si era el ultimo archivo, sobran su carpeta (temporada) y la de
             # la serie si tambien queda vacia.
             from app.services.layout import prune_empty_dirs

@@ -11,6 +11,9 @@ import re
 import subprocess
 import time
 
+from app.services.subs import extraer_subtitulos
+from app.services.tracks import leer_pistas, mejor_audio
+
 logger = logging.getLogger("tmd")
 
 VIDEO_EXTS = ('.mkv', '.mp4', '.avi', '.ts', '.m4v', '.mov', '.wmv', '.flv', '.webm')
@@ -31,6 +34,75 @@ def _info(path, fmt):
         return ""
 
 
+def _mapeo_audio(pistas: dict) -> list[str]:
+    """Mapea el video y todas las pistas de audio, con la preferida la
+    primera y marcada como unica activa.
+
+    Antes se hacia `-map 0:a` a secas: todas las pistas entraban y todas
+    quedaban activas, de modo que Safari y QuickTime las reproducian a la vez
+    y se oia la pelicula en español y en ingles encima. Ahora el idioma que
+    manda es el español si esta, y el resto viaja dentro del archivo pero
+    apagado, para quien sepa cambiarlo.
+    """
+    audio = pistas.get("audio") or []
+    args = ["-map", "0:v:0"]
+    if not audio:
+        return args
+
+    pref = mejor_audio(audio)
+    orden = [pref] + [a["order"] for a in audio if a["order"] != pref]
+    for n in orden:
+        args += ["-map", f"0:a:{n}"]
+
+    for destino, origen in enumerate(orden):
+        lang = audio[origen]["language"]
+        titulo = audio[origen]["title"]
+        args += ["-disposition:a:" + str(destino), "default" if destino == 0 else "0"]
+        if lang and lang != "und":
+            args += [f"-metadata:s:a:{destino}", f"language={lang}"]
+        if titulo:
+            args += [f"-metadata:s:a:{destino}", f"title={titulo}"]
+    return args
+
+
+def _sacar_subtitulos(path: str, pistas: dict) -> None:
+    try:
+        extraer_subtitulos(path, pistas.get("subtitles") or [])
+    except Exception as e:
+        logger.warning("Extraccion de subtitulos fallida en %s: %s", os.path.basename(path), e)
+
+
+def _arreglar_pistas_mp4(f: str, pistas: dict, converted: list, on_progress=None) -> None:
+    """Remux copiando de un MP4 que ya era compatible, solo para dejar una
+    unica pista de audio activa (y de paso sacar sus subtitulos)."""
+    audio = pistas.get("audio") or []
+    activas = [a for a in audio if a["default"]]
+    pref = mejor_audio(audio)
+    # Si ya hay exactamente una activa y es la que toca, no hay nada que hacer.
+    if len(activas) == 1 and activas[0]["order"] == pref:
+        _sacar_subtitulos(f, pistas)
+        converted.append(f)
+        return
+
+    logger.info("Reordenando pistas de audio en %s (%d pistas, %d activas)",
+                os.path.basename(f), len(audio), len(activas))
+    if on_progress:
+        on_progress(f)
+    _sacar_subtitulos(f, pistas)
+
+    tmp = os.path.splitext(f)[0] + "_tracks.mp4"
+    try:
+        subprocess.run(["ffmpeg", "-i", f, *_mapeo_audio(pistas), "-sn", "-dn",
+                        "-c", "copy", "-movflags", "+faststart", tmp, "-y", "-loglevel", "error"],
+                       check=True)
+        os.replace(tmp, f)
+    except Exception as e:
+        logger.error("No se pudieron reordenar las pistas de %s: %s", f, e)
+        if os.path.isfile(tmp):
+            os.remove(tmp)
+    converted.append(f)
+
+
 def make_compatible(file_list, on_progress=None):
     """Convierte (o reempaqueta) cada video a MP4. Devuelve las rutas finales."""
     converted = []
@@ -47,8 +119,21 @@ def make_compatible(file_list, on_progress=None):
         audio_ok = (not anorm) or any(c in anorm for c in COMPAT_AUDIO)
         container_ok = (not cnorm) or any(c in cnorm for c in COMPAT_CONTAINER)
 
+        pistas = leer_pistas(f)
+
+        # Un MP4 ya compatible se dejaba tal cual, pero si trae varias pistas
+        # de audio puede venir con todas marcadas como activas: hay
+        # reproductores (Safari, QuickTime) que entonces las suenan a la vez.
+        # Un remux copiando es cuestion de segundos y lo deja en su sitio.
         if video_ok and audio_ok and container_ok:
-            converted.append(f)
+            # El remux solo vale si el archivo es de verdad un MP4. Sin
+            # mediainfo instalado `_info()` devuelve "" y todo pasa por
+            # compatible, asi que no basta con fiarse de esa comprobacion.
+            if f.lower().endswith(".mp4") and len(pistas.get("audio", [])) > 1:
+                _arreglar_pistas_mp4(f, pistas, converted, on_progress)
+            else:
+                _sacar_subtitulos(f, pistas)
+                converted.append(f)
             continue
 
         v_args = ["-c:v", "copy"] if video_ok else ["-c:v", "libx264", "-preset", "veryfast", "-crf", "20"]
@@ -68,9 +153,12 @@ def make_compatible(file_list, on_progress=None):
         new_name = os.path.splitext(f)[0] + ".mp4"
         tmp = os.path.splitext(f)[0] + "_tv.mp4"
         try:
-            # Sin subtitulos: MP4 no admite PGS/ASS y ffmpeg abortaria. Se
-            # conservan todas las pistas de audio (dual).
-            subprocess.run(["ffmpeg", "-i", f, "-map", "0:v:0", "-map", "0:a", "-sn", "-dn",
+            # Los subtitulos se sacan del original a .vtt sueltos: MP4 no
+            # admite PGS ni ASS y antes se perdian sin mas. Va antes de
+            # convertir porque es el original el que los lleva.
+            _sacar_subtitulos(f, pistas)
+
+            subprocess.run(["ffmpeg", "-i", f, *_mapeo_audio(pistas), "-sn", "-dn",
                             *v_args, *a_args, "-movflags", "+faststart", tmp, "-y", "-loglevel", "error"], check=True)
             if new_name != f and os.path.isfile(f):
                 os.remove(f)
