@@ -11,6 +11,7 @@ import Series from './pages/Series';
 import Search from './pages/Search';
 import Library from './pages/Library';
 import Settings from './pages/Settings';
+import Onboarding from './pages/Onboarding';
 
 function Splash() {
   return (
@@ -47,7 +48,7 @@ function Shell() {
 }
 
 export default function App() {
-  const { isAuthenticated, isLoading } = useAuth();
+  const { isAuthenticated, isLoading, hasPrefs } = useAuth();
   const location = useLocation();
 
   if (isLoading) return <Splash />;
@@ -55,6 +56,10 @@ export default function App() {
     return location.pathname === '/login' ? <Login /> : <Navigate to="/login" replace />;
   }
   if (location.pathname === '/login') return <Navigate to="/" replace />;
+
+  // Sin preferencias se pasa por el onboarding. Vive fuera del Shell: no
+  // tiene rail ni descargas, es una pantalla cerrada hasta que se guarda.
+  if (hasPrefs === false) return <Onboarding />;
 
   return (
     <DownloadsProvider>

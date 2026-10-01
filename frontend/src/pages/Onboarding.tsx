@@ -118,7 +118,7 @@ export default function Onboarding() {
   };
 
   const handleSave = () => {
-    if (selectedMovies.size < 3 || selectedSeries.size < 3) return;
+    if (!canAdvance) return;
     guardar(Array.from(selectedMovies), Array.from(selectedSeries));
   };
 
@@ -129,7 +129,11 @@ export default function Onboarding() {
 
   const currentPicks = isMovies ? movies : series;
   const selected = isMovies ? selectedMovies : selectedSeries;
-  const canAdvance = (isMovies ? selectedMovies : selectedSeries).size >= 3;
+  // El mínimo se adapta a lo que hay. Si el catálogo solo ofrece una o dos
+  // series, exigir tres dejaba el botón apagado para siempre: no se podía
+  // terminar el onboarding y al volver a entrar lo pedía otra vez.
+  const minimo = Math.min(3, currentPicks.length);
+  const canAdvance = selected.size >= minimo && selected.size > 0;
 
   return (
     <Shell>
@@ -138,13 +142,11 @@ export default function Onboarding() {
           {isMovies ? 'Elige películas que te gusten' : 'Elige series que te gusten'}
         </h1>
         <p className="mt-2 max-w-[640px] text-md text-nf-dim">
-          {isMovies
-            ? 'Marca al menos 3 películas que hayas visto. Con eso se arma tu portada.'
-            : 'Marca al menos 3 series que hayas visto. Con eso se arma tu portada.'}
+          {`Marca al menos ${minimo || 3} ${isMovies ? 'películas' : 'series'} que hayas visto. Con eso se arma tu portada.`}
         </p>
         <div className="mt-6 flex items-center justify-between gap-4">
           <p className="text-base text-nf-faint">
-            {selected.size} de 10 seleccionadas (mínimo 3)
+            {selected.size} de 10 seleccionadas{minimo > 0 && ` (mínimo ${minimo})`}
             {topeAvisado && <span className="ml-2 text-nf-text">Ya has llegado a 10; quita alguna para cambiarla.</span>}
           </p>
           <div className="flex items-center gap-3">

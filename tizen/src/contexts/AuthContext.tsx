@@ -7,8 +7,11 @@ interface AuthContextType {
   isLoading: boolean;
   username: string | null;
   isAdmin: boolean;
+  /** null mientras no se sabe; false manda al onboarding. */
+  hasPrefs: boolean | null;
   login: (username: string, password: string, remember?: boolean) => Promise<string | null>;
   logout: () => void;
+  refreshPrefs: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType>({
@@ -16,8 +19,10 @@ const AuthContext = createContext<AuthContextType>({
   isLoading: true,
   username: null,
   isAdmin: false,
+  hasPrefs: null,
   login: async () => null,
   logout: () => {},
+  refreshPrefs: async () => {},
 });
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -25,6 +30,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
   const [username, setUsername] = useState<string | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [hasPrefs, setHasPrefs] = useState<boolean | null>(null);
+
+  const refreshPrefs = async () => {
+    try {
+      const r = await apiFetch('/preferences');
+      if (!r.ok) throw new Error();
+      const d = await r.json();
+      setHasPrefs(d.preferences !== null);
+    } catch {
+      // Ante la duda no se fuerza el onboarding: es peor dejar a alguien
+      // encerrado ahi por un fallo de red que no personalizar la portada.
+      setHasPrefs(true);
+    }
+  };
 
   useEffect(() => {
     const token = getAccessToken();
@@ -37,9 +56,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             setUsername(data.username);
             setIsAdmin(data.role === 'admin');
             connectProgressWs();
-          } else {
-            clearTokens();
+            return refreshPrefs();
           }
+          clearTokens();
         })
         .catch(() => clearTokens())
         .finally(() => setIsLoading(false));
@@ -63,6 +82,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       apiFetch('/auth/me')
         .then((res) => res.json())
         .then((d) => setIsAdmin(d.role === 'admin'));
+      await refreshPrefs();
       connectProgressWs();
       return null;
     } catch {
@@ -76,10 +96,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setIsAuthenticated(false);
     setUsername(null);
     setIsAdmin(false);
+    setHasPrefs(null);
   };
 
   return (
-    <AuthContext.Provider value={{ isAuthenticated, isLoading, username, isAdmin, login, logout }}>
+    <AuthContext.Provider value={{ isAuthenticated, isLoading, username, isAdmin, hasPrefs, login, logout, refreshPrefs }}>
       {children}
     </AuthContext.Provider>
   );

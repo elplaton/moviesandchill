@@ -2,7 +2,20 @@
 <html lang="es">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <!--
+      Sin manifest, al añadir la web a la pantalla de inicio del iPad no hay
+      ambito definido: cualquier navegacion se tomaba como salida de la app y
+      iOS abria encima la barra de direcciones de Safari con las pestañas.
+      Con scope "/" toda la web queda dentro y la navegacion no se sale.
+    -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <meta name="theme-color" content="#141414" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Movies&Chill" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+    <link rel="icon" href="/icons/icon-192.png" />
     <title>Movies & Chill</title>
     <script>
       // En un telefono se abre la PWA (/m/), salvo que se pida la web completa con ?desktop=1.

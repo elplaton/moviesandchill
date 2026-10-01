@@ -7,16 +7,33 @@ export interface Me { id: number; username: string; role: 'admin' | 'user'; quot
 interface Ctx {
   me: Me | null;
   loading: boolean;
+  /** null mientras no se sabe; false manda al onboarding. */
+  hasPrefs: boolean | null;
   login: (u: string, p: string) => Promise<string | null>;
   logout: () => void;
   refresh: () => Promise<void>;
+  refreshPrefs: () => Promise<void>;
 }
 
-const AuthCtx = createContext<Ctx>({ me: null, loading: true, login: async () => null, logout: () => {}, refresh: async () => {} });
+const AuthCtx = createContext<Ctx>({ me: null, loading: true, hasPrefs: null, login: async () => null, logout: () => {}, refresh: async () => {}, refreshPrefs: async () => {} });
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [me, setMe] = useState<Me | null>(null);
   const [loading, setLoading] = useState(true);
+  const [hasPrefs, setHasPrefs] = useState<boolean | null>(null);
+
+  const refreshPrefs = async () => {
+    try {
+      const r = await apiFetch('/preferences');
+      if (!r.ok) throw new Error();
+      const d = await r.json();
+      setHasPrefs(d.preferences !== null);
+    } catch {
+      // Si no se puede comprobar, no se fuerza el onboarding: es peor
+      // encerrar a alguien ahi por un fallo de red que no personalizar.
+      setHasPrefs(true);
+    }
+  };
 
   const refresh = async () => {
     try {
@@ -29,7 +46,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!getAccessToken()) { setLoading(false); return; }
-    refresh().then(() => { connectProgressWs(); }).finally(() => setLoading(false));
+    refresh().then(() => { connectProgressWs(); return refreshPrefs(); }).finally(() => setLoading(false));
   }, []);
 
   const login = async (u: string, p: string) => {
@@ -39,14 +56,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (!r.ok) return d.detail || 'No se pudo entrar';
       setTokens(d.access_token, d.refresh_token);
       await refresh();
+      await refreshPrefs();
       connectProgressWs();
       return null;
     } catch { return 'Sin conexión con el servidor'; }
   };
 
-  const logout = () => { clearTokens(); disconnectProgressWs(); setMe(null); };
+  const logout = () => { clearTokens(); disconnectProgressWs(); setMe(null); setHasPrefs(null); };
 
-  return <AuthCtx.Provider value={{ me, loading, login, logout, refresh }}>{children}</AuthCtx.Provider>;
+  return <AuthCtx.Provider value={{ me, loading, hasPrefs, login, logout, refresh, refreshPrefs }}>{children}</AuthCtx.Provider>;
 }
 
 export const useAuth = () => useContext(AuthCtx);
