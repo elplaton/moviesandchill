@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Overlay from './Overlay';
 import { useBackHandler } from '../focus/react';
 import { pushMediaHandler, pushRawHandler } from '../focus/keys';
+import { audioLabel, fetchTracks, subtitleUrl, type MediaTracks } from '../services/tracks';
 import { clearWatched, resumePoint, setWatched } from '../tv/progress';
 import { toast } from '../tv/toast';
 import { IconPause, IconPlay } from './Icons';
@@ -94,15 +95,70 @@ export default function Player({ src, path, title, subtitle, poster, backdrop, o
     showOsd();
   }, [showOsd]);
 
-  useBackHandler(() => { close(); return true; }, true);
+  // Panel de idioma y subtitulos: se abre con la flecha arriba. No usa el
+  // motor de foco porque el reproductor ya se queda con todas las teclas.
+  const [tracks, setTracks] = useState<MediaTracks>({ audio: [], subtitles: [], defaultAudio: 0 });
+  const [panel, setPanel] = useState(false);
+  const [cursor, setCursor] = useState(0);
+  const [audioActivo, setAudioActivo] = useState(0);
+  const [subActiva, setSubActiva] = useState(-1);
+
+  useEffect(() => {
+    let vivo = true;
+    fetchTracks(path).then(t => {
+      if (!vivo) return;
+      setTracks(t);
+      setAudioActivo(t.defaultAudio);
+    });
+    return () => { vivo = false; };
+  }, [path]);
+
+  // Lista plana de lo que se puede elegir, que es lo que recorre el cursor.
+  const opciones = useMemo(() => {
+    const items: { tipo: 'audio' | 'sub'; valor: number; texto: string }[] = [];
+    if (tracks.audio.length > 1) {
+      for (const a of tracks.audio) items.push({ tipo: 'audio', valor: a.order, texto: audioLabel(a) });
+    }
+    if (tracks.subtitles.length > 0) {
+      items.push({ tipo: 'sub', valor: -1, texto: 'Sin subtitulos' });
+      tracks.subtitles.forEach((sub, i) => items.push({ tipo: 'sub', valor: i, texto: sub.label }));
+    }
+    return items;
+  }, [tracks]);
+
+  const aplicar = useCallback((op: { tipo: 'audio' | 'sub'; valor: number }) => {
+    const v = videoRef.current;
+    if (op.tipo === 'audio') {
+      const lista = (v as unknown as { audioTracks?: { length: number; [n: number]: { enabled: boolean } } })?.audioTracks;
+      if (lista) for (let n = 0; n < lista.length; n++) lista[n].enabled = n === op.valor;
+      setAudioActivo(op.valor);
+    } else {
+      if (v) for (let n = 0; n < v.textTracks.length; n++) v.textTracks[n].mode = n === op.valor ? 'showing' : 'disabled';
+      setSubActiva(op.valor);
+    }
+  }, []);
+
+  useBackHandler(() => {
+    if (panel) { setPanel(false); return true; }
+    close();
+    return true;
+  }, true);
 
   useEffect(() => pushRawHandler((key) => {
+    if (panel) {
+      if (key === 'up') { setCursor(c => Math.max(0, c - 1)); return true; }
+      if (key === 'down') { setCursor(c => Math.min(opciones.length - 1, c + 1)); return true; }
+      if (key === 'enter') { aplicar(opciones[cursor]); setPanel(false); return true; }
+      setPanel(false);
+      return true;
+    }
     if (key === 'enter') { togglePlay(); return true; }
     if (key === 'left') { seek(-1); return true; }
     if (key === 'right') { seek(1); return true; }
+    if (key === 'up' && opciones.length) { setCursor(0); setPanel(true); showOsd(); return true; }
     showOsd();
     return true;
-  }), [togglePlay, seek, showOsd]);
+  }), [togglePlay, seek, showOsd, panel, opciones, cursor, aplicar]);
 
   useEffect(() => pushMediaHandler((key) => {
     const v = videoRef.current;
@@ -163,7 +219,12 @@ export default function Player({ src, path, title, subtitle, poster, backdrop, o
     <Overlay>
     <div className="fixed inset-0 z-[70]" style={{ background: '#000' }}>
       <video ref={videoRef} src={src} autoPlay preload="auto" className="absolute inset-0 w-full h-full"
-        style={{ backgroundColor: '#000', objectFit: 'contain' }} />
+        style={{ backgroundColor: '#000', objectFit: 'contain' }}>
+        {tracks.subtitles.map(sub => (
+          <track key={sub.path} kind="subtitles" src={subtitleUrl(sub.path)}
+            srcLang={sub.language} label={sub.label} />
+        ))}
+      </video>
 
       {buffering && (
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
@@ -185,6 +246,23 @@ export default function Player({ src, path, title, subtitle, poster, backdrop, o
         </div>
       )}
 
+      {panel && (
+        <div className="absolute right-[96px] bottom-[320px] w-[520px] rounded-xl bg-black/92 border border-white/15 py-5">
+          <p className="px-7 pb-3 text-caption text-tv-text3 uppercase tracking-wide">Idioma y subtítulos</p>
+          {opciones.map((op, i) => {
+            const activa = op.tipo === 'audio' ? op.valor === audioActivo : op.valor === subActiva;
+            return (
+              <div key={`${op.tipo}-${op.valor}`}
+                className={`px-7 py-3 text-lead ${i === cursor ? 'bg-white text-black font-semibold' : 'text-tv-text2'}`}>
+                <span className="inline-block w-8">{activa ? '✓' : ''}</span>
+                {op.texto}
+              </div>
+            );
+          })}
+          <p className="px-7 pt-3 text-caption text-tv-text3">OK elige · Atrás cierra</p>
+        </div>
+      )}
+
       <div className={`tv-osd ${osd ? '' : 'is-hidden'} absolute left-0 right-0 bottom-0 pt-[160px] pb-[64px] px-[96px]`}
         style={{ background: 'linear-gradient(180deg, rgba(0,0,0,0) 0%, rgba(0,0,0,0.85) 100%)' }}>
         <div className="flex items-end justify-between mb-6">
@@ -202,7 +280,10 @@ export default function Player({ src, path, title, subtitle, poster, backdrop, o
         <div className="relative h-[10px] rounded-full bg-white/25 overflow-hidden">
           <div className="absolute inset-y-0 left-0 bg-tv-red rounded-full" style={{ width: `${pct}%` }} />
         </div>
-        <p className="mt-5 text-caption text-tv-text3">OK pausa · ◀ ▶ saltan 10 s (mantén para más) · Atrás sale</p>
+        <p className="mt-5 text-caption text-tv-text3">
+          OK pausa · ◀ ▶ saltan 10 s (mantén para más) · Atrás sale
+          {opciones.length > 0 && ' · ▲ idioma y subtítulos'}
+        </p>
       </div>
     </div>
     </Overlay>

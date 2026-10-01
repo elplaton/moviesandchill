@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { getAccessToken } from '../services/api';
-import { IconClose, IconExpand, IconMute, IconPause, IconPlay, IconVolume } from './ui/Icon';
+import { audioLabel, fetchTracks, puedeCambiarAudio, subtitleUrl,
+         type MediaTracks } from '../services/tracks';
+import { IconClose, IconExpand, IconMute, IconPause, IconPlay, IconSubtitles, IconVolume } from './ui/Icon';
 
 interface Props {
   path: string;
@@ -55,8 +57,36 @@ export default function Player({ path, title, subtitle, onClose }: Props) {
   const [ui, setUi] = useState(true);
   const [buffering, setBuffering] = useState(true);
   const [hint, setHint] = useState<string | null>(null);
+  const [tracks, setTracks] = useState<MediaTracks | null>(null);
+  const [menu, setMenu] = useState(false);
+  const [subActiva, setSubActiva] = useState(-1);   // -1 = sin subtítulos
+  const [audioActivo, setAudioActivo] = useState(0);
 
   const src = `/api/stream?path=${encodeURIComponent(path)}&token=${encodeURIComponent(getAccessToken() || '')}`;
+
+  useEffect(() => {
+    let vivo = true;
+    fetchTracks(path).then(t => { if (vivo) { setTracks(t); setAudioActivo(t.default_audio ?? 0); } });
+    return () => { vivo = false; };
+  }, [path]);
+
+  // Los <track> los pinta React, pero encenderlos y apagarlos es cosa del DOM:
+  // el atributo `default` solo vale para el primer renderizado.
+  const elegirSubtitulo = useCallback((i: number) => {
+    const v = ref.current;
+    if (v) for (let n = 0; n < v.textTracks.length; n++) v.textTracks[n].mode = n === i ? 'showing' : 'disabled';
+    setSubActiva(i);
+    setMenu(false);
+  }, []);
+
+  const elegirAudio = useCallback((i: number) => {
+    const lista = (ref.current as unknown as {
+      audioTracks?: { length: number; [n: number]: { enabled: boolean } };
+    })?.audioTracks;
+    if (lista) for (let n = 0; n < lista.length; n++) lista[n].enabled = n === i;
+    setAudioActivo(i);
+    setMenu(false);
+  }, []);
 
   const wake = useCallback(() => {
     setUi(true);
@@ -152,9 +182,20 @@ export default function Player({ path, title, subtitle, onClose }: Props) {
     setTime(v.currentTime);
   };
 
+  const audio = tracks?.audio || [];
+  const subs = tracks?.external_subtitles || [];
+  const cambioAudio = puedeCambiarAudio(ref.current);
+  const hayPistas = audio.length > 1 || subs.length > 0;
+
   return (
     <div ref={boxRef} className="fixed inset-0 z-[80] bg-black" onMouseMove={wake} onDoubleClick={fullscreen}>
-      <video ref={ref} src={src} autoPlay onClick={toggle} className="h-full w-full bg-black object-contain" />
+      <video ref={ref} src={src} autoPlay onClick={toggle} crossOrigin="use-credentials"
+        className="h-full w-full bg-black object-contain">
+        {(tracks?.external_subtitles || []).map(sub => (
+          <track key={sub.path} kind="subtitles" src={subtitleUrl(sub.path)}
+            srcLang={sub.language} label={sub.label} />
+        ))}
+      </video>
 
       {buffering && (
         <div className="pointer-events-none absolute inset-0 grid place-items-center">
@@ -200,6 +241,52 @@ export default function Player({ path, title, subtitle, onClose }: Props) {
           <span className="text-base tabular-nums text-nf-dim">{fmt(time)} / {fmt(duration)}</span>
           <span className="flex-1" />
           <span className="hidden xl:block text-xs text-nf-faint">{KEY_HELP}</span>
+          {hayPistas && (
+            <div className="relative">
+              <button onClick={() => setMenu(m => !m)} aria-label="Idioma y subtítulos"
+                className={`grid h-9 w-9 place-items-center rounded-full hover:bg-white/15 ${menu ? 'bg-white/15' : ''}`}>
+                <span className="w-5 h-5"><IconSubtitles /></span>
+              </button>
+              {menu && (
+                <div className="absolute bottom-12 right-0 w-64 overflow-hidden rounded border border-nf-line bg-black/95 shadow-panel">
+                  {audio.length > 1 && (
+                    <>
+                      <p className="px-4 pt-3 pb-1 text-xs font-semibold uppercase tracking-wide text-nf-faint">Audio</p>
+                      {audio.map(a => (
+                        <button key={a.order} onClick={() => elegirAudio(a.order)} disabled={!cambioAudio}
+                          className={`block w-full px-4 py-2 text-left text-base hover:bg-white/10 disabled:cursor-default disabled:hover:bg-transparent ${
+                            a.order === audioActivo ? 'text-white' : 'text-nf-dim'}`}>
+                          {a.order === audioActivo ? '✓ ' : '\u00a0\u00a0 '}{audioLabel(a)}
+                        </button>
+                      ))}
+                      {!cambioAudio && (
+                        <p className="px-4 pb-2 text-xs leading-snug text-nf-faint">
+                          Este navegador no deja cambiar de pista; suena la primera del archivo.
+                          En Safari y en la tele sí se puede.
+                        </p>
+                      )}
+                    </>
+                  )}
+                  {subs.length > 0 && (
+                    <>
+                      <p className="px-4 pt-3 pb-1 text-xs font-semibold uppercase tracking-wide text-nf-faint">Subtítulos</p>
+                      <button onClick={() => elegirSubtitulo(-1)}
+                        className={`block w-full px-4 py-2 text-left text-base hover:bg-white/10 ${subActiva === -1 ? 'text-white' : 'text-nf-dim'}`}>
+                        {subActiva === -1 ? '✓ ' : '\u00a0\u00a0 '}Desactivados
+                      </button>
+                      {subs.map((sub, i) => (
+                        <button key={sub.path} onClick={() => elegirSubtitulo(i)}
+                          className={`block w-full px-4 py-2 text-left text-base hover:bg-white/10 ${subActiva === i ? 'text-white' : 'text-nf-dim'}`}>
+                          {subActiva === i ? '✓ ' : '\u00a0\u00a0 '}{sub.label}
+                        </button>
+                      ))}
+                    </>
+                  )}
+                  <div className="h-2" />
+                </div>
+              )}
+            </div>
+          )}
           <button onClick={fullscreen} className="grid h-9 w-9 place-items-center rounded-full hover:bg-white/15" aria-label="Pantalla completa">
             <span className="w-5 h-5"><IconExpand /></span>
           </button>

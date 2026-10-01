@@ -15,6 +15,7 @@ export const IconTrash = () => <svg {...s}><path d="M4 7h16M10 11v6M14 11v6M6 7l
 export const IconCheck = () => <svg {...s} strokeWidth={2.6}><path d="M5 12.5l4.5 4.5L19 7.5" /></svg>;
 export const IconVolume = () => <svg {...s}><path d="M11 5L6 9H3v6h3l5 4V5z" /><path d="M15.5 8.5a5 5 0 010 7" /></svg>;
 export const IconMute = () => <svg {...s}><path d="M11 5L6 9H3v6h3l5 4V5z" /><path d="M16 9l5 6M21 9l-5 6" /></svg>;
+export const IconSubtitles = () => <svg {...s}><rect x="3" y="5" width="18" height="14" rx="2" /><path d="M7 14h4M14 14h3" /></svg>;
 export const IconExpand = () => <svg {...s}><path d="M8 3H3v5M16 3h5v5M16 21h5v-5M8 21H3v-5" /></svg>;
 export const IconUser = () => <svg {...s}><circle cx="12" cy="8" r="4" /><path d="M4 21c0-4 3.6-7 8-7s8 3 8 7" /></svg>;
 export const IconShield = () => <svg {...s}><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z" /></svg>;

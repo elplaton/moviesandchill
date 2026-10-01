@@ -1,5 +1,6 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { getAccessToken } from '../services/api';
+import { fetchSubtitles, subtitleUrl, type ExternalSubtitle } from '../services/tracks';
 import { clearWatched, resumePoint, setWatched } from '../utils/progress';
 
 interface Props { path: string; title: string; subtitle?: string; poster?: string; backdrop?: string; onClose: () => void }
@@ -16,7 +17,16 @@ interface Props { path: string; title: string; subtitle?: string; poster?: strin
  */
 export default function Player({ path, title, subtitle, poster, backdrop, onClose }: Props) {
   const ref = useRef<HTMLVideoElement>(null);
+  const [subs, setSubs] = useState<ExternalSubtitle[]>([]);
   const src = `/api/stream?path=${encodeURIComponent(path)}&token=${encodeURIComponent(getAccessToken() || '')}`;
+
+  // El selector de subtítulos lo pone el reproductor del sistema; aquí solo
+  // hay que colgarle las pistas que haya.
+  useEffect(() => {
+    let vivo = true;
+    fetchSubtitles(path).then(s => { if (vivo) setSubs(s); });
+    return () => { vivo = false; };
+  }, [path]);
 
   useEffect(() => {
     const v = ref.current; if (!v) return;
@@ -77,7 +87,12 @@ export default function Player({ path, title, subtitle, poster, backdrop, onClos
   return (
     <div className="fixed inset-0 z-[70] bg-black">
       <video ref={ref} src={src} controls autoPlay playsInline poster={backdrop}
-        className="w-full h-full bg-black object-contain" />
+        crossOrigin="use-credentials" className="w-full h-full bg-black object-contain">
+        {subs.map(sub => (
+          <track key={sub.path} kind="subtitles" src={subtitleUrl(sub.path)}
+            srcLang={sub.language} label={sub.label} />
+        ))}
+      </video>
     </div>
   );
 }

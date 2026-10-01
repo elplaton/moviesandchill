@@ -189,16 +189,25 @@ async def convert_library_job(extract_path: str):
     pending = []
     for root, _dirs, files in os.walk(base):
         for name in files:
-            if name.lower().endswith(VIDEO_EXTS) and not name.lower().endswith(".mp4"):
-                pending.append(os.path.join(root, name))
+            if not name.lower().endswith(VIDEO_EXTS):
+                continue
+            # Los MP4 tambien entran. Antes se saltaban por ser ya compatibles,
+            # pero un MP4 puede traer varias pistas de audio activas a la vez
+            # (es lo que pasaba con los que convirtio la version anterior) y
+            # entonces se oyen todos los idiomas encima. make_compatible mira
+            # las pistas y solo toca lo que haga falta.
+            pending.append(os.path.join(root, name))
     _conv_state.update({"running": True, "total": len(pending), "done": 0, "current": "", "started": time.time(), "converted": 0})
-    logger.info("Conversion de biblioteca: %d archivos que no son MP4", len(pending))
+    logger.info("Revision de biblioteca: %d videos", len(pending))
     loop = asyncio.get_event_loop()
     try:
         for f in pending:
             _conv_state["current"] = os.path.relpath(f, base)
+            antes = os.path.getmtime(f) if os.path.exists(f) else 0
             out = await loop.run_in_executor(None, make_compatible, [f])
-            if out and out[0] != f:
+            # Un remux deja el mismo nombre, asi que mirar solo el nombre no
+            # vale para saber si se ha tocado algo.
+            if out and (out[0] != f or (os.path.exists(out[0]) and os.path.getmtime(out[0]) != antes)):
                 _conv_state["converted"] += 1
             _conv_state["done"] += 1
         # Los tamaños en disco cambian al reempaquetar: se actualizan las cuotas.
