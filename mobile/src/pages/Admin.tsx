@@ -165,6 +165,77 @@ function Channels() {
   );
 }
 
+/**
+ * Medidas de la pantalla, para cuando algo no cuadra con los bordes.
+ *
+ * Existe porque el hueco bajo la barra de pestañas costo tres intentos de
+ * diagnosticar a ciegas: resulto ser la barra de direcciones de Safari, que
+ * al encogerse sigue ocupando sitio aunque apenas se vea. Con estos numeros
+ * delante se ve en dos segundos si la app va instalada o dentro del navegador.
+ */
+function Pantalla() {
+  const [v, setV] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    const medir = () => {
+      const vv = window.visualViewport;
+      const raiz = getComputedStyle(document.documentElement);
+      setV({
+        'Modo': window.matchMedia?.('(display-mode: standalone)').matches ? 'instalada (standalone)' : 'dentro del navegador',
+        'navigator.standalone': String((navigator as any).standalone ?? '—'),
+        'Pantalla': `${screen.width} × ${screen.height}`,
+        'window.innerHeight': String(window.innerHeight),
+        'visualViewport alto': vv ? String(Math.round(vv.height)) : '—',
+        'visualViewport offsetTop': vv ? String(Math.round(vv.offsetTop)) : '—',
+        'Alto de maquetación': String(document.documentElement.clientHeight),
+        '--app-h': raiz.getPropertyValue('--app-h').trim() || '(sin definir)',
+        '--app-top': raiz.getPropertyValue('--app-top').trim() || '(sin definir)',
+        'Zona segura abajo': raiz.getPropertyValue('--safe-b').trim() || '0px',
+      });
+    };
+    medir();
+    const vv = window.visualViewport;
+    vv?.addEventListener('resize', medir);
+    vv?.addEventListener('scroll', medir);
+    window.addEventListener('resize', medir);
+    return () => {
+      vv?.removeEventListener('resize', medir);
+      vv?.removeEventListener('scroll', medir);
+      window.removeEventListener('resize', medir);
+    };
+  }, []);
+
+  const instalada = v['Modo']?.startsWith('instalada');
+  const sobra = Number(v['Alto de maquetación']) - Number(v['visualViewport alto']);
+
+  return (
+    <section className="rounded-2xl bg-white/5 p-4 mb-4">
+      <p className="text-[13px] font-semibold text-nf-text2 mb-2">Pantalla</p>
+      {!instalada && (
+        <p className="text-[13px] text-amber-400/90 mb-3 leading-relaxed">
+          Estás dentro de Safari, no en la app instalada. La franja de abajo es su barra de
+          direcciones: aunque se encoja, sigue ocupando sitio y la página no puede pintar ahí.
+          Añade la app a la pantalla de inicio (Compartir → «Añadir a pantalla de inicio») y
+          esa franja desaparece.
+        </p>
+      )}
+      {Number.isFinite(sobra) && sobra > 2 && (
+        <p className="text-[13px] text-nf-text2 mb-3">
+          Hay {sobra} px de la pantalla que no son de la página.
+        </p>
+      )}
+      <div className="text-[12px] leading-[1.9] font-mono">
+        {Object.entries(v).map(([k, val]) => (
+          <div key={k} className="flex justify-between gap-3">
+            <span className="text-nf-text3">{k}</span>
+            <span className="text-right">{val}</span>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 function Server() {
   const [cfg, setCfg] = useState<any>(null);
   const [status, setStatus] = useState<any>(null);
@@ -189,7 +260,8 @@ function Server() {
         <Toggle k="convert_dts_to_ac3" label="Convertir a MP4 al descargar" help="Necesario para iPhone y para las teles" />
         <Toggle k="delete_archives_after_extract" label="Borrar comprimidos tras extraer" />
       </section>
-      <p className="text-[12px] text-nf-text3">Las rutas, las claves de Telegram y el resto de ajustes se editan desde la web de escritorio o en el archivo .env del servidor.</p>
+      <Pantalla />
+      <p className="text-[12px] text-nf-text3">Las rutas y el resto de ajustes se editan desde la web de escritorio o en el archivo .env del servidor.</p>
     </div>
   );
 }

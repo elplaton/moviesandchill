@@ -5,7 +5,17 @@
 :root { --safe-b: env(safe-area-inset-bottom, 0px); --safe-t: env(safe-area-inset-top, 0px); }
 html { -webkit-text-size-adjust: 100%; }
 html, body, #root { height: 100%; overflow: hidden; }
-body { background: #141414; color: #fff; -webkit-font-smoothing: antialiased; overscroll-behavior-y: none; }
+/*
+ * El lienzo va del color de la barra de pestañas, no del fondo de la app.
+ *
+ * En Safari la barra de direcciones vive abajo y al encogerse sigue ocupando
+ * sitio: `visualViewport` la descuenta, el armazon acaba justo encima y por
+ * debajo asomaba el fondo de la pagina, mas claro, con pinta de hueco. La
+ * pagina no puede pintar ahi, pero si puede asomar del mismo color, y
+ * entonces la barra parece llegar al borde. El fondo de la app lo pone
+ * .app-shell, asi que dentro no cambia nada.
+ */
+body { background: #0A0A0A; color: #fff; -webkit-font-smoothing: antialiased; overscroll-behavior-y: none; }
 
 /*
  * Armazon del alto exacto de lo que se ve.
@@ -25,6 +35,7 @@ body { background: #141414; color: #fff; -webkit-font-smoothing: antialiased; ov
   height: var(--app-h, 100dvh);
   display: flex;
   flex-direction: column;
+  background: #141414;
 }
 /* Lo unico que se desplaza. Con overscroll contain el rebote no arrastra la pagina. */
 .app-main { flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
