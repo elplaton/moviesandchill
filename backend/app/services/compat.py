@@ -12,7 +12,7 @@ import subprocess
 import time
 
 from app.services.subs import extraer_subtitulos
-from app.services.tracks import leer_pistas, mejor_audio
+from app.services.tracks import leer_pistas, mejor_audio, video_apto_apple
 
 logger = logging.getLogger("tmd")
 
@@ -121,6 +121,15 @@ def make_compatible(file_list, on_progress=None):
 
         pistas = leer_pistas(f)
 
+        # `mediainfo` solo da el nombre del codec, y con eso no se distingue un
+        # H.264 de 8 bits de uno de 10: se llaman igual. El de 10 bits no lo
+        # puede decodificar ningun dispositivo de Apple, asi que por AirPlay se
+        # oye la pelicula pero no se ve. ffprobe si da el croma y el perfil.
+        apto, motivo_apple = video_apto_apple(pistas.get("video"))
+        if video_ok and not apto:
+            video_ok = False
+            vnorm = f"{vnorm or '?'} ({motivo_apple})"
+
         # Un MP4 ya compatible se dejaba tal cual, pero si trae varias pistas
         # de audio puede venir con todas marcadas como activas: hay
         # reproductores (Safari, QuickTime) que entonces las suenan a la vez.
@@ -136,7 +145,12 @@ def make_compatible(file_list, on_progress=None):
                 converted.append(f)
             continue
 
-        v_args = ["-c:v", "copy"] if video_ok else ["-c:v", "libx264", "-preset", "veryfast", "-crf", "20"]
+        # -pix_fmt yuv420p es lo que hace util la recodificacion: sin eso
+        # libx264 conserva los 10 bits de la fuente y el archivo seguiria sin
+        # poder verse en un Apple TV.
+        v_args = (["-c:v", "copy"] if video_ok else
+                  ["-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+                   "-pix_fmt", "yuv420p", "-profile:v", "high", "-level", "4.1"])
         # HEVC en MP4 necesita la etiqueta hvc1 para que Safari lo reconozca.
         if video_ok and any(t in vnorm for t in ("hevc", "h265", "x265")):
             v_args += ["-tag:v", "hvc1"]

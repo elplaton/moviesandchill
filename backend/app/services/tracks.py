@@ -39,6 +39,44 @@ NOMBRE_IDIOMA = {
 PREFERENCIA = ("spa", "es", "esp", "cas", "lat", "spa-mx")
 
 
+# Croma que los dispositivos de Apple decodifican por hardware. Todo lo que
+# no sea 4:2:0 se queda fuera, y los 10 bits solo valen en HEVC.
+CROMA_8 = ("yuv420p", "yuvj420p")
+CROMA_10 = ("yuv420p10le", "yuv420p10be")
+
+
+def video_apto_apple(video: dict | None) -> tuple[bool, str]:
+    """Si un iPhone, un iPad o un Apple TV pueden reproducir este video.
+
+    Importa para AirPlay: cuando el receptor no sabe decodificar la imagen
+    reproduce **solo el audio**, sin avisar de nada. El caso tipico es un
+    H.264 de 10 bits, que Apple no admite de ninguna manera (los 10 bits solo
+    los lleva en HEVC) y que es frecuente en los releases en español.
+
+    No basta con mirar el nombre del codec: un H.264 de 8 y otro de 10 bits
+    se llaman igual, y lo que los distingue es `pix_fmt`.
+    """
+    if not video:
+        return True, ""          # sin datos no se supone lo peor
+    codec = (video.get("codec") or "").lower()
+    pix = (video.get("pix_fmt") or "").lower()
+    bits = video.get("bits") or (10 if "10" in pix else 8)
+
+    if codec in ("h264", "avc1", "avc"):
+        if bits and bits > 8:
+            return False, f"H.264 de {bits} bits (Apple solo admite 8)"
+        if pix and pix not in CROMA_8:
+            return False, f"croma {pix} (Apple necesita 4:2:0)"
+        return True, ""
+
+    if codec in ("hevc", "h265", "hvc1"):
+        if pix and pix not in CROMA_8 + CROMA_10:
+            return False, f"croma {pix} (Apple necesita 4:2:0)"
+        return True, ""
+
+    return False, f"codec {codec or 'desconocido'}"
+
+
 def nombre_idioma(code: str) -> str:
     c = (code or "").strip().lower()
     return NOMBRE_IDIOMA.get(c, c.upper() if c else "Sin identificar")
@@ -99,8 +137,13 @@ def leer_pistas(path: str) -> dict:
         disp = s.get("disposition") or {}
 
         if tipo == "video" and video is None:
+            bits = s.get("bits_per_raw_sample")
             video = {
                 "codec": s.get("codec_name", ""),
+                "profile": s.get("profile", ""),
+                "pix_fmt": s.get("pix_fmt", ""),
+                "bits": int(bits) if str(bits or "").isdigit() else None,
+                "level": s.get("level"),
                 "width": s.get("width"), "height": s.get("height"),
             }
         elif tipo == "audio":
@@ -135,6 +178,11 @@ def leer_pistas(path: str) -> dict:
                 "default": bool(disp.get("default")),
                 "textual": codec in SUBS_TEXTO,
             })
+
+    apto, motivo = video_apto_apple(video)
+    if video is not None:
+        video["apple"] = apto
+        video["apple_motivo"] = motivo
 
     return {"ok": True, "video": video, "audio": audio, "subtitles": subs,
             "container": (datos.get("format") or {}).get("format_name", "")}
