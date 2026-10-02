@@ -8,7 +8,7 @@ from typing import Annotated
 import aiofiles
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
 
 from app.auth.dependencies import get_current_user, get_stream_user
@@ -211,7 +211,7 @@ async def delete_file(req: DeleteRequest, user: Annotated[str, Depends(get_curre
         return {"error": str(e)}
 
 
-@router.get("/stream")
+@router.api_route("/stream", methods=["GET", "HEAD"])
 async def stream(request: Request, path: str = "", user: Annotated[str, Depends(get_stream_user)] = None):
     from app.routers.download import config
     base = os.path.realpath(config["extract_path"])
@@ -226,18 +226,42 @@ async def stream(request: Request, path: str = "", user: Annotated[str, Depends(
     mime_map = {"mkv": "video/x-matroska", "mp4": "video/mp4", "avi": "video/x-msvideo", "ts": "video/mp2t", "mov": "video/quicktime", "webm": "video/webm", "m4v": "video/mp4", "flv": "video/x-flv", "wmv": "video/x-ms-wmv"}
     content_type = mime_map.get(ext, "application/octet-stream")
 
+    cabeceras = {"Accept-Ranges": "bytes", "Content-Disposition": "inline"}
+
+    # AVFoundation (lo que usa un Apple TV o una tele por AirPlay para bajarse
+    # el video) empieza por un HEAD para saber el tamaño y si puede buscar.
+    # Aqui solo habia GET, asi que recibia un 405, daba el archivo por un
+    # directo no navegable y se quedaba sin obedecer pausa, play ni busqueda.
+    # Se responde antes del semaforo: un HEAD no gasta plaza de reproduccion.
+    if request.method == "HEAD":
+        return Response(status_code=200, media_type=content_type,
+                        headers={**cabeceras, "Content-Length": str(file_size)})
+
     range_header = request.headers.get("Range")
     start, end = 0, file_size - 1
+    parcial = False
     if range_header:
-        match = re.match(r"bytes=(\d+)-(\d*)", range_header)
-        if match:
-            start = int(match.group(1))
-            end_str = match.group(2)
-            end = int(end_str) if end_str else file_size - 1
-            if end >= file_size:
-                end = file_size - 1
-            if start > end:
-                raise HTTPException(status_code=416, detail="Range no valido")
+        # Hay tres formas validas y antes solo se entendia la primera:
+        #   bytes=100-199  un tramo       bytes=100-  de ahi al final
+        #   bytes=-2048    los ultimos N  <- esta se colaba por el else
+        # Lo que no encajaba se servia como el archivo entero pero con un
+        # 206 y un Content-Range que decia justo eso, asi que un cliente
+        # que pedia la cola recibia la cabeza sin enterarse.
+        match = re.fullmatch(r"bytes=(\d*)-(\d*)", range_header.strip())
+        if not match or not (match.group(1) or match.group(2)):
+            raise HTTPException(status_code=416, detail="Range no valido",
+                                headers={"Content-Range": f"bytes */{file_size}"})
+        desde, hasta = match.group(1), match.group(2)
+        if not desde:                      # bytes=-N: los ultimos N bytes
+            start = max(0, file_size - int(hasta))
+            end = file_size - 1
+        else:
+            start = int(desde)
+            end = min(int(hasta), file_size - 1) if hasta else file_size - 1
+        if start >= file_size or start > end:
+            raise HTTPException(status_code=416, detail="Range no valido",
+                                headers={"Content-Range": f"bytes */{file_size}"})
+        parcial = True
 
     if _stream_semaphore is None:
         init_files_semaphore()
@@ -267,8 +291,8 @@ async def stream(request: Request, path: str = "", user: Annotated[str, Depends(
             finally:
                 _stream_semaphore.release()
 
-        headers = {"Content-Disposition": "inline", "Accept-Ranges": "bytes", "Content-Length": str(content_length)}
-        if range_header:
+        headers = {**cabeceras, "Content-Length": str(content_length)}
+        if parcial:
             headers["Content-Range"] = f"bytes {start}-{end}/{file_size}"
             response = StreamingResponse(chunked_stream(), status_code=206, media_type=content_type, headers=headers)
         else:
