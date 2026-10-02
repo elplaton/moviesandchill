@@ -1,6 +1,7 @@
 const b = { fill: 'none', stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const, viewBox: '0 0 24 24', className: 'w-full h-full' };
 export const IHome = () => <svg {...b}><path d="M3 11l9-8 9 8" /><path d="M5 10v10h5v-6h4v6h5V10" /></svg>;
 export const ISearch = () => <svg {...b}><circle cx="11" cy="11" r="7" /><path d="M20 20l-3.5-3.5" /></svg>;
+export const IAirplay = () => <svg {...b}><path d="M6 17H4a1 1 0 01-1-1V6a1 1 0 011-1h16a1 1 0 011 1v10a1 1 0 01-1 1h-2" /><path d="M12 14l4 6H8l4-6z" /></svg>;
 export const IDown = () => <svg {...b}><path d="M12 4v11M7 10l5 5 5-5" /><path d="M4 19h16" /></svg>;
 export const IUser = () => <svg {...b}><circle cx="12" cy="8" r="4" /><path d="M4 21c0-4 3.6-7 8-7s8 3 8 7" /></svg>;
 export const IShield = () => <svg {...b}><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z" /></svg>;

@@ -3,6 +3,7 @@ import Overlay from './Overlay';
 import { useBackHandler } from '../focus/react';
 import { pushMediaHandler, pushRawHandler } from '../focus/keys';
 import { audioLabel, fetchTracks, subtitleUrl, type MediaTracks } from '../services/tracks';
+import { streamTicket, streamUrl } from '../services/api';
 import { clearWatched, resumePoint, setWatched } from '../tv/progress';
 import { toast } from '../tv/toast';
 import { IconPause, IconPlay } from './Icons';
@@ -102,6 +103,16 @@ export default function Player({ src, path, title, subtitle, poster, backdrop, o
   const [cursor, setCursor] = useState(0);
   const [audioActivo, setAudioActivo] = useState(0);
   const [subActiva, setSubActiva] = useState(-1);
+
+  // La URL del video espera a la entrada de reproduccion: el token de acceso
+  // caduca a la hora y cortaba las peliculas largas por la mitad. Hasta que
+  // llega se usa la que venga en `src`, que es lo de antes.
+  const [fuente, setFuente] = useState(src);
+  useEffect(() => {
+    let vivo = true;
+    streamTicket(path).then(t => { if (vivo) setFuente(streamUrl(path, t)); });
+    return () => { vivo = false; };
+  }, [path]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     let vivo = true;
@@ -218,7 +229,7 @@ export default function Player({ src, path, title, subtitle, poster, backdrop, o
   return (
     <Overlay>
     <div className="fixed inset-0 z-[70]" style={{ background: '#000' }}>
-      <video ref={videoRef} src={src} autoPlay preload="auto" className="absolute inset-0 w-full h-full"
+      <video ref={videoRef} src={fuente} autoPlay preload="auto" className="absolute inset-0 w-full h-full"
         style={{ backgroundColor: '#000', objectFit: 'contain' }}>
         {tracks.subtitles.map(sub => (
           <track key={sub.path} kind="subtitles" src={subtitleUrl(sub.path)}

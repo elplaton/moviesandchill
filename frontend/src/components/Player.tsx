@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { getAccessToken } from '../services/api';
-import { audioLabel, fetchTracks, puedeCambiarAudio, subtitleUrl,
+import { audioLabel, fetchTracks, puedeCambiarAudio, streamTicket, subtitleUrl,
          type MediaTracks } from '../services/tracks';
-import { IconClose, IconExpand, IconMute, IconPause, IconPlay, IconSubtitles, IconVolume } from './ui/Icon';
+import { useAirplay } from '../hooks/useAirplay';
+import { IconAirplay, IconClose, IconExpand, IconMute, IconPause, IconPlay, IconSubtitles, IconVolume } from './ui/Icon';
 
 interface Props {
   path: string;
@@ -61,11 +61,18 @@ export default function Player({ path, title, subtitle, onClose }: Props) {
   const [menu, setMenu] = useState(false);
   const [subActiva, setSubActiva] = useState(-1);   // -1 = sin subtítulos
   const [audioActivo, setAudioActivo] = useState(0);
+  const airplay = useAirplay(ref);
 
-  const src = `/api/stream?path=${encodeURIComponent(path)}&token=${encodeURIComponent(getAccessToken() || '')}`;
+  // El `src` espera a la entrada de reproducción: el token de acceso caduca a
+  // la hora y cortaba las películas largas por la mitad.
+  const [ticket, setTicket] = useState<string | null>(null);
+  const src = ticket === null
+    ? undefined
+    : `/api/stream?path=${encodeURIComponent(path)}&token=${encodeURIComponent(ticket)}`;
 
   useEffect(() => {
     let vivo = true;
+    streamTicket(path).then(t => { if (vivo) setTicket(t); });
     fetchTracks(path).then(t => { if (vivo) { setTracks(t); setAudioActivo(t.default_audio ?? 0); } });
     return () => { vivo = false; };
   }, [path]);
@@ -190,12 +197,21 @@ export default function Player({ path, title, subtitle, onClose }: Props) {
   return (
     <div ref={boxRef} className="fixed inset-0 z-[80] bg-black" onMouseMove={wake} onDoubleClick={fullscreen}>
       <video ref={ref} src={src} autoPlay onClick={toggle} crossOrigin="use-credentials"
+        x-webkit-airplay="allow"
         className="h-full w-full bg-black object-contain">
         {(tracks?.external_subtitles || []).map(sub => (
-          <track key={sub.path} kind="subtitles" src={subtitleUrl(sub.path)}
+          <track key={sub.path} kind="subtitles" src={subtitleUrl(sub.path, ticket || undefined)}
             srcLang={sub.language} label={sub.label} />
         ))}
       </video>
+
+      {airplay.activo && (
+        <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-3">
+          <span className="w-12 h-12 text-nf-red"><IconAirplay /></span>
+          <p className="text-lg font-semibold">Reproduciendo por AirPlay</p>
+          <p className="text-base text-nf-dim">La imagen va al otro dispositivo.</p>
+        </div>
+      )}
 
       {buffering && (
         <div className="pointer-events-none absolute inset-0 grid place-items-center">
@@ -241,6 +257,13 @@ export default function Player({ path, title, subtitle, onClose }: Props) {
           <span className="text-base tabular-nums text-nf-dim">{fmt(time)} / {fmt(duration)}</span>
           <span className="flex-1" />
           <span className="hidden xl:block text-xs text-nf-faint">{KEY_HELP}</span>
+          {airplay.disponible && (
+            <button onClick={airplay.elegir} aria-label="AirPlay"
+              className={`grid h-9 w-9 place-items-center rounded-full hover:bg-white/15 ${
+                airplay.activo ? 'text-nf-red' : ''}`}>
+              <span className="w-5 h-5"><IconAirplay /></span>
+            </button>
+          )}
           {hayPistas && (
             <div className="relative">
               <button onClick={() => setMenu(m => !m)} aria-label="Idioma y subtítulos"

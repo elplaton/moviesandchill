@@ -38,6 +38,57 @@ async def get_current_user(
     return payload["sub"]
 
 
+def _cubre(autorizada: str, pedida: str) -> bool:
+    """Si una entrada emitida para `autorizada` sirve para `pedida`.
+
+    Vale para el video y para sus subtitulos sueltos, que son ficheros
+    distintos al lado (`<video>.<idioma>.vtt`): pedir una entrada por cada
+    pista seria una vuelta mas al servidor por nada. No vale para otra cosa.
+    """
+    if not autorizada or not pedida:
+        return False
+    if autorizada == pedida:
+        return True
+    if not pedida.lower().endswith(".vtt"):
+        return False
+    raiz = autorizada.rsplit(".", 1)[0]
+    return pedida.startswith(raiz + ".")
+
+
+async def get_stream_user(
+    path: Annotated[str, Query()] = "",
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(security)] = None,
+    token: Annotated[str | None, Query()] = None,
+):
+    """Como `get_current_user`, pero acepta tambien una entrada de reproduccion.
+
+    La usan `/api/stream` y `/api/subtitle`, que son los dos sitios donde la
+    URL viaja con el token dentro y la lee alguien que no puede renovarlo: el
+    elemento `<video>`, o directamente un Apple TV por AirPlay. La entrada
+    vale solo para la ruta que lleva escrita, asi que filtrarse no da acceso
+    a nada mas.
+    """
+    secret = _get_secret()
+
+    if credentials:
+        payload = decode_token(credentials.credentials, secret)
+        if payload:
+            return payload["sub"]
+
+    if token:
+        payload = decode_token(token, secret)
+        if payload:
+            return payload["sub"]
+        entrada = decode_token(token, secret, expected_type="stream")
+        if entrada and _cubre(entrada.get("path") or "", path):
+            return entrada["sub"]
+
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Token invalido o expirado",
+    )
+
+
 async def get_current_admin(
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(security)] = None,
     token: Annotated[str | None, Query()] = None,

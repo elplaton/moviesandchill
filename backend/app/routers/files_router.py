@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from app.auth.dependencies import get_current_user
+from app.auth.dependencies import get_current_user, get_stream_user
 from app.services.storage import format_size
 
 logger = logging.getLogger("tmd")
@@ -212,7 +212,7 @@ async def delete_file(req: DeleteRequest, user: Annotated[str, Depends(get_curre
 
 
 @router.get("/stream")
-async def stream(request: Request, path: str = "", user: Annotated[str, Depends(get_current_user)] = None):
+async def stream(request: Request, path: str = "", user: Annotated[str, Depends(get_stream_user)] = None):
     from app.routers.download import config
     base = os.path.realpath(config["extract_path"])
     target = os.path.realpath(os.path.join(base, path))

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
-import { getAccessToken } from '../services/api';
-import { fetchSubtitles, subtitleUrl, type ExternalSubtitle } from '../services/tracks';
+import { fetchSubtitles, streamTicket, subtitleUrl, type ExternalSubtitle } from '../services/tracks';
+import { useAirplay } from '../hooks/useAirplay';
+import { IAirplay } from './Icons';
 import { clearWatched, resumePoint, setWatched } from '../utils/progress';
 
 interface Props { path: string; title: string; subtitle?: string; poster?: string; backdrop?: string; onClose: () => void }
@@ -24,12 +25,20 @@ export default function Player({ path, title, subtitle, poster, backdrop, onClos
   const [subs, setSubs] = useState<ExternalSubtitle[]>([]);
   const [preparando, setPreparando] = useState(true);
   const [fallo, setFallo] = useState('');
-  const src = `/api/stream?path=${encodeURIComponent(path)}&token=${encodeURIComponent(getAccessToken() || '')}`;
+  const airplay = useAirplay(ref);
+  // El `src` espera a la entrada de reproducción: el token de acceso caduca a
+  // la hora y cortaba las películas largas por la mitad. Con AirPlay es
+  // imprescindible, porque quien pide los trozos es el Apple TV.
+  const [ticket, setTicket] = useState<string | null>(null);
+  const src = ticket === null
+    ? undefined
+    : `/api/stream?path=${encodeURIComponent(path)}&token=${encodeURIComponent(ticket)}`;
 
   // El selector de subtítulos lo pone el reproductor del sistema; aquí solo
   // hay que colgarle las pistas que haya.
   useEffect(() => {
     let vivo = true;
+    streamTicket(path).then(t => { if (vivo) setTicket(t); });
     fetchSubtitles(path).then(s => { if (vivo) setSubs(s); });
     return () => { vivo = false; };
   }, [path]);
@@ -52,6 +61,10 @@ export default function Player({ path, title, subtitle, poster, backdrop, onClos
     let entered = false;
     const goFull = () => {
       if (entered) return; entered = true;
+      // Si ya va por AirPlay no se entra en pantalla completa: la imagen esta
+      // en la tele y lo unico que se veria aqui es el cartel de AirPlay.
+      const anyAir = v as unknown as { webkitCurrentPlaybackTargetIsWireless?: boolean };
+      if (anyAir.webkitCurrentPlaybackTargetIsWireless) { setPreparando(false); return; }
       // Ya hay imagen y el reproductor del sistema esta a punto de abrirse:
       // se retira la espera un instante despues para no dejar un parpadeo
       // del reproductor en linea entre medias.
@@ -109,12 +122,25 @@ export default function Player({ path, title, subtitle, poster, backdrop, onClos
   return (
     <div className="fixed inset-0 z-[70] bg-black">
       <video ref={ref} src={src} controls autoPlay playsInline poster={backdrop}
-        crossOrigin="use-credentials" className="w-full h-full bg-black object-contain">
+        crossOrigin="use-credentials" x-webkit-airplay="allow"
+        className="w-full h-full bg-black object-contain">
         {subs.map(sub => (
-          <track key={sub.path} kind="subtitles" src={subtitleUrl(sub.path)}
+          <track key={sub.path} kind="subtitles" src={subtitleUrl(sub.path, ticket || undefined)}
             srcLang={sub.language} label={sub.label} />
         ))}
       </video>
+
+      {airplay.activo && !preparando && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center px-8 text-center">
+          <span className="w-14 h-14 text-nf-red"><IAirplay /></span>
+          <p className="mt-4 text-[17px] font-semibold leading-tight">{title}</p>
+          <p className="mt-2 text-[14px] text-nf-text2">Reproduciendo en otra pantalla</p>
+          <button onClick={airplay.elegir}
+            className="mt-6 h-11 px-5 rounded-xl bg-white/15 text-[15px] font-semibold active:bg-white/25">
+            Cambiar de dispositivo
+          </button>
+        </div>
+      )}
 
       {(preparando || fallo) && (
         <div className="absolute inset-0 flex flex-col items-center justify-center px-8 text-center">
@@ -136,6 +162,13 @@ export default function Player({ path, title, subtitle, poster, backdrop, onClos
                 <p className="mt-5 text-[17px] font-semibold leading-tight">{title}</p>
                 {subtitle && <p className="mt-1 text-[14px] text-nf-text2">{subtitle}</p>}
                 <p className="mt-3 text-[13px] text-nf-text3">Preparando el vídeo…</p>
+                {airplay.disponible && (
+                  <button onClick={airplay.elegir}
+                    className="mt-6 inline-flex items-center gap-2 h-11 px-5 rounded-xl bg-white/15 text-[15px] font-semibold active:bg-white/25">
+                    <span className="w-5 h-5"><IAirplay /></span>
+                    Ver en otra pantalla
+                  </button>
+                )}
               </>
             )}
           </div>

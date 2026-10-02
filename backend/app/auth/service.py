@@ -13,6 +13,12 @@ logger = logging.getLogger("tmd")
 ALGORITHM = "HS256"
 ACCESS_EXPIRE_MINUTES = 60
 REFRESH_EXPIRE_DAYS = 7
+# Una pelicula dura mas que un token de acceso, y la URL del video lleva el
+# token dentro: pasada la hora, /api/stream devolvia 401 y la reproduccion se
+# cortaba a mitad. Con AirPlay es peor, porque quien pide los trozos es el
+# Apple TV y no hay nadie que pueda renovar nada. De ahi las "entradas de
+# reproduccion": viven mucho mas, pero solo sirven para un archivo.
+STREAM_EXPIRE_HOURS = 12
 
 PBKDF2_ITERATIONS = 240_000
 
@@ -60,6 +66,24 @@ def create_refresh_token(username: str, secret: str) -> str:
         "sub": username,
         "type": "refresh",
         "exp": datetime.now(timezone.utc) + timedelta(days=REFRESH_EXPIRE_DAYS),
+        "iat": datetime.now(timezone.utc),
+    }
+    return jwt.encode(payload, secret, algorithm=ALGORITHM)
+
+
+def create_stream_token(username: str, path: str, secret: str) -> str:
+    """Permiso para leer *un* archivo durante unas horas.
+
+    Es a proposito mas estrecho y mas largo que el token de acceso: no sirve
+    para la API, solo para `/api/stream` y `/api/subtitle`, y solo para la
+    ruta que lleva escrita. Asi una pelicula de tres horas se ve entera sin
+    tener que ampliar la vida del token con el que se administra todo.
+    """
+    payload = {
+        "sub": username,
+        "type": "stream",
+        "path": path,
+        "exp": datetime.now(timezone.utc) + timedelta(hours=STREAM_EXPIRE_HOURS),
         "iat": datetime.now(timezone.utc),
     }
     return jwt.encode(payload, secret, algorithm=ALGORITHM)

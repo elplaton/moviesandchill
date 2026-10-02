@@ -62,8 +62,30 @@ export function getApiBase() {
   return API_BASE;
 }
 
-export function streamUrl(path: string): string {
-  return `${API_BASE}/stream?path=${encodeURIComponent(path)}&token=${encodeURIComponent(accessToken || '')}`;
+export function streamUrl(path: string, token?: string): string {
+  // Con la entrada de reproduccion si se tiene; si no, el token de acceso,
+  // que es lo que se usaba antes.
+  const t = token || accessToken || '';
+  return `${API_BASE}/stream?path=${encodeURIComponent(path)}&token=${encodeURIComponent(t)}`;
+}
+
+/**
+ * Entrada de reproduccion para un archivo.
+ *
+ * La URL del video lleva el token dentro y la lee el propio elemento
+ * `<video>`, que no puede renovarlo: con el token de acceso (una hora de
+ * vida) una pelicula larga se cortaba a mitad. La entrada dura horas pero
+ * solo vale para este archivo.
+ */
+export async function streamTicket(path: string): Promise<string> {
+  try {
+    const res = await apiFetch(`/stream/ticket?path=${encodeURIComponent(path)}`);
+    if (res.ok) {
+      const d = await res.json();
+      if (d.token) return d.token as string;
+    }
+  } catch { /* se cae al token de acceso */ }
+  return accessToken || '';
 }
 
 async function refreshAccessToken(): Promise<boolean> {
