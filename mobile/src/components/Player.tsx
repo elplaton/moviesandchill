@@ -14,10 +14,16 @@ interface Props { path: string; title: string; subtitle?: string; poster?: strin
  * el video o con el gesto de atras del telefono: al abrirse se apila una
  * entrada en el historial para que "atras" signifique "cerrar el video" y no
  * "volver a la pantalla anterior".
+ *
+ * Mientras carga se tapa con una pantalla de espera. Si no, se veia el
+ * reproductor en linea con sus propios controles durante un segundo y luego
+ * saltaba encima el del sistema: parecian dos reproductores peleandose.
  */
 export default function Player({ path, title, subtitle, poster, backdrop, onClose }: Props) {
   const ref = useRef<HTMLVideoElement>(null);
   const [subs, setSubs] = useState<ExternalSubtitle[]>([]);
+  const [preparando, setPreparando] = useState(true);
+  const [fallo, setFallo] = useState('');
   const src = `/api/stream?path=${encodeURIComponent(path)}&token=${encodeURIComponent(getAccessToken() || '')}`;
 
   // El selector de subtítulos lo pone el reproductor del sistema; aquí solo
@@ -46,6 +52,10 @@ export default function Player({ path, title, subtitle, poster, backdrop, onClos
     let entered = false;
     const goFull = () => {
       if (entered) return; entered = true;
+      // Ya hay imagen y el reproductor del sistema esta a punto de abrirse:
+      // se retira la espera un instante despues para no dejar un parpadeo
+      // del reproductor en linea entre medias.
+      setTimeout(() => setPreparando(false), 120);
       const anyV = v as any;
       // iPhone: el reproductor del sistema. El resto: pantalla completa del
       // documento, con giro a apaisado donde se pueda bloquear.
@@ -53,6 +63,15 @@ export default function Player({ path, title, subtitle, poster, backdrop, onClos
       const req = v.requestFullscreen?.bind(v) || anyV.webkitRequestFullscreen?.bind(v);
       if (req) req().then(() => (screen.orientation as any)?.lock?.('landscape').catch(() => {})).catch(() => {});
     };
+
+    const onError = () => {
+      setPreparando(false);
+      setFallo('No se ha podido abrir el vídeo. Puede que el archivo no esté listo todavía.');
+    };
+    // Red de seguridad: si el vídeo no arranca (archivo a medio convertir, un
+    // codec que el telefono no abre) mas vale ver el reproductor y sus
+    // controles que quedarse en una espera eterna.
+    const rendicion = setTimeout(() => setPreparando(false), 20000);
 
     // Salir de la pantalla completa (boton Hecho, atras) cierra el reproductor.
     const onExitIos = () => { history.state?.player ? history.back() : close(); };
@@ -65,6 +84,7 @@ export default function Player({ path, title, subtitle, poster, backdrop, onClos
     v.addEventListener('timeupdate', onTime);
     v.addEventListener('ended', onEnded);
     v.addEventListener('playing', goFull, { once: true });
+    v.addEventListener('error', onError);
     v.addEventListener('webkitendfullscreen', onExitIos);
     document.addEventListener('fullscreenchange', onFsChange);
 
@@ -74,6 +94,8 @@ export default function Player({ path, title, subtitle, poster, backdrop, onClos
       v.removeEventListener('timeupdate', onTime);
       v.removeEventListener('ended', onEnded);
       v.removeEventListener('playing', goFull);
+      v.removeEventListener('error', onError);
+      clearTimeout(rendicion);
       v.removeEventListener('webkitendfullscreen', onExitIos);
       document.removeEventListener('fullscreenchange', onFsChange);
       if (document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
@@ -93,6 +115,32 @@ export default function Player({ path, title, subtitle, poster, backdrop, onClos
             srcLang={sub.language} label={sub.label} />
         ))}
       </video>
+
+      {(preparando || fallo) && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center px-8 text-center">
+          {backdrop && (
+            <img src={backdrop} alt="" className="absolute inset-0 w-full h-full object-cover opacity-25" />
+          )}
+          <div className="absolute inset-0 bg-gradient-to-t from-black via-black/80 to-black/60" />
+          <div className="relative">
+            {fallo ? (
+              <>
+                <p className="text-[16px] font-semibold">{fallo}</p>
+                <button onClick={onClose} className="mt-5 h-11 px-6 rounded-xl bg-white/15 text-[15px] font-semibold">
+                  Cerrar
+                </button>
+              </>
+            ) : (
+              <>
+                <span className="block w-10 h-10 mx-auto rounded-full border-[3px] border-white/20 border-t-white animate-spin" />
+                <p className="mt-5 text-[17px] font-semibold leading-tight">{title}</p>
+                {subtitle && <p className="mt-1 text-[14px] text-nf-text2">{subtitle}</p>}
+                <p className="mt-3 text-[13px] text-nf-text3">Preparando el vídeo…</p>
+              </>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

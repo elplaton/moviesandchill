@@ -35,32 +35,49 @@ export default function Onboarding() {
   const [guardando, setGuardando] = useState(false);
   const [error, setError] = useState('');
   const [tope, setTope] = useState(false);
+  // `texto` es lo que se escribe; `busqueda` lo que ya se pidio al servidor.
+  const [texto, setTexto] = useState('');
+  const [busqueda, setBusqueda] = useState('');
+  // Cuantos hay en el catalogo sin filtrar. El minimo exigible se mide sobre
+  // esto y no sobre los resultados de la busqueda: buscando una sola pelicula
+  // el minimo bajaria a una y se podria terminar con un solo gusto marcado.
+  const [disponibles, setDisponibles] = useState(0);
   const centinela = useRef<HTMLDivElement>(null);
+  const peticion = useRef(0);
 
   const esPelis = paso === 'peliculas';
   const elegidas = esPelis ? pelis : series;
 
   const cargar = useCallback(async (desde: number) => {
+    const mia = ++peticion.current;
     try {
-      const res = await apiFetch(`/onboarding/picks?offset=${desde}&limit=${PAGINA}`);
+      const q = busqueda ? `&q=${encodeURIComponent(busqueda)}` : '';
+      const res = await apiFetch(`/onboarding/picks?offset=${desde}&limit=${PAGINA}${q}`);
       const d = await res.json();
+      // Una respuesta de una busqueda anterior no debe pisar la de ahora.
+      if (mia !== peticion.current) return;
       const nuevos: Pick[] = (esPelis ? d.movies : d.series) || [];
       if (nuevos.length < PAGINA) setHayMas(false);
+      if (!busqueda && desde === 0) setDisponibles(nuevos.length);
       setItems(prev => (desde === 0 ? nuevos : [...prev, ...nuevos]));
     } catch {
       setError('No se ha podido cargar el catálogo.');
     } finally {
-      setCargando(false);
-      setCargandoMas(false);
+      if (mia === peticion.current) { setCargando(false); setCargandoMas(false); }
     }
-  }, [esPelis]);
+  }, [esPelis, busqueda]);
+
+  useEffect(() => {
+    const t = setTimeout(() => setBusqueda(texto.trim()), 350);
+    return () => clearTimeout(t);
+  }, [texto]);
 
   useEffect(() => {
     setCargando(true);
     setHayMas(true);
     setItems([]);
     cargar(0);
-  }, [paso]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [paso, busqueda]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!hayMas || cargando) return;
@@ -107,7 +124,7 @@ export default function Onboarding() {
 
   // El minimo se adapta a lo que hay: con menos de tres en el catalogo,
   // exigir tres dejaba el boton apagado y no se podia terminar nunca.
-  const minimo = Math.min(MINIMO, items.length);
+  const minimo = Math.min(MINIMO, disponibles || MINIMO);
   const puedeSeguir = elegidas.size >= minimo && elegidas.size > 0;
   const boton = 'w-full h-12 rounded-xl text-[15px] font-semibold disabled:opacity-40';
 
@@ -128,8 +145,25 @@ export default function Onboarding() {
         <p className="mt-4 rounded-xl border border-nf-red/40 bg-nf-red/10 px-4 py-3 text-[14px]">{error}</p>
       )}
 
+      <div className="relative mt-4">
+        <input value={texto} onChange={e => setTexto(e.target.value)}
+          placeholder={esPelis ? 'Busca una película' : 'Busca una serie'}
+          autoCapitalize="none"
+          /* 16px o iOS hace zoom al enfocar el campo */
+          className="w-full h-12 rounded-xl bg-white/10 border border-white/10 pl-4 pr-10 text-[16px] outline-none focus:border-white/40" />
+        {texto && (
+          <button onClick={() => setTexto('')} aria-label="Limpiar"
+            className="absolute right-2 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full text-nf-text3 active:bg-white/10">✕</button>
+        )}
+      </div>
+
       {cargando ? (
         <p className="mt-10 text-[14px] text-nf-text3">Cargando…</p>
+      ) : items.length === 0 && busqueda ? (
+        <div className="mt-10">
+          <p className="text-[15px] text-nf-text2">Nada con «{busqueda}».</p>
+          <p className="mt-1 text-[13px] text-nf-text3">Prueba con menos palabras, o con el título original.</p>
+        </div>
       ) : items.length === 0 ? (
         <div className="mt-10">
           <p className="text-[15px] text-nf-text2">Todavía no hay nada que elegir.</p>
@@ -174,7 +208,7 @@ export default function Onboarding() {
 
       {/* Barra fija: en el móvil el botón no puede quedarse al final de una
           lista infinita, no se encontraría nunca. */}
-      {items.length > 0 && (
+      {(items.length > 0 || elegidas.size > 0) && (
         <div className="fixed left-0 right-0 bottom-0 px-4 pt-3 bg-gradient-to-t from-black via-black/95 to-transparent"
           style={{ paddingBottom: 'calc(12px + var(--safe-b))' }}>
           <div className="flex gap-3">

@@ -87,10 +87,11 @@ async def onboarding_picks(
     user: Annotated[str, Depends(get_current_user)],
     offset: int = 0,
     limit: int = 30,
+    q: str = "",
 ):
     from app.database.preferences import get_top_rated
 
-    data = await get_top_rated(limit=limit, offset=offset)
+    data = await get_top_rated(limit=limit, offset=offset, query=q)
 
     movies = []
     for m in data["movies"]:

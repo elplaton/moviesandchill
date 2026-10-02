@@ -5,6 +5,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { applyFocus } from '../focus/engine';
 import { FocusScope, useFocusItem } from '../focus/react';
 import TvButton from '../components/TvButton';
+import Keyboard from '../components/Keyboard';
 
 interface Pick {
   id: string;
@@ -14,8 +15,10 @@ interface Pick {
   year?: number;
 }
 
+// Dos filas es lo que entra sin tener que desplazar. Con el teclado abierto
+// caben cuatro columnas en vez de seis.
 const COLUMNAS = 6;
-const POR_PAGINA = COLUMNAS * 2;   // dos filas: lo que entra sin desplazar
+const COLUMNAS_BUSCANDO = 4;
 const MINIMO = 3;
 const TOPE = 10;
 
@@ -62,6 +65,15 @@ export default function Onboarding() {
   const [hayMas, setHayMas] = useState(true);
   const [guardando, setGuardando] = useState(false);
   const [error, setError] = useState('');
+  const [buscando, setBuscando] = useState(false);
+  const [texto, setTexto] = useState('');
+  const [busqueda, setBusqueda] = useState('');
+  // Cuantos hay en el catalogo sin filtrar: el minimo exigible se mide sobre
+  // esto y no sobre lo que devuelva la busqueda.
+  const [disponibles, setDisponibles] = useState(0);
+
+  const columnas = buscando ? COLUMNAS_BUSCANDO : COLUMNAS;
+  const porPagina = columnas * 2;
 
   const esPelis = paso === 'peliculas';
   const elegidas = esPelis ? pelis : series;
@@ -69,21 +81,29 @@ export default function Onboarding() {
   const cargar = useCallback(async (p: number) => {
     setCargando(true);
     try {
-      const res = await apiFetch(`/onboarding/picks?offset=${p * POR_PAGINA}&limit=${POR_PAGINA}`);
+      const q = busqueda ? `&q=${encodeURIComponent(busqueda)}` : '';
+      const res = await apiFetch(`/onboarding/picks?offset=${p * porPagina}&limit=${porPagina}${q}`);
       const d = await res.json();
       const nuevos: Pick[] = (esPelis ? d.movies : d.series) || [];
+      if (!busqueda && p === 0) setDisponibles(nuevos.length);
       setItems(nuevos);
-      setHayMas(nuevos.length === POR_PAGINA);
+      setHayMas(nuevos.length === porPagina);
     } catch {
       setError('No se ha podido cargar el catalogo.');
       setItems([]);
     } finally {
       setCargando(false);
     }
-  }, [esPelis]);
+  }, [esPelis, busqueda, porPagina]);
+
+  // Con el mando se teclea despacio: medio segundo de margen va bien.
+  useEffect(() => {
+    const t = setTimeout(() => setBusqueda(texto.trim()), 500);
+    return () => clearTimeout(t);
+  }, [texto]);
 
   useEffect(() => { cargar(pagina); }, [cargar, pagina]);
-  useEffect(() => { setPagina(0); }, [paso]);
+  useEffect(() => { setPagina(0); }, [paso, busqueda]);
 
   const marcar = (tmdbId: number) => {
     const set = esPelis ? setPelis : setSeries;
@@ -115,9 +135,10 @@ export default function Onboarding() {
 
   // El minimo se adapta a lo que hay: con menos de tres en el catalogo,
   // exigir tres dejaba el boton apagado y no se podia terminar nunca.
-  const minimo = Math.min(MINIMO, items.length);
+  const minimo = Math.min(MINIMO, disponibles || MINIMO);
   const puedeSeguir = elegidas.size >= minimo && elegidas.size > 0;
-  const vacio = !cargando && items.length === 0 && pagina === 0;
+  const vacio = !cargando && items.length === 0 && pagina === 0 && !busqueda;
+  const sinResultados = !cargando && items.length === 0 && !!busqueda;
 
   return (
     <div className="absolute inset-0 bg-tv-bg px-[96px] py-[64px]">
@@ -148,23 +169,47 @@ export default function Onboarding() {
           </div>
         ) : (
           <>
-            <FocusScope index={0} orientation="grid" columns={COLUMNAS}
-              className="mt-8 grid grid-cols-6 gap-x-6 gap-y-8">
-              {items.map((item, i) => (
-                <Tarjeta key={item.id} item={item} index={i}
-                  marcada={elegidas.has(item.tmdb_id)}
-                  onToggle={() => marcar(item.tmdb_id)} />
-              ))}
-            </FocusScope>
+            <div className="mt-8 flex items-start space-x-10">
+              <div style={{ width: buscando ? 1120 : 1728 }}>
+                {sinResultados ? (
+                  <div className="h-[372px] flex flex-col justify-center">
+                    <p className="text-lead text-tv-text2">Nada con «{busqueda}».</p>
+                    <p className="mt-2 text-body text-tv-text3">
+                      Prueba con menos palabras, o con el titulo original.
+                    </p>
+                  </div>
+                ) : (
+                  <FocusScope index={0} orientation="grid" columns={columnas}
+                    className={`grid ${buscando ? 'grid-cols-4' : 'grid-cols-6'} gap-x-6 gap-y-8`}>
+                    {items.map((item, i) => (
+                      <Tarjeta key={item.id} item={item} index={i}
+                        marcada={elegidas.has(item.tmdb_id)}
+                        onToggle={() => marcar(item.tmdb_id)} />
+                    ))}
+                  </FocusScope>
+                )}
+              </div>
 
-            <FocusScope index={1} orientation="horizontal" className="mt-10 flex space-x-5">
-              {pagina > 0 && (
-                <TvButton index={0} onClick={() => setPagina(p => p - 1)} disabled={cargando}>
+              {buscando && (
+                <FocusScope index={1} orientation="vertical" as="none">
+                  <Keyboard index={0} value={texto} onChange={setTexto} autoFocus
+                    placeholder={esPelis ? 'Titulo de la pelicula' : 'Titulo de la serie'}
+                    onDone={() => setBuscando(false)} />
+                </FocusScope>
+              )}
+            </div>
+
+            <FocusScope index={buscando ? 2 : 1} orientation="horizontal" className="mt-10 flex space-x-5">
+              <TvButton index={0} onClick={() => { setBuscando(b => !b); if (buscando) { setTexto(''); } }}>
+                {buscando ? 'Cerrar busqueda' : 'Buscar'}
+              </TvButton>
+              {pagina > 0 && !buscando && (
+                <TvButton index={1} onClick={() => setPagina(p => p - 1)} disabled={cargando}>
                   Anteriores
                 </TvButton>
               )}
               {hayMas && (
-                <TvButton index={1} onClick={() => setPagina(p => p + 1)} disabled={cargando}>
+                <TvButton index={2} onClick={() => setPagina(p => p + 1)} disabled={cargando}>
                   Ver mas
                 </TvButton>
               )}

@@ -5,7 +5,7 @@ import { useAuth } from '../contexts/AuthContext';
 import Shell from '../components/Shell';
 import Card from '../components/Card';
 import Button from '../components/ui/Button';
-import { IconCheck } from '../components/ui/Icon';
+import { IconCheck, IconClose, IconSearch } from '../components/ui/Icon';
 
 interface Pick {
   id: string;
@@ -34,29 +34,52 @@ export default function Onboarding() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [topeAvisado, setTopeAvisado] = useState(false);
+  // `texto` es lo que se escribe; `busqueda` lo que ya se ha pedido al
+  // servidor. Separarlos evita una peticion por tecla.
+  const [texto, setTexto] = useState('');
+  const [busqueda, setBusqueda] = useState('');
+  // Cuántos hay en el catálogo sin filtrar. El mínimo exigible se mide sobre
+  // esto y no sobre los resultados de la búsqueda: buscando una sola película
+  // el mínimo bajaría a una y se podría terminar con un solo gusto marcado.
+  const [disponibles, setDisponibles] = useState(0);
   const sentinelRef = useRef<HTMLDivElement>(null);
+  const peticion = useRef(0);
 
   const isMovies = step === 'movies';
 
   const loadPicks = useCallback(async (offset: number) => {
+    const mia = ++peticion.current;
     try {
-      const res = await apiFetch(`/onboarding/picks?offset=${offset}&limit=${PAGE_SIZE}`);
+      const q = busqueda ? `&q=${encodeURIComponent(busqueda)}` : '';
+      const res = await apiFetch(`/onboarding/picks?offset=${offset}&limit=${PAGE_SIZE}${q}`);
       const data = await res.json();
+      // Una respuesta de una busqueda anterior no debe pisar la de ahora.
+      if (mia !== peticion.current) return;
       const newItems = (isMovies ? data.movies : data.series) as Pick[];
       if (newItems.length < PAGE_SIZE) setHasMore(false);
+      if (!busqueda && offset === 0) setDisponibles(newItems.length);
       if (isMovies) {
         setMovies(prev => offset === 0 ? newItems : [...prev, ...newItems]);
       } else {
         setSeries(prev => offset === 0 ? newItems : [...prev, ...newItems]);
       }
-    } catch {} finally { setLoading(false); setLoadMore(false); }
-  }, [isMovies]);
+    } catch {} finally {
+      if (mia === peticion.current) { setLoading(false); setLoadMore(false); }
+    }
+  }, [isMovies, busqueda]);
+
+  // Al escribir se espera un momento antes de preguntar al servidor.
+  useEffect(() => {
+    const t = setTimeout(() => setBusqueda(texto.trim()), 350);
+    return () => clearTimeout(t);
+  }, [texto]);
 
   useEffect(() => {
     setLoading(true);
     setHasMore(true);
+    if (isMovies) setMovies([]); else setSeries([]);
     loadPicks(0);
-  }, [step]);
+  }, [step, busqueda]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!hasMore || loading) return;
@@ -132,7 +155,7 @@ export default function Onboarding() {
   // El mínimo se adapta a lo que hay. Si el catálogo solo ofrece una o dos
   // series, exigir tres dejaba el botón apagado para siempre: no se podía
   // terminar el onboarding y al volver a entrar lo pedía otra vez.
-  const minimo = Math.min(3, currentPicks.length);
+  const minimo = Math.min(3, disponibles || 3);
   const canAdvance = selected.size >= minimo && selected.size > 0;
 
   return (
@@ -166,10 +189,30 @@ export default function Onboarding() {
         {error && (
           <p className="mt-4 rounded border border-nf-red/30 bg-nf-red/10 px-4 py-3 text-base">{error}</p>
         )}
+
+        <div className="relative mt-6 max-w-[420px]">
+          <span className="pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-nf-faint"><IconSearch /></span>
+          <input value={texto} onChange={e => setTexto(e.target.value)}
+            placeholder={isMovies ? 'Busca una película por título' : 'Busca una serie por título'}
+            className="h-12 w-full rounded border border-nf-line bg-nf-surface py-3 pl-12 pr-4 text-md outline-none focus:border-white/40" />
+          {texto && (
+            <button onClick={() => setTexto('')} aria-label="Limpiar"
+              className="absolute right-3 top-1/2 grid h-7 w-7 -translate-y-1/2 place-items-center rounded-full text-nf-faint hover:bg-white/10 hover:text-white">
+              <span className="w-4 h-4"><IconClose /></span>
+            </button>
+          )}
+        </div>
       </div>
 
       {loading && currentPicks.length === 0 ? (
         <p className="px-gutter py-20 text-base text-nf-faint">Cargando…</p>
+      ) : currentPicks.length === 0 && busqueda ? (
+        <div className="px-gutter py-20">
+          <p className="text-lg text-nf-dim">Nada con «{busqueda}».</p>
+          <p className="mt-1 text-base text-nf-faint">
+            Prueba con menos palabras, o con el título original.
+          </p>
+        </div>
       ) : currentPicks.length === 0 ? (
         <div className="px-gutter py-20">
           <p className="text-lg text-nf-dim">Todavía no hay nada que elegir.</p>
