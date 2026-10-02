@@ -63,7 +63,10 @@ def buscar(dato, clave: str):
 def main() -> int:
     # 1. Pedir el despliegue. Si esto falla, el workflow debe fallar.
     try:
-        respuesta = pedir(f"/api/v1/deploy?uuid={UUID}&force=false")
+        # POST, no GET: la pantalla de Webhooks de Coolify muestra esta URL
+        # como si fuera para abrirla en el navegador, pero la API responde
+        # 405 "This endpoint has changed to a POST request".
+        respuesta = pedir(f"/api/v1/deploy?uuid={UUID}&force=false", "POST")
     except urllib.error.HTTPError as e:
         detalle = e.read().decode("utf-8", "replace")[:500]
         print(f"Coolify ha rechazado la peticion ({e.code}): {detalle}", file=sys.stderr)
@@ -74,6 +77,9 @@ def main() -> int:
         # the API": la guarda general de Coolify exige tambien "Read".
         if e.code == 401:
             print("COOLIFY_TOKEN no vale (caducado, revocado o mal copiado).", file=sys.stderr)
+        elif e.code == 405:
+            print("Coolify espera otro metodo HTTP en este endpoint. Mira que "
+                  "pide el mensaje de arriba y ajusta la llamada.", file=sys.stderr)
         elif e.code == 403:
             print("El token existe pero no tiene permiso. En Coolify, Keys & Tokens, "
                   "el token necesita Deploy *y* Read marcados; con Deploy a secas da "

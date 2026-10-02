@@ -99,6 +99,20 @@ repository secret**.
 La URL y el UUID no son secretos de verdad, pero van ahí para que no quede la
 topología de la red escrita en un fichero público.
 
+## Dos cosas que cuestan un intento cada una
+
+**«Allowed API IPs» tiene que quedar vacío.** Se probó con `100.64.0.0/10`, el
+rango de la tailnet, y Coolify sigue respondiendo
+`403 You are not allowed to access the API` aunque el token sea válido y se
+autentique. Y no hay alternativa: el runner recibe **una IP distinta en cada
+ejecución**, así que una lista de IPs exactas no puede funcionar nunca aquí.
+Vacío tampoco es un agujero: el puerto 8000 está cerrado a internet, así que
+solo llegan la LAN y la tailnet, y sigue exigiendo token.
+
+**El endpoint de despliegue es POST.** La pantalla de *Webhooks* de Coolify
+muestra la URL como si fuera para abrirla en el navegador, pero con GET
+responde `405 This endpoint has changed to a POST request`.
+
 ## Cómo se comporta
 
 - **Solo `main`.** También se puede lanzar a mano desde la pestaña *Actions*
