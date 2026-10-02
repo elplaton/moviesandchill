@@ -16,22 +16,34 @@ push a main  →  runner de GitHub  →  (Tailscale)  →  100.97.138.49:8000  �
 
 ## Lo que hay que configurar una vez
 
-### 1. Token de la API de Coolify
+### 1. Habilitar la API de Coolify
+
+**Viene desactivada de serie**, y sin esto no se puede ni crear un token.
+
+En Coolify: **Settings → Advanced → API and MCP**.
+
+- **API access**: `Enabled`
+- **Allowed API IPs**: `100.64.0.0/10`
+
+Ese rango es el CGNAT que usa Tailscale para toda la tailnet, así que la API
+solo acepta peticiones que lleguen por la VPN. El runner de GitHub recibe una
+IP de ese rango al unirse, de modo que entra; cualquier otra cosa no. Es una
+segunda cerradura además de tener el puerto 8000 cerrado al exterior: si algún
+día se abriera por error, la API seguiría sin estar accesible.
+
+### 2. Token de la API de Coolify
 
 En Coolify: **Keys & Tokens → API tokens → Create new token**. Permisos: basta
 con poder desplegar (`deploy`). Cópialo en el momento, que no se vuelve a
 enseñar.
 
-### 2. Cliente OAuth de Tailscale
+### 3. Cliente OAuth de Tailscale
 
-En la consola de Tailscale: **Settings → OAuth clients → Generate**. Ámbito
-`auth_keys` (escritura) y el tag `tag:ci`.
+**Primero el tag, después el cliente**: el desplegable de tags del cliente
+OAuth solo ofrece tags que ya existan en las ACL, así que hay que declararlo
+antes o no habrá nada que elegir.
 
-Se usa OAuth y no una *auth key* normal porque las auth keys caducan a los 90
-días como máximo y el despliegue dejaría de funcionar sin avisar.
-
-Además, en **Access controls** hay que declarar el tag y dejarle llegar al
-servidor:
+En **Access controls** (https://login.tailscale.com/admin/acls/file):
 
 ```jsonc
 {
@@ -49,7 +61,21 @@ servidor:
 }
 ```
 
-### 3. Secretos en GitHub
+Y después, en **Settings → OAuth clients → Generate**
+(https://login.tailscale.com/admin/settings/oauth):
+
+- Ámbito **`auth_keys`** con permiso de **escritura** (es el único que hace
+  falta; el action genera una clave de un solo uso con él).
+- Tag: **`tag:ci`**.
+
+Al generarlo enseña el **Client ID** y el **Secret** una sola vez: ese par es
+`TS_OAUTH_CLIENT_ID` y `TS_OAUTH_SECRET`.
+
+Se usa OAuth y no una *auth key* normal porque las auth keys caducan a los 90
+días como máximo y el despliegue dejaría de funcionar sin avisar, probablemente
+en el peor momento.
+
+### 4. Secretos en GitHub
 
 En el repositorio: **Settings → Secrets and variables → Actions → New
 repository secret**.
