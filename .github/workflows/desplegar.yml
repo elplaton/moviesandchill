@@ -1,0 +1,42 @@
+name: Desplegar en Coolify
+
+# Coolify vive en el homelab, dentro de la VPN, y su puerto no esta abierto a
+# internet: el webhook que crea la GitHub App apunta a la IP publica y todas
+# las entregas fallan en silencio. En vez de abrir un puerto, aqui es el
+# runner de GitHub el que entra en la tailnet y llama al despliegue por la IP
+# privada. Nada queda expuesto y el trafico va cifrado por Tailscale.
+
+on:
+  push:
+    branches: [main]
+  # Para poder lanzarlo a mano desde la pestaña Actions.
+  workflow_dispatch:
+
+# Si se empujan dos commits seguidos, el segundo espera al primero: dos
+# despliegues a la vez sobre el mismo servidor se pisarian.
+concurrency:
+  group: desplegar-coolify
+  cancel-in-progress: false
+
+jobs:
+  desplegar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Entrar en la tailnet
+        uses: tailscale/github-action@v3
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          # El tag tiene que estar declarado en las ACL de Tailscale y tener
+          # permiso para llegar al servidor; ver el README de esta carpeta.
+          tags: tag:ci
+          version: latest
+
+      - name: Desplegar y esperar
+        env:
+          COOLIFY_URL: ${{ secrets.COOLIFY_URL }}
+          COOLIFY_TOKEN: ${{ secrets.COOLIFY_TOKEN }}
+          COOLIFY_APP_UUID: ${{ secrets.COOLIFY_APP_UUID }}
+        run: python3 .github/workflows/desplegar.py
