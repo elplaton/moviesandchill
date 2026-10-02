@@ -108,6 +108,23 @@ body.has-pointer { cursor: default; }
 .tv-btn.tv-btn-primary { background: var(--tv-red); }
 .tv-btn.tv-btn-primary.is-focused { background: #fff; color: #000; }
 
+/*
+ * Controles que solo existen donde el mando es un cursor (PlayStation).
+ * No pasan por el motor de foco (en el reproductor no hay foco que mover),
+ * asi que el "encima" lo da :hover y no la clase is-focused.
+ */
+.tv-ctl {
+  background: rgba(255,255,255,0.16);
+  color: #fff;
+  cursor: pointer;
+  transition: transform 140ms ease-out;
+}
+.tv-ctl:hover {
+  background: #fff;
+  color: #000;
+  transform: scale(1.05);
+}
+
 /* Fila de lista (episodio, version): mismo tratamiento que un boton. */
 .tv-row-item {
   background: rgba(255,255,255,0.06);
@@ -180,7 +197,14 @@ body.has-pointer { cursor: default; }
 
 /* OSD del reproductor */
 .tv-osd { transition: opacity 250ms ease-out; }
-.tv-osd.is-hidden { opacity: 0; }
+/*
+ * Oculta no recibe clics. Con puntero (PlayStation) la barra lleva botones, y
+ * una barra invisible que sigue atendiendo haria dos cosas malas: un clic en
+ * cualquier sitio de abajo podria sacar del video sin que se vea por que, y
+ * el raton al pasar por encima no despertaria la barra, porque el movimiento
+ * no llegaria a la capa que esta debajo.
+ */
+.tv-osd.is-hidden { opacity: 0; pointer-events: none; }
 
 /*
  * Mientras se mantiene pulsada una flecha se quitan las transiciones. Animar

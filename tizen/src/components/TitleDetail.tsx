@@ -9,6 +9,7 @@ import { bigBackdrop } from './Hero';
 import Dialog from './Dialog';
 import Overlay from './Overlay';
 import Player from './Player';
+import { soloPuntero } from '../tv/platform';
 import TvButton from './TvButton';
 import { IconCheck, IconDownload, IconPlay, IconStar, IconTrash } from './Icons';
 import { groupEpisodes, groupVersions, seasonLabel, episodeLabel, type Episode, type Version } from '../utils/versions';
@@ -317,6 +318,15 @@ export default function TitleDetail({ input, onClose }: Props) {
       <div className="absolute inset-0" style={{ background: 'linear-gradient(90deg, #141414 0%, rgba(20,20,20,0.96) 36%, rgba(20,20,20,0.55) 60%, rgba(20,20,20,0.35) 100%)' }} />
       <div className="absolute inset-0" style={{ background: 'linear-gradient(180deg, rgba(20,20,20,0.2) 0%, rgba(20,20,20,0) 30%, #141414 100%)' }} />
 
+      {/* Sin tecla Atras (PlayStation) la ficha seria una habitacion sin
+          puerta: se entra con un clic y no se puede salir. */}
+      {soloPuntero() && (
+        <button onClick={onClose}
+          className="tv-ctl absolute top-[48px] right-[96px] z-30 inline-flex items-center rounded-lg px-7 h-[60px] text-body font-semibold">
+          &#10005;&nbsp;&nbsp;Volver
+        </button>
+      )}
+
       <FocusScope trap orientation="horizontal" as="none">
         {/* columna izquierda */}
         <FocusScope index={0} orientation="vertical" className="absolute left-[96px] top-[96px] w-[700px] z-10">
@@ -390,7 +400,11 @@ export default function TitleDetail({ input, onClose }: Props) {
             </FocusScope>
             <div className="absolute left-0 right-0 bottom-0 h-[80px] pointer-events-none" style={{ background: 'linear-gradient(180deg, rgba(20,20,20,0), #141414)' }} />
           </div>
-          <p className="mt-3 text-caption text-tv-text3">OK: reproducir si está en disco, descargar si no · Atrás: volver</p>
+          <p className="mt-3 text-caption text-tv-text3">
+            {soloPuntero()
+              ? 'Pulsa una fila: se reproduce si está en disco y se descarga si no'
+              : 'OK: reproducir si está en disco, descargar si no · Atrás: volver'}
+          </p>
         </FocusScope>
       </FocusScope>
 

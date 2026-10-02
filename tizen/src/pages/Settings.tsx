@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { FocusScope } from '../focus/react';
 import { exitApp } from '../focus/keys';
+import { puedeCerrarse } from '../tv/platform';
 import { apiFetch, getApiBase } from '../services/api';
 import { useDownloadsCtx } from '../contexts/DownloadsContext';
 import Screen from '../components/Screen';
@@ -44,7 +45,9 @@ export default function Settings() {
         </div>
         <FocusScope id="settings-actions" index={0} orientation="horizontal" className="flex space-x-4">
           <TvButton index={0} icon={<IconLogout />} onClick={() => setConfirm('logout')}>Cerrar sesión</TvButton>
-          <TvButton index={1} onClick={() => setConfirm('exit')}>Salir de la app</TvButton>
+          {puedeCerrarse() && (
+            <TvButton index={1} onClick={() => setConfirm('exit')}>Salir de la app</TvButton>
+          )}
         </FocusScope>
         <p className="mt-12 text-caption text-tv-text3 max-w-[820px] leading-relaxed">
           Los canales de Telegram, la clasificación del catálogo y la configuración del servidor se gestionan desde la versión web.

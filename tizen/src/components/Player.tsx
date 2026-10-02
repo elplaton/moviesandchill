@@ -4,6 +4,7 @@ import { useBackHandler } from '../focus/react';
 import { pushMediaHandler, pushRawHandler } from '../focus/keys';
 import { audioLabel, fetchTracks, subtitleUrl, type MediaTracks } from '../services/tracks';
 import { streamTicket, streamUrl } from '../services/api';
+import { soloPuntero } from '../tv/platform';
 import { clearWatched, resumePoint, setWatched } from '../tv/progress';
 import { toast } from '../tv/toast';
 import { IconPause, IconPlay } from './Icons';
@@ -23,6 +24,13 @@ const SAVE_EVERY_MS = 5000;
 /** Salto por pulsacion; al repetir seguido crece. */
 const STEPS = [10, 30, 60, 120];
 const REPEAT_WINDOW_MS = 500;
+/**
+ * En la consola el mando es un cursor y no llega ninguna tecla, asi que todo
+ * lo que aqui se hace con el mando tiene que estar dibujado en pantalla.
+ */
+const PUNTERO = soloPuntero();
+/** Salto de los botones de pantalla: fijo, porque un clic no se "mantiene". */
+const SALTO = 30;
 
 function fmt(s: number): string {
   if (!isFinite(s) || s < 0) s = 0;
@@ -41,6 +49,10 @@ function fmt(s: number): string {
  *
  * La barra se oculta sola. La posicion se guarda cada 5 s y al salir, y al
  * abrir el mismo archivo se reanuda donde se dejo.
+ *
+ * Con puntero (PlayStation) cambia la forma, no el fondo: un clic en el video
+ * pausa, la barra de progreso se puede pulsar, y los saltos, el idioma y el
+ * volver son botones en pantalla.
  */
 export default function Player({ src, path, title, subtitle, poster, backdrop, onClose }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -53,6 +65,9 @@ export default function Player({ src, path, title, subtitle, poster, backdrop, o
   const osdTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastSeek = useRef<{ at: number; n: number }>({ at: 0, n: 0 });
   const lastSave = useRef(0);
+  const barraRef = useRef<HTMLDivElement>(null);
+  /** Motivo por el que este aparato no puede decodificar el video, si lo hay. */
+  const [aviso, setAviso] = useState<string | null>(null);
 
   const showOsd = useCallback(() => {
     setOsd(true);
@@ -96,9 +111,37 @@ export default function Player({ src, path, title, subtitle, poster, backdrop, o
     showOsd();
   }, [showOsd]);
 
+  /** Salto de los botones de pantalla: siempre el mismo, sin escalado. */
+  const saltar = useCallback((segundos: number) => {
+    const v = videoRef.current;
+    if (!v || !v.duration) return;
+    v.currentTime = Math.max(0, Math.min(v.duration - 1, v.currentTime + segundos));
+    setTime(v.currentTime);
+    setSeekHint(`${segundos > 0 ? '+' : '−'}${Math.abs(segundos)} s`);
+    showOsd();
+  }, [showOsd]);
+
+  /**
+   * Pulsar la barra lleva a ese punto. El lienzo esta escalado con transform
+   * (main.tsx lo ajusta a la ventana), pero getBoundingClientRect() ya
+   * devuelve medidas de pantalla y clientX esta en las mismas, asi que la
+   * proporcion sale bien sin deshacer la escala.
+   */
+  const pulsarBarra = useCallback((e: { clientX: number }) => {
+    const v = videoRef.current;
+    const el = barraRef.current;
+    if (!v || !el || !v.duration) return;
+    const r = el.getBoundingClientRect();
+    if (!r.width) return;
+    const frac = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width));
+    v.currentTime = frac * v.duration;
+    setTime(v.currentTime);
+    showOsd();
+  }, [showOsd]);
+
   // Panel de idioma y subtitulos: se abre con la flecha arriba. No usa el
   // motor de foco porque el reproductor ya se queda con todas las teclas.
-  const [tracks, setTracks] = useState<MediaTracks>({ audio: [], subtitles: [], defaultAudio: 0 });
+  const [tracks, setTracks] = useState<MediaTracks>({ audio: [], subtitles: [], defaultAudio: 0, video: null });
   const [panel, setPanel] = useState(false);
   const [cursor, setCursor] = useState(0);
   const [audioActivo, setAudioActivo] = useState(0);
@@ -120,6 +163,14 @@ export default function Player({ src, path, title, subtitle, poster, backdrop, o
       if (!vivo) return;
       setTracks(t);
       setAudioActivo(t.defaultAudio);
+      // El navegador de la consola solo lee H.264 de 8 bits: con cualquier
+      // otra cosa se oye el audio y la imagen se queda en negro, sin ningun
+      // error. Se avisa antes de que pase, y se para el audio mientras.
+      if (PUNTERO && t.video && t.video.ps4 === false) {
+        setAviso(t.video.ps4_motivo || 'la consola no puede decodificar este vídeo');
+        videoRef.current?.pause();
+        setPlaying(false);
+      }
     });
     return () => { vivo = false; };
   }, [path]);
@@ -196,12 +247,21 @@ export default function Player({ src, path, title, subtitle, poster, backdrop, o
     const onTime = () => { setTime(v.currentTime); save(); };
     const onEnded = () => { clearWatched(path); onClose(); };
     const onWaiting = () => setBuffering(true);
+    // El estado se lee del elemento, no se supone: si el navegador bloquea el
+    // arranque automatico (pasa en WebKit cuando el src llega despues del
+    // clic, porque la fuente espera a la entrada de reproduccion) el video se
+    // queda en pausa y la barra decia "reproduciendo". Con esto dice la verdad
+    // y el boton de pausa sirve para arrancarlo.
+    const onPlay = () => setPlaying(true);
+    const onPause = () => setPlaying(false);
     const onPlaying = () => { setBuffering(false); setPlaying(true); };
     const onError = () => { toast('No se ha podido reproducir el archivo', 'error', 5000); };
     v.addEventListener('loadedmetadata', onMeta);
     v.addEventListener('timeupdate', onTime);
     v.addEventListener('ended', onEnded);
     v.addEventListener('waiting', onWaiting);
+    v.addEventListener('play', onPlay);
+    v.addEventListener('pause', onPause);
     v.addEventListener('playing', onPlaying);
     v.addEventListener('canplay', onPlaying);
     v.addEventListener('error', onError);
@@ -211,6 +271,8 @@ export default function Player({ src, path, title, subtitle, poster, backdrop, o
       v.removeEventListener('timeupdate', onTime);
       v.removeEventListener('ended', onEnded);
       v.removeEventListener('waiting', onWaiting);
+      v.removeEventListener('play', onPlay);
+      v.removeEventListener('pause', onPause);
       v.removeEventListener('playing', onPlaying);
       v.removeEventListener('canplay', onPlaying);
       v.removeEventListener('error', onError);
@@ -229,13 +291,22 @@ export default function Player({ src, path, title, subtitle, poster, backdrop, o
   return (
     <Overlay>
     <div className="fixed inset-0 z-[70]" style={{ background: '#000' }}>
-      <video ref={videoRef} src={fuente} autoPlay preload="auto" className="absolute inset-0 w-full h-full"
+      <video ref={videoRef} src={fuente} autoPlay playsInline preload="auto" className="absolute inset-0 w-full h-full"
         style={{ backgroundColor: '#000', objectFit: 'contain' }}>
         {tracks.subtitles.map(sub => (
           <track key={sub.path} kind="subtitles" src={subtitleUrl(sub.path)}
             srcLang={sub.language} label={sub.label} />
         ))}
       </video>
+
+      {/* Capa de clic: pausa al pulsar el video y despierta la barra al mover
+          el cursor. Va antes de la barra y del panel en el DOM, asi que no les
+          quita los clics: lo que se pinta despues queda por encima. */}
+      {PUNTERO && (
+        <div className="absolute inset-0"
+          onClick={() => { if (panel) setPanel(false); else togglePlay(); }}
+          onMouseMove={showOsd} />
+      )}
 
       {buffering && (
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
@@ -264,13 +335,23 @@ export default function Player({ src, path, title, subtitle, poster, backdrop, o
             const activa = op.tipo === 'audio' ? op.valor === audioActivo : op.valor === subActiva;
             return (
               <div key={`${op.tipo}-${op.valor}`}
-                className={`px-7 py-3 text-lead ${i === cursor ? 'bg-white text-black font-semibold' : 'text-tv-text2'}`}>
+                onMouseEnter={PUNTERO ? () => setCursor(i) : undefined}
+                onClick={PUNTERO ? () => { aplicar(op); setPanel(false); } : undefined}
+                className={`px-7 py-3 text-lead ${i === cursor ? 'bg-white text-black font-semibold' : 'text-tv-text2'}${PUNTERO ? ' cursor-pointer' : ''}`}>
                 <span className="inline-block w-8">{activa ? '✓' : ''}</span>
                 {op.texto}
               </div>
             );
           })}
-          <p className="px-7 pt-3 text-caption text-tv-text3">OK elige · Atrás cierra</p>
+          <p className="px-7 pt-3 text-caption text-tv-text3">
+            {PUNTERO ? 'Pulsa una opción' : 'OK elige · Atrás cierra'}
+          </p>
+        </div>
+      )}
+
+      {PUNTERO && (
+        <div className={`tv-osd ${osd ? '' : 'is-hidden'} absolute top-[40px] left-[48px]`}>
+          <button className="tv-ctl inline-flex items-center justify-center space-x-3 rounded-lg px-7 h-[60px] text-body font-semibold whitespace-nowrap" onClick={close}>&#10005;&nbsp;&nbsp;Volver</button>
         </div>
       )}
 
@@ -288,14 +369,64 @@ export default function Player({ src, path, title, subtitle, poster, backdrop, o
             <span className="tabular-nums">{fmt(duration)}</span>
           </div>
         </div>
-        <div className="relative h-[10px] rounded-full bg-white/25 overflow-hidden">
-          <div className="absolute inset-y-0 left-0 bg-tv-red rounded-full" style={{ width: `${pct}%` }} />
+        {/* El area de clic es mas alta que la barra: con un cursor que se mueve
+            con el stick, 10 px de alto no se aciertan. */}
+        <div ref={barraRef} onClick={PUNTERO ? pulsarBarra : undefined}
+          className={PUNTERO ? 'py-[16px] -my-[16px] cursor-pointer' : ''}>
+          <div className="relative h-[10px] rounded-full bg-white/25 overflow-hidden">
+            <div className="absolute inset-y-0 left-0 bg-tv-red rounded-full" style={{ width: `${pct}%` }} />
+          </div>
         </div>
-        <p className="mt-5 text-caption text-tv-text3">
-          OK pausa · ◀ ▶ saltan 10 s (mantén para más) · Atrás sale
-          {opciones.length > 0 && ' · ▲ idioma y subtítulos'}
-        </p>
+        {PUNTERO ? (
+          <>
+            <div className="mt-7 flex items-center space-x-4">
+              <button className="tv-ctl inline-flex items-center justify-center space-x-3 rounded-lg px-7 h-[60px] text-body font-semibold whitespace-nowrap" onClick={() => saltar(-SALTO)}>&#8722;{SALTO} s</button>
+              <button className="tv-ctl inline-flex items-center justify-center space-x-3 rounded-lg px-7 h-[60px] text-body font-semibold whitespace-nowrap w-[150px]" onClick={togglePlay}>
+                <span className="w-7 h-7">{playing ? <IconPause /> : <IconPlay />}</span>
+                <span>{playing ? 'Pausa' : 'Seguir'}</span>
+              </button>
+              <button className="tv-ctl inline-flex items-center justify-center space-x-3 rounded-lg px-7 h-[60px] text-body font-semibold whitespace-nowrap" onClick={() => saltar(SALTO)}>+{SALTO} s</button>
+              {opciones.length > 0 && (
+                <button className="tv-ctl inline-flex items-center justify-center space-x-3 rounded-lg px-7 h-[60px] text-body font-semibold whitespace-nowrap" onClick={() => { setCursor(0); setPanel(true); showOsd(); }}>
+                  Idioma y subtítulos
+                </button>
+              )}
+            </div>
+            <p className="mt-5 text-caption text-tv-text3">
+              Pulsa el vídeo para pausar · pulsa la barra para ir a un punto
+            </p>
+          </>
+        ) : (
+          <p className="mt-5 text-caption text-tv-text3">
+            OK pausa · ◀ ▶ saltan 10 s (mantén para más) · Atrás sale
+            {opciones.length > 0 && ' · ▲ idioma y subtítulos'}
+          </p>
+        )}
       </div>
+
+      {aviso && (
+        <div className="absolute inset-0 flex items-center justify-center px-[96px]"
+          style={{ background: 'rgba(0,0,0,0.86)' }}>
+          <div className="w-[1040px] rounded-xl bg-[#1A1A1A] border border-white/15 px-12 py-11 text-center">
+            <p className="text-h1 font-bold">La consola no puede con este vídeo</p>
+            <p className="mt-5 text-lead text-tv-text2">{aviso}.</p>
+            <p className="mt-3 text-body text-tv-text3 leading-relaxed">
+              Si sigues, lo normal es que se oiga pero no se vea. Para verlo aquí
+              hay que reconvertir el archivo a H.264 de 8 bits.
+            </p>
+            <div className="mt-9 flex items-center justify-center space-x-4">
+              <button className="tv-ctl inline-flex items-center justify-center space-x-3 rounded-lg px-7 h-[60px] text-body font-semibold whitespace-nowrap" onClick={close}>Volver</button>
+              <button className="tv-ctl inline-flex items-center justify-center space-x-3 rounded-lg px-7 h-[60px] text-body font-semibold whitespace-nowrap" onClick={() => {
+                setAviso(null);
+                const v = videoRef.current;
+                v?.play().catch(() => {});
+                setPlaying(true);
+                showOsd();
+              }}>Intentar igualmente</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
     </Overlay>
   );

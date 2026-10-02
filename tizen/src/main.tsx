@@ -1,14 +1,26 @@
+// Primero de todo: en la PS4 falta flatMap y el modulo que lo usa se carga
+// antes de que React pinte nada.
+import './tv/polyfills';
 import ReactDOM from 'react-dom/client';
 import { HashRouter } from 'react-router-dom';
 import App from './App';
 import { AuthProvider } from './contexts/AuthContext';
 import { FocusRoot } from './focus/react';
 import { startRemoteConsole } from './debug/remote';
+import { plataforma, soloPuntero, tienePuntero } from './tv/platform';
 import './index.css';
 
 // Solo Tizen (mando sin puntero) oculta el cursor. En LG el Magic Remote es
-// un puntero de verdad que se dibuja como cursor CSS: ocultarlo lo dejaria ciego.
-if (!/Tizen/i.test(navigator.userAgent)) document.body.classList.add('has-pointer');
+// un puntero de verdad que se dibuja como cursor CSS: ocultarlo lo dejaria ciego,
+// y en la PlayStation el cursor lo mueve el stick.
+if (tienePuntero()) document.body.classList.add('has-pointer');
+// Donde el puntero es lo unico que hay, la app dibuja los botones que en una
+// tele estan en el mando (volver, pausa, saltos); quien lo decide es
+// soloPuntero(). La clase y el atributo quedan en el <html> para poder
+// apuntar a este caso desde el CSS y para ver en que aparato se esta sin
+// tener que leer el user agent a mano cuando algo no cuadra.
+if (soloPuntero()) document.documentElement.classList.add('solo-puntero');
+document.documentElement.setAttribute('data-plataforma', plataforma());
 
 // La interfaz mide 1920x1080 fijos. Si la ventana (o la tele: algun modelo
 // usa 1280x720) no mide eso, se escala entera y se centra, con bandas negras

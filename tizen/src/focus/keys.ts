@@ -7,6 +7,7 @@
  * "va con retraso". Aqui se procesa como mucho un movimiento por frame.
  */
 import { move, enter, type Direction } from './engine';
+import { puedeCerrarse } from '../tv/platform';
 
 /** Teclas de direccion: codigos estandar + los especificos de Tizen. */
 const DIR_BY_CODE: Record<number, Direction> = {
@@ -117,6 +118,9 @@ function goBack() {
 }
 
 export function exitApp() {
+  // En el navegador de la consola no hay app que cerrar: dejarlo intentar
+  // window.close() no hace nada y deja al usuario mirando el mismo dialogo.
+  if (!puedeCerrarse()) return;
   try {
     const w = window as unknown as { tizen?: any; AndroidTV?: { exit?: () => void } };
     if (w.tizen?.application) {

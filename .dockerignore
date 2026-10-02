@@ -1,6 +1,10 @@
 **/node_modules
 **/dist
-tizen
+# tizen/ SI entra en el contexto: de su codigo sale el paquete /ps4/ que
+# sirve nginx (node_modules y dist los filtran las dos primeras lineas).
+tizen/dist
+tizen/node_modules
+tizen/MoviesChill.wgt
 webos
 venv
 downloads

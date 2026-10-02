@@ -24,7 +24,15 @@ export default defineConfig(({ mode }) => ({
     // webOS 5 (LG 2020) va por Chromium 68 y webOS 6 (2021) por 79.
     // Fire OS 7 (los Fire TV Stick anteriores a 2023) monta un WebView por
     // Chromium 70, asi que comparte suelo con webOS.
-    target: mode === 'webos' || mode === 'firetv' ? 'chrome68' : 'chrome85',
+    //
+    // La PS4 no lleva Chromium sino WebKit, asi que no vale ningun objetivo
+    // `chromeNN`: con el de webOS el paquete sale con sintaxis que la consola
+    // no sabe leer y la pagina se queda en blanco. Safari 11 cubre el WebKit
+    // de los firmwares que se ven hoy (605 y posteriores); si una consola muy
+    // vieja se queda en blanco, baja a safari10.
+    target: mode === 'ps4' ? 'safari11'
+      : mode === 'webos' || mode === 'firetv' ? 'chrome68'
+      : 'chrome85',
   },
   server: {
     proxy: {

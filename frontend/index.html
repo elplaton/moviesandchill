@@ -18,11 +18,15 @@
     <link rel="icon" href="/icons/icon-192.png" />
     <title>Movies & Chill</title>
     <script>
-      // En un telefono se abre la PWA (/m/), salvo que se pida la web completa con ?desktop=1.
+      // En un telefono se abre la PWA (/m/) y en la PlayStation la app de TV
+      // (/ps4/), salvo que se pida la web completa con ?desktop=1.
       (function () {
         var q = location.search;
         if (/[?&]desktop=1/.test(q)) { try { localStorage.setItem('mc.desktop', '1'); } catch (e) {} return; }
         var forced = false; try { forced = localStorage.getItem('mc.desktop') === '1'; } catch (e) {}
+        // La direccion se escribe una sola vez con el teclado en pantalla de
+        // la consola: que valga la de siempre y caiga en la app que toca.
+        if (/PlayStation [45]/i.test(navigator.userAgent) && !forced) { location.replace('/ps4/'); return; }
         var phone = /Android|iPhone|iPod|Mobile/i.test(navigator.userAgent) && Math.min(screen.width, screen.height) < 768;
         if (phone && !forced) location.replace('/m/');
       })();

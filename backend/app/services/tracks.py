@@ -77,6 +77,46 @@ def video_apto_apple(video: dict | None) -> tuple[bool, str]:
     return False, f"codec {codec or 'desconocido'}"
 
 
+# Lo que decodifica el navegador de la PlayStation 4: MP4 con H.264 (perfiles
+# Baseline, Main y High) de 8 bits en 4:2:0, hasta 1920x1080 y 20 Mbps, con
+# audio AAC. No lleva HEVC, ni VP9, ni AV1, ni 10 bits.
+PS4_MAX_W = 1920
+PS4_MAX_H = 1080
+
+
+def video_apto_ps4(video: dict | None) -> tuple[bool, str]:
+    """Si el navegador de la PS4 puede reproducir este video.
+
+    Mismo cuidado que con AirPlay y por el mismo motivo: cuando el cliente no
+    sabe decodificar la imagen, reproduce **solo el audio** y no avisa de
+    nada. Aqui ademas se descarta el HEVC entero, que en la biblioteca es
+    frecuente porque `make_compatible()` lo deja pasar tal cual (a un iPhone
+    le vale, a la consola no).
+    """
+    if not video:
+        return True, ""          # sin datos no se supone lo peor
+    codec = (video.get("codec") or "").lower()
+    pix = (video.get("pix_fmt") or "").lower()
+    bits = video.get("bits") or (10 if "10" in pix else 8)
+
+    if codec not in ("h264", "avc1", "avc"):
+        return False, f"{codec.upper() or 'codec desconocido'} (la consola solo lee H.264)"
+    if bits and bits > 8:
+        return False, f"H.264 de {bits} bits (la consola solo admite 8)"
+    if pix and pix not in CROMA_8:
+        return False, f"croma {pix} (la consola necesita 4:2:0)"
+    w, h = video.get("width") or 0, video.get("height") or 0
+    if w > PS4_MAX_W or h > PS4_MAX_H:
+        return False, f"{w}x{h} (la consola llega a 1920x1080)"
+    # El nivel de H.264 se queda fuera a proposito: los codificadores declaran
+    # niveles altos de sobra (un 720p con nivel 5.1 es corriente y se
+    # reproduce bien), y un aviso que se equivoca es un aviso que se ignora.
+    # Lo que de verdad separa lo que se ve de lo que no es el codec, los bits
+    # y el croma. El limite de 20 Mbps tampoco se mira: no se sabe sin leer el
+    # bitrate real, y pasarse se nota como tirones, no como pantalla negra.
+    return True, ""
+
+
 def nombre_idioma(code: str) -> str:
     c = (code or "").strip().lower()
     return NOMBRE_IDIOMA.get(c, c.upper() if c else "Sin identificar")
@@ -183,6 +223,9 @@ def leer_pistas(path: str) -> dict:
     if video is not None:
         video["apple"] = apto
         video["apple_motivo"] = motivo
+        apto4, motivo4 = video_apto_ps4(video)
+        video["ps4"] = apto4
+        video["ps4_motivo"] = motivo4
 
     return {"ok": True, "video": video, "audio": audio, "subtitles": subs,
             "container": (datos.get("format") or {}).get("format_name", "")}
