@@ -67,8 +67,18 @@ def main() -> int:
     except urllib.error.HTTPError as e:
         detalle = e.read().decode("utf-8", "replace")[:500]
         print(f"Coolify ha rechazado la peticion ({e.code}): {detalle}", file=sys.stderr)
-        if e.code in (401, 403):
-            print("Revisa COOLIFY_TOKEN y que tenga permiso de despliegue.", file=sys.stderr)
+        # Los dos codigos quieren decir cosas distintas y conviene no
+        # confundirlos: 401 es que el token no vale, 403 es que vale pero no
+        # llega. Se comprobo sobre esta instancia que un token con solo la
+        # marca "Deploy" da 403 con el mensaje "You are not allowed to access
+        # the API": la guarda general de Coolify exige tambien "Read".
+        if e.code == 401:
+            print("COOLIFY_TOKEN no vale (caducado, revocado o mal copiado).", file=sys.stderr)
+        elif e.code == 403:
+            print("El token existe pero no tiene permiso. En Coolify, Keys & Tokens, "
+                  "el token necesita Deploy *y* Read marcados; con Deploy a secas da "
+                  "este mismo 403. Si estan los dos, mira 'Allowed API IPs' en "
+                  "Settings > Advanced.", file=sys.stderr)
         return 1
     except Exception as e:
         print(f"No se ha podido contactar con Coolify en {BASE}: {e}", file=sys.stderr)

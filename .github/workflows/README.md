@@ -33,9 +33,17 @@ día se abriera por error, la API seguiría sin estar accesible.
 
 ### 2. Token de la API de Coolify
 
-En Coolify: **Keys & Tokens → API tokens → Create new token**. Permisos: basta
-con poder desplegar (`deploy`). Cópialo en el momento, que no se vuelve a
-enseñar.
+En Coolify: **Keys & Tokens → API Tokens → Create Token**.
+
+Permisos: hay que marcar **`Deploy` y `Read`**, los dos. Con `Deploy` a secas
+la API responde `403 {"message":"You are not allowed to access the API."}`
+aunque el token sea válido y se autentique (se ve en *Last used*): la guarda
+general de Coolify exige `read` para cualquier petición. No hace falta `Root`
+ni `Read sensitive data`.
+
+*Expires in*: `Never`, o habrá que renovarlo.
+
+Se enseña una sola vez; cópialo en el momento.
 
 ### 3. Cliente OAuth de Tailscale
 
