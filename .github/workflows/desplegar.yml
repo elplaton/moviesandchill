@@ -24,6 +24,15 @@ jobs:
     timeout-minutes: 25
 
     steps:
+      # Hace falta porque el paso de desplegar ejecuta un script del repo.
+      # Con sparse-checkout se baja solo esa carpeta: el proyecto entero son
+      # varios megas de codigo que aqui no se compila ni se mira.
+      - name: Traer el script de despliegue
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: .github/workflows
+          sparse-checkout-cone-mode: false
+
       - name: Entrar en la tailnet
         uses: tailscale/github-action@v3
         with:
