@@ -37,6 +37,21 @@ body { background: #0A0A0A; color: #fff; -webkit-font-smoothing: antialiased; ov
   flex-direction: column;
   background: #141414;
 }
+/*
+ * Instalada en la pantalla de inicio: arriba y abajo, sin alto.
+ *
+ * `bottom: 0` es el borde real de la pantalla con viewport-fit=cover, de modo
+ * que la barra de pestañas queda pegada al canto y su padding de zona segura
+ * levanta los iconos por encima del indicador de inicio, que es su trabajo.
+ * Con `height` medido quedaba 62 px corto (874 de pantalla contra 812 de
+ * innerHeight) y los iconos flotaban a 100 px del borde.
+ */
+html.instalada .app-shell {
+  top: 0;
+  bottom: 0;
+  height: auto;
+}
+
 /* Lo unico que se desplaza. Con overscroll contain el rebote no arrastra la pagina. */
 .app-main { flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
 ::-webkit-scrollbar { display: none; }

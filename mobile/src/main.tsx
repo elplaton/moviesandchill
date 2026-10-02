@@ -50,7 +50,15 @@ function trackViewportHeight() {
   const instalada = window.matchMedia?.('(display-mode: standalone)').matches
     || (navigator as unknown as { standalone?: boolean }).standalone === true;
   if (instalada) {
-    root.style.setProperty('--app-h', '100dvh');
+    // Instalada el armazon no se mide: se ancla arriba y abajo y ocupa la
+    // pantalla entera (lo hace el CSS con esta clase). Medir no servia:
+    // en un iPhone 16 Pro la pantalla son 874 px y innerHeight dice 812,
+    // porque descuenta la franja del reloj de ARRIBA; pero con
+    // viewport-fit=cover la pagina pinta de borde a borde, asi que usar ese
+    // alto dejaba el armazon 62 px corto por abajo y la barra de pestañas
+    // se iba con el.
+    root.classList.add('instalada');
+    root.style.removeProperty('--app-h');
     root.style.setProperty('--app-top', '0px');
     return;
   }
