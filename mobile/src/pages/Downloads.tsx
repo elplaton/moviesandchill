@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useLibrary, type LocalFile, type LocalTitle } from '../contexts/LibraryContext';
 import { useAuth } from '../contexts/AuthContext';
 import { fetchMetadataBatch } from '../services/tmdb';
@@ -35,79 +36,32 @@ function Caratula({ poster, title, className = '' }: { poster?: string; title: s
 }
 
 /**
- * Una serie: carátula, título y, al tocarla, sus episodios por temporada.
- * Es la misma ficha plegable que en escritorio, con la imagen delante para
- * poder reconocer la serie de un vistazo en vez de leer el nombre.
- */
-function SeriesRow({ t, meta, onPlay, onDelete }: {
-  t: LocalTitle; meta?: TMDBMetadata; onPlay: (f: LocalFile) => void; onDelete: (f: LocalFile) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const seasons = useMemo(() => {
-    const m = new Map<number, LocalFile[]>();
-    for (const e of t.episodes) { const s = e.season ?? 1; if (!m.has(s)) m.set(s, []); m.get(s)!.push(e); }
-    for (const list of m.values()) list.sort((a, b) => (a.episode ?? 0) - (b.episode ?? 0));
-    return [...m.entries()].sort((a, b) => a[0] - b[0]);
-  }, [t.episodes]);
-  const owners = [...new Set(t.episodes.map(e => e.owner))];
-  const titulo = meta?.title || t.cleanName;
-
-  return (
-    <div className="border-b border-white/5">
-      <button onClick={() => setOpen(o => !o)} className="w-full flex items-center gap-3 px-4 py-3 text-left active:bg-white/5">
-        <Caratula poster={meta?.poster} title={titulo} className="w-[52px] h-[78px]" />
-        <div className="flex-1 min-w-0">
-          <p className="text-[16px] font-semibold truncate">{titulo}</p>
-          <p className="text-[12px] text-nf-text3 truncate">
-            {t.episodes.length} {t.episodes.length === 1 ? 'episodio' : 'episodios'}
-            {seasons.length > 1 ? ` · ${seasons.length} temporadas` : ''}
-          </p>
-          <p className="text-[12px] text-nf-text3 truncate">
-            {t.size ? `${t.size} · ` : ''}{owners.length === 1 ? owners[0] : `${owners.length} cuentas`}
-          </p>
-        </div>
-        <span className={`w-5 h-5 shrink-0 text-nf-text3 transition-transform ${open ? 'rotate-90' : ''}`}>
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M9 5l7 7-7 7" /></svg>
-        </span>
-      </button>
-      {open && seasons.map(([n, eps]) => (
-        <div key={n}>
-          <p className="px-4 pt-2 pb-1 text-[12px] font-semibold text-nf-text3">Temporada {n}</p>
-          {eps.map(e => (
-            <div key={e.path} className="flex items-center gap-3 pl-4 pr-3 py-2 bg-white/[0.02]">
-              <span className="w-12 shrink-0 text-[13px] text-nf-text3 font-semibold tabular-nums">{epLabel(e)}</span>
-              <div className="flex-1 min-w-0"><p className="text-[14px] truncate">{e.size}</p><p className="text-[11px] text-nf-text3 truncate">{e.owner}</p></div>
-              <button onClick={() => onPlay(e)} className="tap w-9 h-9 rounded-full bg-white text-black flex items-center justify-center shrink-0"><span className="w-4 h-4 ml-0.5"><IPlay /></span></button>
-              {e.canDelete && <button onClick={() => onDelete(e)} className="tap w-9 h-9 rounded-full bg-white/10 text-nf-text2 flex items-center justify-center shrink-0 active:bg-nf-red/40"><span className="w-4 h-4"><ITrash /></span></button>}
-            </div>
-          ))}
-        </div>
-      ))}
-    </div>
-  );
-}
-
-/**
- * Descargas: lo que esta bajando, lo pausado y lo que hay en el servidor,
- * separado en series (plegables, por temporada) y peliculas.
+ * Descargas: lo que esta bajando, lo pausado y lo que hay en el servidor.
  *
- * Las caratulas salen de TMDB por el nombre de la carpeta, igual que en
- * escritorio: en disco solo hay nombres de archivo, y una lista de texto no
- * se reconoce de un vistazo.
+ * Las series **no se despliegan aqui**: llevan a su ficha, que es la pantalla
+ * con todos los episodios y desde donde se bajan los que faltan. Plegarlas
+ * dentro de la lista obligaba a desplegar, mirar y volver a plegar para pasar
+ * de una a otra.
  */
 export default function Downloads() {
-  const { titles, batches, paused, states, cancel, pause, resume, remove } = useLibrary();
+  const { titles, batches, paused, states, cancel, pause, resume, remove, loadStatus } = useLibrary();
   const { me, refresh } = useAuth();
   const [playing, setPlaying] = useState<LocalFile | null>(null);
   const [filter, setFilter] = useState<'all' | 'mine'>('all');
   const [metas, setMetas] = useState<Map<string, TMDBMetadata>>(new Map());
+  const [hoja, setHoja] = useState<{ titulo: string; versiones: LocalFile[] } | null>(null);
 
   const active = batches.filter(b => ['downloading', 'extracting', 'converting'].includes(b.status));
-  const mine = (t: LocalTitle) => t.isSeries ? t.episodes.some(e => e.owner === me?.username) : t.owner === me?.username;
+  const mine = (t: LocalTitle) => t.isSeries ? t.episodes.some(e => e.owner === me?.username) : t.versions.some(v => v.owner === me?.username);
   const visible = titles.filter(t => filter === 'all' || mine(t));
   const series = visible.filter(t => t.isSeries).sort((a, b) => a.cleanName.localeCompare(b.cleanName));
   const movies = visible.filter(t => !t.isSeries).sort((a, b) => a.cleanName.localeCompare(b.cleanName));
   const metaDe = (t: LocalTitle) => metas.get(t.cleanName);
+
+  // Al abrir la pantalla se pregunta por lo que esta bajando: el WebSocket se
+  // cae cuando el telefono suspende la app y, sin esto, la lista de descargas
+  // en curso podia estar vacia aunque hubiera alguna.
+  useEffect(() => { loadStatus(); }, [loadStatus]);
 
   useEffect(() => {
     const nombres = [...new Set(titles.map(t => t.cleanName).filter(Boolean))];
@@ -119,9 +73,22 @@ export default function Downloads() {
 
   const del = async (f: LocalFile) => {
     if (!confirm(`¿Borrar "${f.name}" del servidor?`)) return;
-    const err = await remove(f.path); if (err) toast(err, 'error', 5000); else { toast('Borrado', 'ok'); refresh(); }
+    const err = await remove(f.path);
+    if (err) toast(err, 'error', 5000);
+    else { toast('Borrado', 'ok'); refresh(); setHoja(null); }
   };
   const pct = me?.quota_bytes ? Math.min(100, Math.round((me.used_bytes / me.quota_bytes) * 100)) : 0;
+
+  /** A dónde lleva una serie: a su ficha si TMDB la conoce. */
+  const fichaDe = (t: LocalTitle) => {
+    const id = metaDe(t)?.tmdb_id;
+    return id ? `/t/series/${id}` : null;
+  };
+
+  const abrirPelicula = (t: LocalTitle, titulo: string) => {
+    if (t.versions.length > 1) { setHoja({ titulo, versiones: t.versions }); return; }
+    if (t.versions[0]) setPlaying(t.versions[0]);
+  };
 
   return (
     <div className="pb-6">
@@ -138,24 +105,34 @@ export default function Downloads() {
       {active.length > 0 && (
         <Section title="Descargando" count={`${active.length}`}>
           {active.map(b => {
-            const l = b.status === 'extracting' ? 'Extrayendo' : b.status === 'converting' ? 'Convirtiendo' : `${b.progress} % · ${b.downloaded_parts}/${b.total_parts} partes`;
             const ds = [...states.values()].find(s => s.batchId === b.batch_id);
+            const l = b.status === 'extracting' ? 'Extrayendo' : b.status === 'converting' ? 'Convirtiendo' : `${b.downloaded_parts}/${b.total_parts} partes`;
             const canManage = !b.owner || b.owner === me?.username || me?.role === 'admin';
+            const meta = metas.get(cleanTitle(b.folder_name));
             return (
-              <div key={b.batch_id} className="px-4 py-2.5 border-b border-white/5">
-                <div className="flex items-center justify-between gap-3">
-                  <div className="min-w-0">
+              <div key={b.batch_id} className="px-4 py-3 border-b border-white/5">
+                <div className="flex items-center gap-3">
+                  <Caratula poster={meta?.poster} title={cleanTitle(b.folder_name)} className="w-[46px] h-[69px]" />
+                  <div className="flex-1 min-w-0">
                     <p className="text-[15px] font-medium truncate">{cleanTitle(b.folder_name)}</p>
-                    <p className="text-[12px] text-nf-text3">{l}{ds?.speed ? ` · ${ds.speed}` : ''}{b.owner && b.owner !== me?.username ? ` · ${b.owner}` : ''}</p>
-                  </div>
-                  {canManage && b.status === 'downloading' && (
-                    <div className="flex gap-2 shrink-0">
-                      <button onClick={() => { pause(b.batch_id); toast('Pausada'); }} className="tap h-9 px-3 rounded-full bg-white/10 text-[13px]">Pausar</button>
-                      <button onClick={() => { cancel(b.batch_id); toast('Cancelada'); }} className="tap h-9 px-3 rounded-full bg-nf-red/20 text-red-300 text-[13px]">Cancelar</button>
+                    <p className="text-[12px] text-nf-text3 truncate">
+                      {l}{ds?.speed ? ` · ${ds.speed}` : ''}{b.owner && b.owner !== me?.username ? ` · ${b.owner}` : ''}
+                    </p>
+                    {ds?.downloadedStr && <p className="text-[11px] text-nf-text3 truncate">{ds.downloadedStr} de {ds.totalStr || b.total_size_str}</p>}
+                    <div className="mt-2 flex items-center gap-2">
+                      <div className="flex-1 h-1.5 rounded-full bg-white/10 overflow-hidden">
+                        <div className="h-full bg-nf-red transition-[width] duration-500" style={{ width: `${b.progress}%` }} />
+                      </div>
+                      <span className="text-[12px] tabular-nums text-nf-text2 w-10 text-right">{b.progress} %</span>
                     </div>
-                  )}
+                  </div>
                 </div>
-                <div className="mt-2 h-1.5 rounded-full bg-white/10 overflow-hidden"><div className="h-full bg-nf-red" style={{ width: `${b.progress}%` }} /></div>
+                {canManage && b.status === 'downloading' && (
+                  <div className="flex gap-2 mt-2.5">
+                    <button onClick={() => { pause(b.batch_id); toast('Pausada'); }} className="tap flex-1 h-9 rounded-full bg-white/10 text-[13px]">Pausar</button>
+                    <button onClick={() => { cancel(b.batch_id); toast('Cancelada'); }} className="tap flex-1 h-9 rounded-full bg-nf-red/20 text-red-300 text-[13px]">Cancelar</button>
+                  </div>
+                )}
               </div>
             );
           })}
@@ -175,24 +152,46 @@ export default function Downloads() {
 
       {series.length > 0 && (
         <Section title="Series" count={`${series.length}`}>
-          {series.map(t => <SeriesRow key={t.path} t={t} meta={metaDe(t)} onPlay={setPlaying} onDelete={del} />)}
+          {series.map(t => {
+            const m = metaDe(t);
+            const titulo = m?.title || t.cleanName;
+            const ficha = fichaDe(t);
+            const dentro = (
+              <>
+                <Caratula poster={m?.poster} title={titulo} className="w-[52px] h-[78px]" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-[16px] font-semibold truncate">{titulo}</p>
+                  <p className="text-[12px] text-nf-text3 truncate">
+                    {t.episodes.length} {t.episodes.length === 1 ? 'episodio' : 'episodios'} en disco
+                  </p>
+                  <p className="text-[12px] text-nf-text3 truncate">{t.size ? `${t.size} · ` : ''}{t.owner}</p>
+                </div>
+                <span className="w-5 h-5 shrink-0 text-nf-text3">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M9 5l7 7-7 7" /></svg>
+                </span>
+              </>
+            );
+            const clase = 'w-full flex items-center gap-3 px-4 py-3 text-left active:bg-white/5 border-b border-white/5';
+            // Sin ficha de TMDB no hay pantalla a la que ir: se reproduce el
+            // primer episodio en vez de dejar la fila muerta.
+            return ficha
+              ? <Link key={t.path} to={ficha} className={clase}>{dentro}</Link>
+              : <button key={t.path} onClick={() => t.episodes[0] && setPlaying(t.episodes[0])} className={clase}>{dentro}</button>;
+          })}
         </Section>
       )}
 
       {movies.length > 0 && (
         <Section title="Películas" count={`${movies.length}`}>
-          {/* Rejilla de carátulas, como la de escritorio: en el teléfono caben
-              tres por fila y se reconocen sin leer. */}
           <div className="grid grid-cols-3 gap-3 px-4">
             {movies.map(t => {
               const m = metaDe(t);
               const titulo = m?.title || t.cleanName;
+              const varias = t.versions.length > 1;
               return (
                 <div key={t.path}>
-                  {/* Borrar va encima de la carátula, como en escritorio: debajo
-                      sería un segundo botón por película y tres por fila. */}
                   <div className="relative">
-                    <button onClick={() => t.file && setPlaying(t.file)} aria-label={`Ver ${titulo}`} className="block w-full active:opacity-70">
+                    <button onClick={() => abrirPelicula(t, titulo)} aria-label={`Ver ${titulo}`} className="block w-full active:opacity-70">
                       <Caratula poster={m?.poster} title={titulo} className="w-full aspect-[2/3]" />
                       <span className="absolute inset-0 flex items-center justify-center">
                         <span className="w-9 h-9 rounded-full bg-black/55 flex items-center justify-center"><span className="w-4 h-4 ml-0.5"><IPlay /></span></span>
@@ -203,8 +202,12 @@ export default function Downloads() {
                         <span className="w-2.5 h-2.5"><IStar /></span>{m.rating.toFixed(1)}
                       </span>
                     ) : null}
-                    {t.canDelete && t.file && (
-                      <button onClick={() => del(t.file!)} aria-label={`Borrar ${titulo}`}
+                    {varias ? (
+                      <span className="absolute bottom-1 left-1 right-1 rounded bg-black/80 px-1 py-0.5 text-[10px] font-semibold text-center pointer-events-none">
+                        {t.versions.length} versiones
+                      </span>
+                    ) : t.versions[0]?.canDelete && (
+                      <button onClick={() => del(t.versions[0])} aria-label={`Borrar ${titulo}`}
                         className="tap absolute top-1 right-1 w-8 h-8 rounded-full bg-black/70 text-nf-text2 flex items-center justify-center active:bg-nf-red/60">
                         <span className="w-4 h-4"><ITrash /></span>
                       </button>
@@ -221,6 +224,34 @@ export default function Downloads() {
 
       {titles.length === 0 && active.length === 0 && <p className="px-4 pt-4 text-[14px] text-nf-text3">Todavía no hay nada descargado.</p>}
       {titles.length > 0 && visible.length === 0 && <p className="px-4 pt-4 text-[14px] text-nf-text3">No has descargado nada todavía.</p>}
+
+      {/* Varias calidades de la misma película: cada una se ve y se borra por
+          su cuenta, que es justo lo que antes no se podía. */}
+      {hoja && (
+        <div className="fixed inset-0 z-[65] bg-black/70 flex items-end" onClick={() => setHoja(null)}>
+          <div className="w-full bg-nf-raised rounded-t-2xl p-4 rise" style={{ paddingBottom: 'calc(16px + var(--safe-b))' }} onClick={e => e.stopPropagation()}>
+            <p className="text-[15px] font-semibold mb-1">{hoja.titulo}</p>
+            <p className="text-[12px] text-nf-text3 mb-3">{hoja.versiones.length} versiones en el servidor</p>
+            {hoja.versiones.map(v => (
+              <div key={v.path} className="flex items-center gap-3 py-2.5 border-b border-white/10 last:border-0">
+                <div className="flex-1 min-w-0">
+                  <p className="text-[15px] font-medium truncate">{v.quality || v.name}</p>
+                  <p className="text-[12px] text-nf-text3 truncate">{v.size} · {v.owner}</p>
+                </div>
+                <button onClick={() => { setHoja(null); setPlaying(v); }} className="tap h-9 px-4 rounded-full bg-white text-black text-[13px] font-semibold flex items-center gap-1 shrink-0">
+                  <span className="w-4 h-4"><IPlay /></span>Ver
+                </button>
+                {v.canDelete && (
+                  <button onClick={() => del(v)} aria-label={`Borrar ${v.quality || v.name}`}
+                    className="tap w-9 h-9 rounded-full bg-white/10 text-nf-text2 flex items-center justify-center shrink-0 active:bg-nf-red/40">
+                    <span className="w-4 h-4"><ITrash /></span>
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {playing && <Player path={playing.path} title={playing.series || cleanTitle(playing.name)} subtitle={epLabel(playing) || undefined} onClose={() => setPlaying(null)} />}
     </div>

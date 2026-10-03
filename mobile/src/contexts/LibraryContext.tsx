@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
 import { apiFetch } from '../services/api';
-import { onProgress } from '../services/ws';
+import { connectProgressWs, onProgress } from '../services/ws';
 import { useAuth } from './AuthContext';
 import type { Batch, DownloadState } from '../types';
 
@@ -10,6 +10,8 @@ import type { Batch, DownloadState } from '../types';
  */
 export interface LocalFile {
   name: string; path: string; size?: string; owner: string; canDelete: boolean;
+  /** Peliculas: "1080p", "2160p HDR"... vacio si el nombre no lo dice. */
+  quality?: string;
   /** Si es un episodio: a que serie, temporada y numero pertenece. */
   series?: string; season?: number | null; episode?: number | null;
 }
@@ -19,8 +21,10 @@ export interface LocalTitle {
   name: string; path: string; size?: string; cleanName: string;
   isSeries: boolean; owner: string; canDelete: boolean;
   episodes: LocalFile[];
-  /** Solo peliculas: el archivo. */
+  /** Solo peliculas: el archivo principal (la version mas grande). */
   file?: LocalFile;
+  /** Solo peliculas: una entrada por calidad (4K, 1080p...). */
+  versions: LocalFile[];
 }
 
 interface Ctx {
@@ -33,6 +37,8 @@ interface Ctx {
   paused: any[];
   states: Map<number, DownloadState>;
   reload: () => Promise<void>;
+  /** Releer solo lo que esta bajando (barato): al abrir Descargas y al volver a la app. */
+  loadStatus: () => Promise<void>;
   localFor: (fileName: string, season?: number | null, episode?: number | null, series?: string) => LocalFile | undefined;
   download: (msgId: number, channelId?: number) => Promise<string | null>;
   cancel: (batchId: string) => Promise<void>;
@@ -99,7 +105,7 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
       const add = (e: any, owner: string, can: boolean, series?: string): LocalFile | undefined => {
         if (!e?.name || !e?.path || e.is_dir) return undefined;
         const f: LocalFile = {
-          name: e.name, path: e.path, size: e.size, owner, canDelete: can,
+          name: e.name, path: e.path, size: e.size, owner, canDelete: can, quality: e.quality,
           series, season: e.season ?? null, episode: e.episode ?? null,
         };
         list.push(f); names.set(norm(e.name), f);
@@ -117,10 +123,13 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
         const clean = it.clean_name || it.name;
         if (it.is_series) {
           const list2 = (it.episodes || []).map((ep: any) => add(ep, ep.owner || owner, ep.can_delete ?? can, clean)).filter(Boolean) as LocalFile[];
-          titleList.push({ name: it.name, path: it.path, size: it.size, cleanName: clean, isSeries: true, owner, canDelete: can, episodes: list2 });
+          titleList.push({ name: it.name, path: it.path, size: it.size, cleanName: clean, isSeries: true, owner, canDelete: can, episodes: list2, versions: [] });
         } else {
-          const f = add(it, owner, can);
-          if (f) titleList.push({ name: it.name, path: it.path, size: it.size, cleanName: clean, isSeries: false, owner, canDelete: can, episodes: [], file: f });
+          // Una pelicula puede estar en varias calidades y cada archivo tiene
+          // su dueño: se indexan todas, no solo la principal.
+          const brutas = (it.versions && it.versions.length ? it.versions : [it]);
+          const vers = brutas.map((v: any) => add(v, v.owner || owner, v.can_delete ?? can)).filter(Boolean) as LocalFile[];
+          if (vers.length) titleList.push({ name: it.name, path: it.path, size: it.size, cleanName: clean, isSeries: false, owner, canDelete: can, episodes: [], versions: vers, file: vers[0] });
         }
       }
       setFiles(list); setTitles(titleList); setByName(names); setByFolder(folders); setByEpisode(eps);
@@ -145,6 +154,18 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
 
   const hayActivas = batches.some(b => ['downloading', 'extracting', 'converting'].includes(b.status));
   useEffect(() => { if (!hayActivas) return; const t = setInterval(loadStatus, 4000); return () => clearInterval(t); }, [hayActivas, loadStatus]);
+
+  // Al volver a la app hay que preguntar: el telefono suspende el WebSocket en
+  // cuanto la pantalla se apaga o se cambia de app, y el sondeo de arriba solo
+  // corre si ya sabemos que hay algo bajando. Sin esto se volvia a Descargas y
+  // la barra estaba como se dejo, o no estaba.
+  useEffect(() => {
+    if (!me) return;
+    const alVolver = () => { if (document.visibilityState === 'visible') { connectProgressWs(); loadStatus(); } };
+    document.addEventListener('visibilitychange', alVolver);
+    window.addEventListener('focus', alVolver);
+    return () => { document.removeEventListener('visibilitychange', alVolver); window.removeEventListener('focus', alVolver); };
+  }, [me, loadStatus]);
 
   const localFor = useCallback((fileName: string, season?: number | null, episode?: number | null, series?: string) => {
     // 1) Por serie y numero de episodio (lo que de verdad identifica un capitulo).
@@ -180,7 +201,7 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
     catch { return 'No se ha podido borrar'; }
   }, [reload]);
 
-  return <LibCtx.Provider value={{ files, titles, version, batches, paused, states, reload, localFor, download, cancel, pause, resume, remove }}>{children}</LibCtx.Provider>;
+  return <LibCtx.Provider value={{ files, titles, version, batches, paused, states, reload, loadStatus, localFor, download, cancel, pause, resume, remove }}>{children}</LibCtx.Provider>;
 }
 
 export function useLibrary(): Ctx { const v = useContext(LibCtx); if (!v) throw new Error('LibraryProvider ausente'); return v; }
