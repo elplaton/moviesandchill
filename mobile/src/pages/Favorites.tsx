@@ -14,7 +14,7 @@ export default function Favorites() {
         <h1 className="text-[28px] font-bold">Favoritos</h1>
         <p className="text-[12px] text-nf-text2 mt-1">
           {loading && items.length === 0 ? 'Cargando…'
-            : `${items.length} ${items.length === 1 ? 'título' : 'títulos'} guardados`}
+            : `${items.length} ${items.length === 1 ? 'título guardado' : 'títulos guardados'}`}
         </p>
       </div>
 
