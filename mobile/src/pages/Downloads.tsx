@@ -1,10 +1,12 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useLibrary, type LocalFile, type LocalTitle } from '../contexts/LibraryContext';
 import { useAuth } from '../contexts/AuthContext';
+import { fetchMetadataBatch } from '../services/tmdb';
 import { cleanTitle } from '../utils/text';
 import { toast } from '../utils/toast';
 import Player from '../components/Player';
-import { IPlay, ITrash } from '../components/Icons';
+import { IPlay, IStar, ITrash } from '../components/Icons';
+import type { TMDBMetadata } from '../types';
 
 const gb = (b: number) => `${(b / 1024 ** 3).toFixed(1)} GB`;
 const epLabel = (f: LocalFile) => f.episode != null ? `${f.season ?? 1}x${String(f.episode).padStart(2, '0')}` : '';
@@ -21,8 +23,25 @@ function Section({ title, count, children }: { title: string; count?: string; ch
   );
 }
 
-/** Una serie: cabecera con el título y, al abrirla, sus episodios por temporada. */
-function SeriesRow({ t, onPlay, onDelete }: { t: LocalTitle; onPlay: (f: LocalFile) => void; onDelete: (f: LocalFile) => void }) {
+/** Carátula 2:3 con hueco reservado: si TMDB no la conoce, sale el título. */
+function Caratula({ poster, title, className = '' }: { poster?: string; title: string; className?: string }) {
+  return (
+    <div className={`relative shrink-0 overflow-hidden rounded-lg bg-nf-card ${className}`}>
+      {poster
+        ? <img src={poster} alt="" loading="lazy" className="absolute inset-0 w-full h-full object-cover" />
+        : <span className="absolute inset-0 p-1.5 flex items-end text-[10px] font-semibold leading-tight text-nf-text2 line-clamp-4">{title}</span>}
+    </div>
+  );
+}
+
+/**
+ * Una serie: carátula, título y, al tocarla, sus episodios por temporada.
+ * Es la misma ficha plegable que en escritorio, con la imagen delante para
+ * poder reconocer la serie de un vistazo en vez de leer el nombre.
+ */
+function SeriesRow({ t, meta, onPlay, onDelete }: {
+  t: LocalTitle; meta?: TMDBMetadata; onPlay: (f: LocalFile) => void; onDelete: (f: LocalFile) => void;
+}) {
   const [open, setOpen] = useState(false);
   const seasons = useMemo(() => {
     const m = new Map<number, LocalFile[]>();
@@ -31,15 +50,20 @@ function SeriesRow({ t, onPlay, onDelete }: { t: LocalTitle; onPlay: (f: LocalFi
     return [...m.entries()].sort((a, b) => a[0] - b[0]);
   }, [t.episodes]);
   const owners = [...new Set(t.episodes.map(e => e.owner))];
+  const titulo = meta?.title || t.cleanName;
 
   return (
     <div className="border-b border-white/5">
       <button onClick={() => setOpen(o => !o)} className="w-full flex items-center gap-3 px-4 py-3 text-left active:bg-white/5">
+        <Caratula poster={meta?.poster} title={titulo} className="w-[52px] h-[78px]" />
         <div className="flex-1 min-w-0">
-          <p className="text-[16px] font-semibold truncate">{t.cleanName}</p>
-          <p className="text-[12px] text-nf-text3">
+          <p className="text-[16px] font-semibold truncate">{titulo}</p>
+          <p className="text-[12px] text-nf-text3 truncate">
             {t.episodes.length} {t.episodes.length === 1 ? 'episodio' : 'episodios'}
-            {seasons.length > 1 ? ` · ${seasons.length} temporadas` : ''} · {owners.length === 1 ? owners[0] : `${owners.length} cuentas`}
+            {seasons.length > 1 ? ` · ${seasons.length} temporadas` : ''}
+          </p>
+          <p className="text-[12px] text-nf-text3 truncate">
+            {t.size ? `${t.size} · ` : ''}{owners.length === 1 ? owners[0] : `${owners.length} cuentas`}
           </p>
         </div>
         <span className={`w-5 h-5 shrink-0 text-nf-text3 transition-transform ${open ? 'rotate-90' : ''}`}>
@@ -66,18 +90,32 @@ function SeriesRow({ t, onPlay, onDelete }: { t: LocalTitle; onPlay: (f: LocalFi
 /**
  * Descargas: lo que esta bajando, lo pausado y lo que hay en el servidor,
  * separado en series (plegables, por temporada) y peliculas.
+ *
+ * Las caratulas salen de TMDB por el nombre de la carpeta, igual que en
+ * escritorio: en disco solo hay nombres de archivo, y una lista de texto no
+ * se reconoce de un vistazo.
  */
 export default function Downloads() {
   const { titles, batches, paused, states, cancel, pause, resume, remove } = useLibrary();
   const { me, refresh } = useAuth();
   const [playing, setPlaying] = useState<LocalFile | null>(null);
   const [filter, setFilter] = useState<'all' | 'mine'>('all');
+  const [metas, setMetas] = useState<Map<string, TMDBMetadata>>(new Map());
 
   const active = batches.filter(b => ['downloading', 'extracting', 'converting'].includes(b.status));
   const mine = (t: LocalTitle) => t.isSeries ? t.episodes.some(e => e.owner === me?.username) : t.owner === me?.username;
   const visible = titles.filter(t => filter === 'all' || mine(t));
   const series = visible.filter(t => t.isSeries).sort((a, b) => a.cleanName.localeCompare(b.cleanName));
   const movies = visible.filter(t => !t.isSeries).sort((a, b) => a.cleanName.localeCompare(b.cleanName));
+  const metaDe = (t: LocalTitle) => metas.get(t.cleanName);
+
+  useEffect(() => {
+    const nombres = [...new Set(titles.map(t => t.cleanName).filter(Boolean))];
+    if (!nombres.length) return;
+    let vivo = true;
+    fetchMetadataBatch(nombres).then(m => { if (vivo) setMetas(new Map(m)); }).catch(() => {});
+    return () => { vivo = false; };
+  }, [titles]);
 
   const del = async (f: LocalFile) => {
     if (!confirm(`¿Borrar "${f.name}" del servidor?`)) return;
@@ -137,19 +175,47 @@ export default function Downloads() {
 
       {series.length > 0 && (
         <Section title="Series" count={`${series.length}`}>
-          {series.map(t => <SeriesRow key={t.path} t={t} onPlay={setPlaying} onDelete={del} />)}
+          {series.map(t => <SeriesRow key={t.path} t={t} meta={metaDe(t)} onPlay={setPlaying} onDelete={del} />)}
         </Section>
       )}
 
       {movies.length > 0 && (
         <Section title="Películas" count={`${movies.length}`}>
-          {movies.map(t => (
-            <div key={t.path} className="flex items-center gap-3 px-4 py-3 border-b border-white/5">
-              <div className="flex-1 min-w-0"><p className="text-[16px] font-semibold truncate">{t.cleanName}</p><p className="text-[12px] text-nf-text3">{t.size} · {t.owner}</p></div>
-              <button onClick={() => t.file && setPlaying(t.file)} className="tap w-9 h-9 rounded-full bg-white text-black flex items-center justify-center shrink-0"><span className="w-4 h-4 ml-0.5"><IPlay /></span></button>
-              {t.canDelete && t.file && <button onClick={() => del(t.file!)} className="tap w-9 h-9 rounded-full bg-white/10 text-nf-text2 flex items-center justify-center shrink-0 active:bg-nf-red/40"><span className="w-4 h-4"><ITrash /></span></button>}
-            </div>
-          ))}
+          {/* Rejilla de carátulas, como la de escritorio: en el teléfono caben
+              tres por fila y se reconocen sin leer. */}
+          <div className="grid grid-cols-3 gap-3 px-4">
+            {movies.map(t => {
+              const m = metaDe(t);
+              const titulo = m?.title || t.cleanName;
+              return (
+                <div key={t.path}>
+                  {/* Borrar va encima de la carátula, como en escritorio: debajo
+                      sería un segundo botón por película y tres por fila. */}
+                  <div className="relative">
+                    <button onClick={() => t.file && setPlaying(t.file)} aria-label={`Ver ${titulo}`} className="block w-full active:opacity-70">
+                      <Caratula poster={m?.poster} title={titulo} className="w-full aspect-[2/3]" />
+                      <span className="absolute inset-0 flex items-center justify-center">
+                        <span className="w-9 h-9 rounded-full bg-black/55 flex items-center justify-center"><span className="w-4 h-4 ml-0.5"><IPlay /></span></span>
+                      </span>
+                    </button>
+                    {m?.rating ? (
+                      <span className="absolute top-1 left-1 inline-flex items-center gap-0.5 rounded bg-black/75 px-1 py-0.5 text-[10px] font-bold text-nf-warn pointer-events-none">
+                        <span className="w-2.5 h-2.5"><IStar /></span>{m.rating.toFixed(1)}
+                      </span>
+                    ) : null}
+                    {t.canDelete && t.file && (
+                      <button onClick={() => del(t.file!)} aria-label={`Borrar ${titulo}`}
+                        className="tap absolute top-1 right-1 w-8 h-8 rounded-full bg-black/70 text-nf-text2 flex items-center justify-center active:bg-nf-red/60">
+                        <span className="w-4 h-4"><ITrash /></span>
+                      </button>
+                    )}
+                  </div>
+                  <p className="mt-1.5 text-[12px] font-medium leading-tight line-clamp-2">{titulo}</p>
+                  <p className="text-[11px] text-nf-text3 truncate">{t.size} · {t.owner}</p>
+                </div>
+              );
+            })}
+          </div>
         </Section>
       )}
 
