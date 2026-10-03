@@ -19,10 +19,21 @@ WORK_PREFIX = ".dl_"
 # La misma pelicula se baja en varias calidades y todas caian en
 # <Titulo (Año)>/<Titulo (Año)>.mkv: la segunda borraba a la primera sin
 # avisar. El nombre lleva ahora la calidad, asi que 4K y 1080p conviven.
-_RESOLUCION_RE = re.compile(r"(?<![\w])(2160p|1080p|720p|576p|480p|4k|uhd)(?![\w])", re.IGNORECASE)
-_MATIZ_RE = re.compile(r"(?<![\w])(remux|hdr10\+|hdr10|hdr|dolby ?vision|dovi|bluray|blu-?ray|web-?dl|webrip|bdrip|brrip|hdtv|dvdrip)(?![\w])", re.IGNORECASE)
-_NORMAL = {"4k": "2160p", "uhd": "2160p", "blu-ray": "BluRay", "bluray": "BluRay",
-           "webdl": "WEB-DL", "web-dl": "WEB-DL", "dolbyvision": "DV", "dolby vision": "DV", "dovi": "DV"}
+# El guion bajo separa palabras en los nombres de archivo
+# ("Oppenheimer_2023_BDRip_1080p_x265.mkv"), pero \w lo cuenta como letra:
+# con (?<![\w]) no se reconocia ni una sola etiqueta en ese estilo.
+_LIM_IZQ, _LIM_DER = r"(?<![0-9A-Za-z])", r"(?![0-9A-Za-z])"
+_RESOLUCION_RE = re.compile(_LIM_IZQ + r"(2160p|1080p|720p|576p|480p|4k|uhd)" + _LIM_DER, re.IGNORECASE)
+_MATIZ_RE = re.compile(_LIM_IZQ + r"(remux|hdr10\+|hdr10|hdr|dolby ?vision|dovi|bluray|blu-?ray|web-?dl|webrip|bdrip|brrip|hdtv|dvdrip)" + _LIM_DER, re.IGNORECASE)
+# Como se escribe cada etiqueta en el nombre final, sea como sea que venga.
+_NORMAL = {
+    "4k": "2160p", "uhd": "2160p",
+    "bluray": "BluRay", "blu-ray": "BluRay",
+    "webdl": "WEB-DL", "web-dl": "WEB-DL", "webrip": "WEBRip",
+    "bdrip": "BDRip", "brrip": "BRRip", "dvdrip": "DVDRip", "hdtv": "HDTV",
+    "hdr": "HDR", "hdr10": "HDR10", "hdr10+": "HDR10+",
+    "remux": "Remux", "dolbyvision": "DV", "dovi": "DV",
+}
 
 
 def etiqueta_calidad(file_name: str) -> str:
@@ -33,14 +44,13 @@ def etiqueta_calidad(file_name: str) -> str:
     de archivo ilegibles sin separar mejor.
     """
     partes = []
-    res = _RESOLUCION_RE.search(file_name)
-    if res:
-        t = res.group(1).lower()
-        partes.append(_NORMAL.get(t, t))
-    mat = _MATIZ_RE.search(file_name)
-    if mat:
-        t = mat.group(1).lower().replace(" ", "")
-        partes.append(_NORMAL.get(t, mat.group(1).upper() if len(t) <= 5 else mat.group(1).title()))
+    for regex in (_RESOLUCION_RE, _MATIZ_RE):
+        hallado = regex.search(file_name)
+        if not hallado:
+            continue
+        # "Blu-Ray", "blu ray" y "bluray" son lo mismo y se escriben igual.
+        bruto = hallado.group(1).lower().replace(" ", "")
+        partes.append(_NORMAL.get(bruto) or _NORMAL.get(bruto.replace("-", "")) or hallado.group(1))
     return " ".join(partes)
 
 
