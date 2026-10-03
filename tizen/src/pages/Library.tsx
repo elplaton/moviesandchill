@@ -99,7 +99,9 @@ export default function Library() {
         key: `lib-${file.path}`, kind: isSeries ? 'series' : 'movie',
         title: meta.title || key, poster: meta.poster, backdrop: meta.backdrop, year: meta.year, rating: meta.rating,
         overview: meta.overview, genres: meta.genres,
-        subtitle: isSeries ? `${file.episodes?.length || 0} ${(file.episodes?.length || 0) === 1 ? 'episodio' : 'episodios'} en disco` : file.size,
+        subtitle: isSeries
+          ? `${file.episodes?.length || 0} ${(file.episodes?.length || 0) === 1 ? 'episodio' : 'episodios'} en disco`
+          : (file.versions && file.versions.length > 1 ? `${file.versions.length} versiones · ${file.size}` : file.size),
       },
     };
   }), [grouped, metas]);
@@ -120,9 +122,14 @@ export default function Library() {
   // Borrar al lado. Si el titulo no esta en TMDB, solo lo que hay en disco.
   const open = useCallback(async (l: Local) => {
     const kind = l.file.is_series ? 'series' : 'movie';
+    // Una pelicula puede estar en varias calidades: van todas a la ficha, que
+    // ya sabe enseñar una fila por version. Antes solo se pasaba la principal
+    // y la otra no existia para la tele.
     const local = l.file.is_series
       ? (l.file.episodes || []).map((e) => ({ name: e.name, path: e.path, size: e.size }))
-      : [{ name: l.file.name, path: l.file.path, size: l.file.size }];
+      : (l.file.versions?.length
+          ? l.file.versions.map((v) => ({ name: v.name, path: v.path, size: v.size, quality: v.quality || undefined }))
+          : [{ name: l.file.name, path: l.file.path, size: l.file.size }]);
     let files: SearchResult[] = [];
     if (l.meta.tmdb_id) {
       try { files = (await fetchMediaFiles(l.meta.tmdb_id, kind)).results; } catch { /* solo disco */ }

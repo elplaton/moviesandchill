@@ -97,6 +97,8 @@ export interface SeriesEpisode {
 
 export interface TMDBMetadata {
   title: string;
+  /** Lo devuelve /metadata/batch: sirve para abrir la ficha desde el disco. */
+  tmdb_id?: number;
   year?: number;
   rating?: number;
   poster?: string;
@@ -164,4 +166,16 @@ export interface BrowseItem {
 export interface BrowseRow {
   genre: string;
   items: BrowseItem[];
+}
+
+/** Una version de una pelicula en disco: el mismo titulo en otra calidad. */
+export interface MovieVersion {
+  name: string;
+  size: string;
+  size_bytes: number;
+  path: string;
+  /** "1080p", "2160p HDR"... vacio si el nombre no dice nada. */
+  quality: string;
+  owner?: string;
+  can_delete?: boolean;
 }

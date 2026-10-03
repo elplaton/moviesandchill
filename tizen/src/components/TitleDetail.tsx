@@ -22,8 +22,8 @@ export interface DetailInput {
   meta: Featured;
   /** Archivos indexados (de /media/{id}/files o de una busqueda). */
   files: SearchResult[];
-  /** Archivos ya en disco (biblioteca). */
-  local?: { name: string; path: string; size: string }[];
+  /** Archivos ya en disco (biblioteca). `quality` distingue 4K de 1080p. */
+  local?: { name: string; path: string; size: string; quality?: string }[];
 }
 
 interface Props { input: DetailInput; onClose: () => void }
@@ -149,7 +149,7 @@ export default function TitleDetail({ input, onClose }: Props) {
       if (vs.some((v) => v.fileName === l.name) || resolved.has(l.path)) continue;
       const m = l.name.match(/(\d{1,2})x(\d{2,3})|[sS](\d{1,2})[eE](\d{1,3})/);
       vs.push({
-        key: `local:${l.path}`, fileName: l.name, baseName: l.name.replace(/\.[^.]+$/, ''), quality: 'En disco',
+        key: `local:${l.path}`, fileName: l.name, baseName: l.name.replace(/\.[^.]+$/, ''), quality: l.quality || 'En disco',
         sizeBytes: 0, sizeStr: l.size, parts: 1, messageId: 0, channelName: 'Biblioteca', downloaded: true, path: l.path,
         season: m ? parseInt(m[1] || m[3]) : undefined, episode: m ? parseInt(m[2] || m[4]) : undefined,
       });

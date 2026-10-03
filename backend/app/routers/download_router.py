@@ -73,8 +73,11 @@ async def download(req: DownloadRequest, background_tasks: BackgroundTasks, acco
     total_size = sum(p.get("size", 0) for p in parts)
 
     # Una descarga por archivo para todo el mundo: si ya esta en disco (de
-    # quien sea) se ofrece ver, no volver a bajar.
-    existing = await find_existing(req.message_id, req.channel_id, layout["final_dir"] if layout["kind"] == "movie" else None)
+    # quien sea) se ofrece ver, no volver a bajar. Lo que no se puede repetir
+    # es **el mismo archivo**, no la misma pelicula: antes se comparaba tambien
+    # la carpeta de destino, asi que al tener el 1080p ya no se dejaba bajar el
+    # 4K ("Ya esta descargado"). Cada version es una descarga distinta.
+    existing = await find_existing(req.message_id, req.channel_id)
     if existing and existing["status"] == "done" and os.path.exists(existing["folder_path"]):
         return {"error": f"Ya está descargado por {existing.get('owner') or 'admin'}", "already": True,
                 "owner": existing.get("owner"), "folder_name": existing["folder_name"], "local_path": existing["folder_path"]}
@@ -288,12 +291,16 @@ async def _download_batch(batch_id):
         from app.database.downloads import set_download_status, move_download, dir_size
         if batch.get("final_stem"):
             # De la carpeta temporal al sitio definitivo con su nombre:
-            #   series    -> Serie/Temporada N/<N>x<EE>.<ext>   (se posee el archivo)
-            #   peliculas -> Titulo (Año)/Titulo (Año).<ext>     (se posee la carpeta)
+            #   series    -> Serie/Temporada N/<N>x<EE>.<ext>
+            #   peliculas -> Titulo (Año)/Titulo (Año) - 1080p.<ext>
+            # En los dos casos **se posee el archivo**, no la carpeta. Cuando
+            # una pelicula poseia su carpeta, las dos calidades compartian la
+            # misma fila de ruta: borrar una borraba las dos y el dueño que
+            # salia era el de cualquiera de ellas.
             finals = await asyncio.get_event_loop().run_in_executor(None, finalize_episode, folder, batch["final_dir"], batch["final_stem"])
             all_extracted = finals or all_extracted
-            owned = (finals[0] if finals else folder) if batch.get("kind") == "series" else batch["final_dir"]
-            size = sum(os.path.getsize(f) for f in finals if os.path.isfile(f)) if batch.get("kind") == "series" else dir_size(batch["final_dir"])
+            owned = finals[0] if finals else folder
+            size = sum(os.path.getsize(f) for f in finals if os.path.isfile(f)) or dir_size(folder)
             await move_download(folder, owned, "done", size)
             batch["folder_path"] = owned
         else:

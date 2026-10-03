@@ -15,9 +15,11 @@ import type { TMDBMetadata } from '../types';
 const gb = (b: number) => `${(b / 1024 ** 3).toFixed(1)} GB`;
 
 interface Ep { name: string; path: string; size: string; season?: number; episode?: number; owner?: string; can_delete?: boolean }
+/** Una calidad de una película en disco (4K, 1080p...). */
+interface Ver { name: string; path: string; size: string; quality: string; owner?: string; can_delete?: boolean }
 interface Title {
   name: string; path: string; size: string; cleanName: string; isSeries: boolean;
-  owner: string; canDelete: boolean; episodes: Ep[];
+  owner: string; canDelete: boolean; episodes: Ep[]; versions: Ver[];
 }
 
 const epLabel = (e: Ep) => e.episode != null ? `${e.season ?? 1}x${String(e.episode).padStart(2, '0')}` : '';
@@ -97,6 +99,7 @@ export default function Downloads() {
   const [notice, setNotice] = useState('');
   const [playing, setPlaying] = useState<{ path: string; title: string; subtitle?: string } | null>(null);
   const [filter, setFilter] = useState<'all' | 'mine'>('all');
+  const [pick, setPick] = useState<{ title: string; versions: Ver[] } | null>(null);
 
   const say = (m: string) => { setNotice(m); setTimeout(() => setNotice(''), 4000); };
 
@@ -106,6 +109,7 @@ export default function Downloads() {
       const list: Title[] = (d.files || []).map((f: any) => ({
         name: f.name, path: f.path, size: f.size || '', cleanName: f.clean_name || cleanTitle(f.name),
         isSeries: !!f.is_series, owner: f.owner || 'admin', canDelete: !!f.can_delete, episodes: f.episodes || [],
+        versions: f.versions || [{ name: f.name, path: f.path, size: f.size || '', quality: '', owner: f.owner, can_delete: f.can_delete }],
       }));
       setTitles(list);
       const names = [...new Set(list.map(t => t.cleanName).filter(Boolean))];
@@ -123,7 +127,7 @@ export default function Downloads() {
     await load(); reloadIndex(); refreshMe();
   };
 
-  const mine = (t: Title) => t.isSeries ? t.episodes.some(e => (e.owner || t.owner) === username) : t.owner === username;
+  const mine = (t: Title) => t.isSeries ? t.episodes.some(e => (e.owner || t.owner) === username) : t.versions.some(v => (v.owner || t.owner) === username);
   const visible = titles.filter(t => filter === 'all' || mine(t));
   const series = visible.filter(t => t.isSeries).sort((a, b) => a.cleanName.localeCompare(b.cleanName));
   const movies = visible.filter(t => !t.isSeries).sort((a, b) => a.cleanName.localeCompare(b.cleanName));
@@ -225,14 +229,20 @@ export default function Downloads() {
             <div className="grid gap-x-[var(--row-gap)] gap-y-7 [grid-template-columns:repeat(auto-fill,minmax(var(--card-w),1fr))]">
               {movies.map(t => {
                 const m = metaFor(t);
+                const name = m?.title || t.cleanName;
+                // Con varias calidades no se puede reproducir "la pelicula":
+                // hay que elegir cual, y borrar una no puede llevarse la otra.
+                const varias = t.versions.length > 1;
+                const abrir = () => varias ? setPick({ title: name, versions: t.versions }) : setPlaying({ path: t.path, title: name });
                 return (
-                  <Card key={t.path} title={m?.title || t.cleanName} poster={m?.poster} rating={m?.rating}
-                    meta={`${t.size} · ${t.owner}`} badge="En disco" badgeTone="ok"
-                    onOpen={() => setPlaying({ path: t.path, title: m?.title || t.cleanName })}
+                  <Card key={t.path} title={name} poster={m?.poster} rating={m?.rating}
+                    meta={`${t.size} · ${t.owner}`}
+                    badge={varias ? `${t.versions.length} versiones` : 'En disco'} badgeTone={varias ? 'neutral' : 'ok'}
+                    onOpen={abrir}
                     actions={
                       <>
-                        <Button variant="light" size="sm" icon={<IconPlay />} onClick={() => setPlaying({ path: t.path, title: m?.title || t.cleanName })}>Ver</Button>
-                        {t.canDelete && <Button variant="ghost" size="sm" onClick={() => del(t.path, m?.title || t.cleanName)}>Borrar</Button>}
+                        <Button variant="light" size="sm" icon={<IconPlay />} onClick={abrir}>{varias ? 'Elegir versión' : 'Ver'}</Button>
+                        {!varias && t.canDelete && <Button variant="ghost" size="sm" onClick={() => del(t.path, name)}>Borrar</Button>}
                       </>
                     } />
                 );
@@ -252,6 +262,30 @@ export default function Downloads() {
       <div className="h-16" />
       {notice && (
         <div className="fixed bottom-6 left-1/2 z-[60] -translate-x-1/2 rounded bg-nf-raised px-5 py-3 text-base shadow-panel animate-slide-up">{notice}</div>
+      )}
+      {pick && (
+        <div className="fixed inset-0 z-[70] grid place-items-center bg-black/70 p-4" onClick={() => setPick(null)}>
+          <div onClick={e => e.stopPropagation()} className="w-[min(560px,92vw)] rounded-panel bg-nf-surface p-6 shadow-panel animate-scale-in">
+            <h3 className="text-md font-semibold">{pick.title}</h3>
+            <p className="mb-4 mt-0.5 text-xs text-nf-faint">{pick.versions.length} versiones en el servidor</p>
+            {pick.versions.map(v => (
+              <div key={v.path} className="flex items-center gap-3 rounded px-3 py-3 hover:bg-white/[0.06]">
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-base font-medium">{v.quality || v.name}</p>
+                  <p className="truncate text-xs text-nf-faint">{v.size} · {v.owner || '—'}</p>
+                </div>
+                <Button variant="light" size="sm" icon={<IconPlay />}
+                  onClick={() => { setPick(null); setPlaying({ path: v.path, title: pick.title }); }}>Ver</Button>
+                {v.can_delete && (
+                  <button onClick={() => { setPick(null); del(v.path, `${pick.title} · ${v.quality || v.name}`); }} title="Borrar del servidor"
+                    className="grid h-8 w-8 place-items-center rounded text-nf-faint hover:bg-nf-red/25 hover:text-white">
+                    <span className="w-4 h-4"><IconTrash /></span>
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
       )}
       {playing && <Player path={playing.path} title={playing.title} subtitle={playing.subtitle} onClose={() => setPlaying(null)} />}
     </Shell>

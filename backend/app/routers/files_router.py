@@ -40,7 +40,7 @@ async def list_files(subpath: str = "", user: Annotated[str, Depends(get_current
     """
     from app.routers.download import config
     from app.services.tmdb import clean_title
-    from app.services.layout import WORK_PREFIX
+    from app.services.layout import WORK_PREFIX, etiqueta_calidad
 
     base = os.path.realpath(config["extract_path"])
     if subpath:
@@ -59,6 +59,13 @@ async def list_files(subpath: str = "", user: Annotated[str, Depends(get_current
 
     def video(path):
         return os.path.splitext(path)[1].lower() in VIDEO_EXTS and os.path.isfile(path)
+
+    def version_entry(vf_path):
+        """Una version de una pelicula: el mismo titulo en otra calidad."""
+        name = os.path.basename(vf_path)
+        size = os.path.getsize(vf_path)
+        return {"name": name, "size": format_size(size), "size_bytes": size, "path": vf_path,
+                "quality": etiqueta_calidad(name)}
 
     def episode_entry(vf_path, season=None):
         name = os.path.basename(vf_path)
@@ -103,14 +110,22 @@ async def list_files(subpath: str = "", user: Annotated[str, Depends(get_current
             legacy_groups.setdefault(m.group(1).strip().lower(), []).append(d)
             continue
 
-        if len(direct) > 1 or (len(direct) == 1 and EP_RE.search(direct[0])):
+        # Lo que decide si es serie es que haya marcador de episodio en el
+        # nombre, no cuantos videos hay. Con la regla vieja ("mas de uno =
+        # serie"), las dos calidades de una pelicula salian como una serie de
+        # dos episodios.
+        if any(EP_RE.search(vf) for vf in direct):
             episodes = [episode_entry(os.path.join(full, vf)) for vf in direct]
             items.append({"name": d, "is_dir": True, "size": format_size(_dir_size(full)), "path": full,
                           "is_series": True, "clean_name": clean_title(d), "episodes": episodes})
-        elif len(direct) == 1:
-            vf_path = os.path.join(full, direct[0])
-            items.append({"name": direct[0], "is_dir": False, "size": format_size(os.path.getsize(vf_path)), "path": vf_path,
-                          "is_series": False, "clean_name": clean_title(d), "folder": full})
+        elif direct:
+            versions = sorted((version_entry(os.path.join(full, vf)) for vf in direct),
+                              key=lambda v: -v["size_bytes"])
+            principal = versions[0]
+            items.append({"name": principal["name"], "is_dir": False,
+                          "size": format_size(sum(v["size_bytes"] for v in versions)),
+                          "path": principal["path"], "is_series": False,
+                          "clean_name": clean_title(d), "folder": full, "versions": versions})
 
     # Estructura vieja: "Serie S1", "Serie S2"... se juntan en una sola serie.
     for key, season_dirs in legacy_groups.items():
@@ -130,7 +145,7 @@ async def list_files(subpath: str = "", user: Annotated[str, Depends(get_current
         if os.path.isdir(full) or not video(full):
             continue
         items.append({"name": entry, "is_dir": False, "size": format_size(os.path.getsize(full)), "path": full,
-                      "is_series": False, "clean_name": clean_title(entry)})
+                      "is_series": False, "clean_name": clean_title(entry), "versions": [version_entry(full)]})
 
     # Dueño de cada elemento y de cada episodio, y si esta cuenta puede borrarlo.
     from app.database.downloads import owners_by_path
@@ -145,14 +160,21 @@ async def list_files(subpath: str = "", user: Annotated[str, Depends(get_current
         obj["can_delete"] = is_admin or bool(row and me and row["owner_id"] == me["id"])
 
     for it in items:
-        tag(it, it.get("folder") or it["path"])
-        for ep in it.get("episodes") or []:
-            tag(ep, ep["path"])
-        if it.get("episodes"):
-            # Una serie con episodios de varias cuentas: la carpeta solo la borra un admin.
-            owners_set = {ep["owner"] for ep in it["episodes"]}
-            it["owner"] = owners_set.pop() if len(owners_set) == 1 else "varios"
-            it["can_delete"] = is_admin
+        # Se etiqueta por el archivo, no por la carpeta: cada version de una
+        # pelicula tiene su dueño, igual que cada episodio de una serie.
+        tag(it, it["path"])
+        hijos = it.get("episodes") or it.get("versions") or []
+        for h in hijos:
+            tag(h, h["path"])
+        if len(hijos) > 1:
+            # Con varias cuentas de por medio, la ficha entera solo la borra un
+            # admin; cada archivo lo sigue borrando el suyo.
+            duenos = {h["owner"] for h in hijos}
+            if len(duenos) == 1:
+                it["owner"] = duenos.pop()
+            else:
+                it["owner"] = "varios"
+                it["can_delete"] = is_admin
     return {"files": items, "path": target, "parent": subpath}
 
 
