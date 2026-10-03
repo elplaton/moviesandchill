@@ -40,6 +40,9 @@ export const IconInfo = () => (
 export const IconTrash = () => (
   <svg {...base} className="w-full h-full"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3" /></svg>
 );
+export const IconHeart = ({ filled }: { filled?: boolean } = {}) => (
+  <svg {...base} fill={filled ? 'currentColor' : 'none'} className="w-full h-full"><path d="M12 20s-7-4.4-7-9.3A4.2 4.2 0 0112 8a4.2 4.2 0 017 2.7c0 4.9-7 9.3-7 9.3z" /></svg>
+);
 export const IconLogout = () => (
   <svg {...base} className="w-full h-full"><path d="M10 4H5v16h5M14 8l4 4-4 4M8 12h10" /></svg>
 );

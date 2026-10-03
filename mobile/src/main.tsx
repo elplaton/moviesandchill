@@ -4,6 +4,7 @@ import { BrowserRouter } from 'react-router-dom';
 import App from './App';
 import { AuthProvider } from './contexts/AuthContext';
 import { LibraryProvider } from './contexts/LibraryContext';
+import { FavoritesProvider } from './contexts/FavoritesContext';
 import './index.css';
 
 // Actualizacion silenciosa: cada compilacion lleva un sw.js distinto; al
@@ -88,7 +89,9 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
     <BrowserRouter basename="/m">
       <AuthProvider>
         <LibraryProvider>
-          <App />
+          <FavoritesProvider>
+            <App />
+          </FavoritesProvider>
         </LibraryProvider>
       </AuthProvider>
     </BrowserRouter>

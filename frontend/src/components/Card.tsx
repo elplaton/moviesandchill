@@ -67,18 +67,22 @@ function Card({ title, poster, meta, rating, onOpen, actions, badge, badgeTone =
           </span>
         )}
 
-        {busy ? (
-          <span className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/70">{busy}</span>
-        ) : actions ? (
-          <span className="card-info absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/55">{actions}</span>
-        ) : null}
-
         {progress !== undefined && progress > 0 && (
           <span className="absolute inset-x-0 bottom-0 h-1 bg-white/25">
             <span className="block h-full bg-nf-red" style={{ width: `${Math.round(progress * 100)}%` }} />
           </span>
         )}
       </button>
+
+      {/* Las acciones van FUERA del botón de la carátula. Dentro eran botones
+          anidados: al pulsar "Borrar" o "Quitar" el clic subía al de arriba y
+          además abría la ficha. El hover sigue funcionando porque el CSS
+          cuelga de `.card`, que las sigue conteniendo. */}
+      {busy ? (
+        <div className="absolute inset-x-0 top-0 aspect-[2/3] flex flex-col items-center justify-center gap-2 rounded-card bg-black/70">{busy}</div>
+      ) : actions ? (
+        <div className="card-info absolute inset-x-0 top-0 aspect-[2/3] flex flex-col items-center justify-center gap-2 rounded-card bg-black/55">{actions}</div>
+      ) : null}
 
       <p className="mt-2 text-base font-medium leading-snug line-clamp-2">{title}</p>
       {meta && <p className="text-xs text-nf-faint truncate">{meta}</p>}

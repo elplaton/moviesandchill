@@ -135,6 +135,18 @@ async def _ensure_tables():
                 created_at    TIMESTAMP DEFAULT NOW()
             )
         """)
+        # Favoritos por cuenta. media_type guarda el tipo de TMDB ('movie'/'tv')
+        # porque peliculas y series tienen espacios de ids independientes: sin
+        # el tipo, el favorito de tv/606 y el de movie/606 serian el mismo.
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS user_favorites (
+                user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                tmdb_id     INTEGER NOT NULL,
+                media_type  VARCHAR(10) NOT NULL,
+                created_at  TIMESTAMP DEFAULT NOW(),
+                PRIMARY KEY (user_id, tmdb_id, media_type)
+            )
+        """)
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS downloads (
                 id          SERIAL PRIMARY KEY,
@@ -211,6 +223,7 @@ from app.database.media import (insert_media_item, insert_media_items, update_me
     search_media, get_media_by_tmdb, get_media_without_tmdb, get_media_by_channel, mark_batch_tmdb_searched,
     fetch_all_media_for_reclassify, bulk_update_parsed, reset_tmdb_for_ids, get_missing_cache_pairs)
 from app.database.tmdb_cache import get_tmdb_cached, upsert_tmdb_cache
+from app.database.favorites import list_favorites, favorite_keys, add_favorite, remove_favorite
 from app.database.index_progress import get_index_progress, upsert_index_progress, bump_index_progress, get_index_stats, set_index_phase, reset_all_index_progress, get_index_status
 
 

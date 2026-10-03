@@ -3,13 +3,14 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { applyFocus, getCurrentFocusId, subscribe } from '../focus/engine';
 import { FocusScope, useFocusItem } from '../focus/react';
 import { requestContentFocus } from '../tv/intent';
-import { IconDownload, IconFilm, IconGear, IconHome, IconSearch, IconTv } from './Icons';
+import { IconDownload, IconFilm, IconGear, IconHeart, IconHome, IconSearch, IconTv } from './Icons';
 
 export const RAIL_ITEMS: { path: string; label: string; icon: ReactNode }[] = [
   { path: '/buscar', label: 'Buscar', icon: <IconSearch /> },
   { path: '/', label: 'Inicio', icon: <IconHome /> },
   { path: '/peliculas', label: 'Películas', icon: <IconFilm /> },
   { path: '/series', label: 'Series', icon: <IconTv /> },
+  { path: '/favoritos', label: 'Favoritos', icon: <IconHeart /> },
   { path: '/descargas', label: 'Descargas', icon: <IconDownload /> },
   { path: '/ajustes', label: 'Ajustes', icon: <IconGear /> },
 ];

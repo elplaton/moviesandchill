@@ -4,6 +4,27 @@ import { fetchMediaFiles } from '../services/media';
 import type { BrowseItem, BrowseRow, TMDBMetadata } from '../types';
 import type { SheetInput } from '../components/TitleSheet';
 
+/** Abrir la ficha de un título: lo necesitan los carriles y también Favoritos,
+ *  que no carga carriles y no tiene por qué pedir /browse/home para eso. */
+export function useSheet() {
+  const [sheet, setSheet] = useState<SheetInput | null>(null);
+
+  const open = useCallback(async (item: BrowseItem) => {
+    const meta: TMDBMetadata = {
+      title: item.title, poster: item.poster, backdrop: item.backdrop,
+      year: item.year, rating: item.rating, overview: item.overview, genres: item.genres,
+    };
+    try {
+      const { results } = await fetchMediaFiles(item.tmdb_id, item.media_type);
+      setSheet({ kind: item.media_type, tmdbId: item.tmdb_id, meta, files: results });
+    } catch {
+      setSheet({ kind: item.media_type, tmdbId: item.tmdb_id, meta, files: [] });
+    }
+  }, []);
+
+  return { sheet, setSheet, open };
+}
+
 /**
  * Carriles de la portada y apertura de fichas.
  *
@@ -13,7 +34,7 @@ import type { SheetInput } from '../components/TitleSheet';
 export function useCatalog(filter?: 'movie' | 'series') {
   const [rows, setRows] = useState<BrowseRow[]>([]);
   const [loading, setLoading] = useState(true);
-  const [sheet, setSheet] = useState<SheetInput | null>(null);
+  const { sheet, setSheet, open } = useSheet();
 
   useEffect(() => {
     let alive = true;
@@ -34,19 +55,6 @@ export function useCatalog(filter?: 'movie' | 'series') {
       .finally(() => alive && setLoading(false));
     return () => { alive = false; };
   }, [filter]);
-
-  const open = useCallback(async (item: BrowseItem) => {
-    const meta: TMDBMetadata = {
-      title: item.title, poster: item.poster, backdrop: item.backdrop,
-      year: item.year, rating: item.rating, overview: item.overview, genres: item.genres,
-    };
-    try {
-      const { results } = await fetchMediaFiles(item.tmdb_id, item.media_type);
-      setSheet({ kind: item.media_type, tmdbId: item.tmdb_id, meta, files: results });
-    } catch {
-      setSheet({ kind: item.media_type, tmdbId: item.tmdb_id, meta, files: [] });
-    }
-  }, []);
 
   return { rows, loading, sheet, setSheet, open };
 }

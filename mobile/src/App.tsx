@@ -7,6 +7,7 @@ import Home from './pages/Home';
 import Search from './pages/Search';
 import Title from './pages/Title';
 import Downloads from './pages/Downloads';
+import Favorites from './pages/Favorites';
 import Profile from './pages/Profile';
 import Admin from './pages/Admin';
 import Onboarding from './pages/Onboarding';
@@ -35,6 +36,7 @@ export default function App() {
         <Route path="/" element={<Home />} />
         <Route path="/buscar" element={<Search />} />
         <Route path="/t/:kind/:id" element={<Title />} />
+        <Route path="/favoritos" element={<Favorites />} />
         <Route path="/descargas" element={<Downloads />} />
         <Route path="/perfil" element={<Profile />} />
         <Route path="/onboarding" element={<Onboarding />} />

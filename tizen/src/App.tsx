@@ -1,6 +1,7 @@
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from './contexts/AuthContext';
 import { DownloadsProvider, useDownloadsCtx } from './contexts/DownloadsContext';
+import { FavoritesProvider } from './contexts/FavoritesContext';
 import { FocusScope } from './focus/react';
 import Rail from './components/Rail';
 import Toasts from './components/Toasts';
@@ -10,6 +11,7 @@ import Movies from './pages/Movies';
 import Series from './pages/Series';
 import Search from './pages/Search';
 import Library from './pages/Library';
+import Favorites from './pages/Favorites';
 import Settings from './pages/Settings';
 import Onboarding from './pages/Onboarding';
 
@@ -37,6 +39,7 @@ function Shell() {
           <Route path="/peliculas" element={<Movies />} />
           <Route path="/series" element={<Series />} />
           <Route path="/buscar" element={<Search />} />
+          <Route path="/favoritos" element={<Favorites />} />
           <Route path="/descargas" element={<Library />} />
           <Route path="/ajustes" element={<Settings />} />
           <Route path="*" element={<Navigate to="/" replace />} />
@@ -63,7 +66,9 @@ export default function App() {
 
   return (
     <DownloadsProvider>
-      <Shell />
+      <FavoritesProvider>
+        <Shell />
+      </FavoritesProvider>
     </DownloadsProvider>
   );
 }

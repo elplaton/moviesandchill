@@ -4,11 +4,12 @@ import { apiFetch } from '../services/api';
 import { fetchMediaFiles } from '../services/media';
 import { useLibrary, type LocalFile } from '../contexts/LibraryContext';
 import { useAuth } from '../contexts/AuthContext';
+import { useFavorites } from '../contexts/FavoritesContext';
 import { toast } from '../utils/toast';
 import { resumePoint } from '../utils/progress';
 import { groupEpisodes, groupVersions, seasonLabel, episodeLabel, type Version } from '../utils/versions';
 import Player from '../components/Player';
-import { IBack, IPlay, IStar, ITrash } from '../components/Icons';
+import { IBack, IHeart, IPlay, IStar, ITrash } from '../components/Icons';
 import type { DownloadState, SearchResult, TMDBMetadata } from '../types';
 
 type RowState = { s: 'ready'; f: LocalFile } | { s: 'busy'; ds: DownloadState } | { s: 'idle' };
@@ -44,6 +45,7 @@ export default function Title() {
   const navigate = useNavigate();
   const { localFor, states, version, download, cancel, pause, remove } = useLibrary();
   const { refresh } = useAuth();
+  const { esFavorito, alternar } = useFavorites();
   const tmdbId = parseInt(id) || 0;
   const isSeries = kind === 'series';
   const [meta, setMeta] = useState<(TMDBMetadata & { tmdb_id?: number }) | null>(null);
@@ -120,6 +122,7 @@ export default function Title() {
     return { path: r.f.path, resume: !!ready.find(x => resumePoint(x.f.path) > 0), subtitle: r.v.episode !== undefined ? `${r.v.season ?? ''}x${String(r.v.episode).padStart(2, '0')}` : undefined };
   }, [versions, localFor, meta]);
 
+  const marcado = !!tmdbId && esFavorito(tmdbId, isSeries ? 'series' : 'movie');
   const bg = meta?.backdrop || meta?.poster;
   const info = [meta?.year, meta?.genres?.slice(0, 2).join(', '), isSeries ? `${episodes.length} episodios` : `${versions.length} ${versions.length === 1 ? 'versión' : 'versiones'}`].filter(Boolean).join(' · ');
 
@@ -138,11 +141,22 @@ export default function Title() {
           {meta?.rating && info ? <span>·</span> : null}<span>{info}</span>
         </p>
         {meta?.overview && <p className="text-[14px] text-nf-text2 leading-relaxed mt-3 line-clamp-5">{meta.overview}</p>}
-        {playable && (
-          <button onClick={() => setPlaying({ path: playable.path, subtitle: playable.subtitle })} className="mt-4 w-full h-12 rounded-xl bg-white text-black font-semibold text-[16px] flex items-center justify-center gap-2 active:opacity-80">
-            <span className="w-5 h-5"><IPlay /></span>{playable.resume ? 'Continuar viendo' : 'Reproducir'}
-          </button>
-        )}
+        <div className="mt-4 flex gap-2">
+          {playable && (
+            <button onClick={() => setPlaying({ path: playable.path, subtitle: playable.subtitle })} className="flex-1 h-12 rounded-xl bg-white text-black font-semibold text-[16px] flex items-center justify-center gap-2 active:opacity-80">
+              <span className="w-5 h-5"><IPlay /></span>{playable.resume ? 'Continuar viendo' : 'Reproducir'}
+            </button>
+          )}
+          {tmdbId ? (
+            <button onClick={() => alternar(tmdbId, isSeries ? 'series' : 'movie')}
+              aria-label={marcado ? 'Quitar de favoritos' : 'Añadir a favoritos'}
+              className={`h-12 rounded-xl text-[15px] font-semibold flex items-center justify-center gap-2 active:opacity-80 ${
+                playable ? 'w-14 bg-white/10' : 'flex-1 bg-white/10'} ${marcado ? 'text-nf-red' : 'text-white'}`}>
+              <span className="w-5 h-5"><IHeart filled={marcado} /></span>
+              {!playable && (marcado ? 'En favoritos' : 'Favorito')}
+            </button>
+          ) : null}
+        </div>
       </div>
 
       <div className="mt-6">

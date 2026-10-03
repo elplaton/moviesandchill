@@ -15,7 +15,7 @@ ITEMS_PER_ROW = 20
 POOL_SIZE = 400
 
 
-def _item(row: dict) -> dict:
+def item_from_row(row: dict) -> dict:
     is_series = row.get("tmdb_type") == "tv"
     return {
         "id": f"{'s' if is_series else 'm'}{row['tmdb_id']}",
@@ -50,6 +50,7 @@ def _dedupe(items: list[dict]) -> list[dict]:
 @router.get("/browse/home")
 async def browse_home(user: Annotated[str, Depends(get_current_user)]):
     from app.database.browse import get_browse_pool, get_recent_releases, get_recently_added
+    from app.database.favorites import list_favorites
     from app.database.users import get_user_by_username
     from app.database.preferences import get_preferences
 
@@ -61,14 +62,14 @@ async def browse_home(user: Annotated[str, Depends(get_current_user)]):
         get_recently_added(ITEMS_PER_ROW),
     )
 
-    all_items = [_item(r) for r in movies] + [_item(r) for r in series]
+    all_items = [item_from_row(r) for r in movies] + [item_from_row(r) for r in series]
     random.shuffle(all_items)
 
     rows = []
     if releases:
-        rows.append({"genre": "Novedades", "items": _dedupe([_item(r) for r in releases])})
+        rows.append({"genre": "Novedades", "items": _dedupe([item_from_row(r) for r in releases])})
     if added:
-        rows.append({"genre": "Añadido recientemente", "items": _dedupe([_item(r) for r in added])})
+        rows.append({"genre": "Añadido recientemente", "items": _dedupe([item_from_row(r) for r in added])})
 
     genre_rows: dict[str, list[dict]] = defaultdict(list)
     for item in all_items:
@@ -110,5 +111,12 @@ async def browse_home(user: Annotated[str, Depends(get_current_user)]):
             scored.sort(key=lambda x: -x[0])
             if scored:
                 rows.insert(0, {"genre": "Recomendado para ti", "items": [i for _, i in scored[:ITEMS_PER_ROW]]})
+
+        # Los favoritos van los primeros y se calculan aqui, no en cada cliente:
+        # asi la fila sale igual en la web, en el movil y en la tele sin que
+        # ninguno tenga que montarla por su cuenta.
+        favoritos = [item_from_row(r) for r in await list_favorites(db_user["id"], ITEMS_PER_ROW)]
+        if favoritos:
+            rows.insert(0, {"genre": "Mis favoritos", "items": favoritos})
 
     return {"rows": rows}

@@ -3,6 +3,7 @@ import { applyFocus, getElement, setFocus } from '../focus/engine';
 import { FocusScope, useBackHandler, useFocusItem } from '../focus/react';
 import { apiFetch, streamUrl } from '../services/api';
 import { useDownloadsCtx } from '../contexts/DownloadsContext';
+import { useFavorites } from '../contexts/FavoritesContext';
 import { toast } from '../tv/toast';
 import { resumePoint } from '../tv/progress';
 import { bigBackdrop } from './Hero';
@@ -11,7 +12,7 @@ import Overlay from './Overlay';
 import Player from './Player';
 import { soloPuntero } from '../tv/platform';
 import TvButton from './TvButton';
-import { IconCheck, IconDownload, IconPlay, IconStar, IconTrash } from './Icons';
+import { IconCheck, IconDownload, IconHeart, IconPlay, IconStar, IconTrash } from './Icons';
 import { groupEpisodes, groupVersions, seasonLabel, episodeLabel, type Episode, type Version } from '../utils/versions';
 import type { DownloadState, Featured, SearchResult } from '../types';
 
@@ -125,6 +126,7 @@ const LIST_VIEW = 720;   // alto visible de la lista
 export default function TitleDetail({ input, onClose }: Props) {
   const { meta, kind } = input;
   const { downloadStates, download, cancelBatch, pauseBatch, rutaDe, rutaEpisodio, recargar } = useDownloadsCtx();
+  const { esFavorito, alternar } = useFavorites();
   const [playing, setPlaying] = useState<{ path: string; title: string; subtitle?: string } | null>(null);
   const [dialog, setDialog] = useState<{
     title: string; text?: string; actions: { label: string; onSelect: () => void; primary?: boolean }[];
@@ -289,6 +291,7 @@ export default function TitleDetail({ input, onClose }: Props) {
   }, [versions, pathOf]);
 
   const readyCount = versions.filter((v) => !!pathOf(v)).length;
+  const marcado = !!input.tmdbId && esFavorito(input.tmdbId, kind);
 
   // El foco inicial va a lo util: Reproducir si hay algo en disco, y si no el
   // primer episodio o version. Sin esto caia en el chip de temporada.
@@ -341,18 +344,28 @@ export default function TitleDetail({ input, onClose }: Props) {
             ))}
           </div>
           {meta.overview && <p className="mt-6 text-body text-tv-text2 leading-relaxed line-clamp-4">{meta.overview}</p>}
-          <div className="mt-8 flex items-center space-x-4">
+          {/* Reproducir y Favorito van uno al lado del otro, asi que se mueven
+              con izquierda/derecha: en el ambito vertical de la columna el
+              mando los habria recorrido con arriba/abajo. */}
+          <FocusScope index={0} orientation="horizontal" className="mt-8 flex items-center space-x-4">
             {playable && (
               <TvButton index={0} focusKey="detail-play" primary icon={<IconPlay />} onClick={() => play(playable.path, playable.subtitle)}>
                 {playable.resume ? 'Continuar viendo' : 'Reproducir'}
               </TvButton>
             )}
+            {input.tmdbId ? (
+              <TvButton index={1} focusKey="detail-fav" icon={<IconHeart filled={marcado} />}
+                className={marcado ? 'text-tv-red' : ''}
+                onClick={() => { alternar(input.tmdbId!, kind); toast(marcado ? 'Quitado de favoritos' : 'Añadido a favoritos'); }}>
+                {marcado ? 'En favoritos' : 'Favorito'}
+              </TvButton>
+            ) : null}
             {readyCount > 0 && (
               <span className="inline-flex items-center space-x-2 text-caption text-tv-ok font-semibold">
                 <span className="w-5 h-5"><IconCheck /></span><span>{readyCount} en disco</span>
               </span>
             )}
-          </div>
+          </FocusScope>
           {versions.length === 0 && (
             <p className="mt-10 text-body text-tv-text3">No hay archivos indexados para este título.</p>
           )}

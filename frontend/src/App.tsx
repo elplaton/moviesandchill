@@ -7,6 +7,7 @@ import Series from './pages/Series';
 import Search from './pages/Search';
 import Onboarding from './pages/Onboarding';
 import Downloads from './pages/Downloads';
+import Favorites from './pages/Favorites';
 import Admin from './pages/Admin';
 import Account from './pages/Account';
 
@@ -39,6 +40,7 @@ export default function App() {
       <Route path="/peliculas" element={<Protected><Movies /></Protected>} />
       <Route path="/series" element={<Protected><Series /></Protected>} />
       <Route path="/buscar" element={<Protected><Search /></Protected>} />
+      <Route path="/favoritos" element={<Protected><Favorites /></Protected>} />
       <Route path="/descargas" element={<Protected><Downloads /></Protected>} />
       <Route path="/admin" element={<Protected><Admin /></Protected>} />
       <Route path="/admin/:tab" element={<Protected><Admin /></Protected>} />

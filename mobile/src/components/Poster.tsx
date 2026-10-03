@@ -1,11 +1,13 @@
 import { Link } from 'react-router-dom';
 
-interface Props { to: string; title: string; poster?: string; subtitle?: string; progress?: number; badge?: string; wide?: boolean }
+interface Props { to: string; title: string; poster?: string; subtitle?: string; progress?: number; badge?: string; wide?: boolean;
+  /** En una rejilla manda la columna, no un ancho fijo. */
+  full?: boolean }
 
 /** Carátula 2:3 con el título debajo. En móvil el texto no va encima de la imagen: tapa y no se lee. */
-export default function Poster({ to, title, poster, subtitle, progress, badge, wide }: Props) {
+export default function Poster({ to, title, poster, subtitle, progress, badge, wide, full }: Props) {
   return (
-    <Link to={to} className={`block shrink-0 ${wide ? 'w-[160px]' : 'w-[112px]'} active:opacity-70`}>
+    <Link to={to} className={`block active:opacity-70 ${full ? 'w-full' : `shrink-0 ${wide ? 'w-[160px]' : 'w-[112px]'}`}`}>
       <div className="relative rounded-lg overflow-hidden bg-nf-card aspect-[2/3]">
         {poster ? <img src={poster} alt="" loading="lazy" className="absolute inset-0 w-full h-full object-cover" />
           : <div className="absolute inset-0 p-2 flex items-end text-[12px] font-semibold leading-tight text-nf-text2">{title}</div>}

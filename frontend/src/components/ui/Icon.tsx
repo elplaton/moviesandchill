@@ -20,4 +20,7 @@ export const IconSubtitles = () => <svg {...s}><rect x="3" y="5" width="18" heig
 export const IconExpand = () => <svg {...s}><path d="M8 3H3v5M16 3h5v5M16 21h5v-5M8 21H3v-5" /></svg>;
 export const IconUser = () => <svg {...s}><circle cx="12" cy="8" r="4" /><path d="M4 21c0-4 3.6-7 8-7s8 3 8 7" /></svg>;
 export const IconShield = () => <svg {...s}><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z" /></svg>;
+export const IconHeart = ({ filled }: { filled?: boolean } = {}) => (
+  <svg {...s} fill={filled ? 'currentColor' : 'none'}><path d="M12 20s-7-4.4-7-9.3A4.2 4.2 0 0112 8a4.2 4.2 0 017 2.7c0 4.9-7 9.3-7 9.3z" /></svg>
+);
 export const IconLogout = () => <svg {...s}><path d="M10 4H5v16h5M14 8l4 4-4 4M8 12h10" /></svg>;

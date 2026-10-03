@@ -2,11 +2,12 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { apiFetch } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import { useLibrary, type LocalFile } from '../contexts/LibraryContext';
+import { useFavorites } from '../contexts/FavoritesContext';
 import { useDownloads } from '../hooks/useDownloads';
 import { groupEpisodes, groupVersions, episodeLabel, seasonLabel, type Episode, type Version } from '../utils/versions';
 import Button from './ui/Button';
 import Player from './Player';
-import { IconCheck, IconClose, IconDownload, IconPlay, IconStar, IconTrash } from './ui/Icon';
+import { IconCheck, IconClose, IconDownload, IconHeart, IconPlay, IconStar, IconTrash } from './ui/Icon';
 import type { SearchResult, TMDBMetadata } from '../types';
 
 export interface SheetInput {
@@ -34,6 +35,7 @@ export default function TitleSheet({ input, onClose }: Props) {
   const isSeries = kind === 'series';
   const { refreshMe } = useAuth();
   const { localFor, remove, version } = useLibrary();
+  const { esFavorito, alternar } = useFavorites();
   const { downloadStates, download, cancelBatch } = useDownloads();
   const [season, setSeason] = useState<number | null | undefined>(undefined);
   const [names, setNames] = useState<Map<string, string>>(new Map());
@@ -113,6 +115,7 @@ export default function TitleSheet({ input, onClose }: Props) {
   }, [versions, stateOf]);
 
   const onDisk = versions.filter(v => stateOf(v).s === 'ready').length;
+  const marcado = !!input.tmdbId && esFavorito(input.tmdbId, kind);
   const bg = (meta.backdrop || meta.poster || '').replace('/w780/', '/w1280/');
   const facts = [
     meta.year ? String(meta.year) : '',
@@ -179,6 +182,13 @@ export default function TitleSheet({ input, onClose }: Props) {
             </div>
             <div className="mt-5 flex items-center gap-3">
               {playable && <Button variant="light" icon={<IconPlay />} onClick={() => setPlaying(playable)}>Reproducir</Button>}
+              {input.tmdbId ? (
+                <Button variant="ghost" onClick={() => alternar(input.tmdbId!, kind)}
+                  className={marcado ? 'text-nf-red' : ''}
+                  icon={<IconHeart filled={marcado} />}>
+                  {marcado ? 'En favoritos' : 'Favorito'}
+                </Button>
+              ) : null}
               {onDisk > 0 && (
                 <span className="inline-flex items-center gap-1.5 text-base font-medium text-nf-ok">
                   <span className="w-4 h-4"><IconCheck /></span>{onDisk} en disco

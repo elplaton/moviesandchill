@@ -1,7 +1,7 @@
 import { NavLink } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { useLibrary } from '../contexts/LibraryContext';
-import { IDown, IHome, ISearch, IShield, IUser } from './Icons';
+import { IDown, IHeart, IHome, ISearch, IShield, IUser } from './Icons';
 
 /** Barra de pestañas fija abajo, con margen para la barra de inicio del iPhone. */
 export default function TabBar() {
@@ -11,6 +11,7 @@ export default function TabBar() {
   const tabs = [
     { to: '/', label: 'Inicio', icon: <IHome /> },
     { to: '/buscar', label: 'Buscar', icon: <ISearch /> },
+    { to: '/favoritos', label: 'Favoritos', icon: <IHeart /> },
     { to: '/descargas', label: 'Descargas', icon: <IDown />, badge: active || undefined },
     ...(me?.role === 'admin' ? [{ to: '/admin', label: 'Admin', icon: <IShield /> }] : []),
     { to: '/perfil', label: 'Perfil', icon: <IUser /> },
@@ -20,9 +21,9 @@ export default function TabBar() {
       <div className="flex">
         {tabs.map(t => (
           <NavLink key={t.to} to={t.to} end={t.to === '/'}
-            className={({ isActive }) => `flex-1 flex flex-col items-center justify-center h-[56px] text-[11px] font-medium relative ${isActive ? 'text-white' : 'text-nf-text3'}`}>
+            className={({ isActive }) => `flex-1 min-w-0 flex flex-col items-center justify-center h-[56px] font-medium relative ${tabs.length > 5 ? 'text-[10px]' : 'text-[11px]'} ${isActive ? 'text-white' : 'text-nf-text3'}`}>
             <span className="w-6 h-6 mb-0.5">{t.icon}</span>
-            {t.label}
+            <span className="max-w-full px-0.5 truncate">{t.label}</span>
             {t.badge && <span className="absolute top-1.5 right-[calc(50%-20px)] min-w-[18px] h-[18px] px-1 rounded-full bg-nf-red text-[11px] leading-[18px] font-bold text-center">{t.badge}</span>}
           </NavLink>
         ))}
