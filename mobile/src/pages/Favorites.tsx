@@ -1,12 +1,27 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import Poster from '../components/Poster';
 import { useFavorites } from '../contexts/FavoritesContext';
+import { groupFavorites } from '../utils/favorites';
 
-/** Favoritos de la cuenta, lo último marcado primero. */
+/**
+ * Favoritos de la cuenta, clasificados por tipo y, dentro de cada tipo, por
+ * genero.
+ *
+ * Peliculas y series van en un conmutador y no una debajo de otra: en el
+ * telefono caben tres caratulas por fila, asi que con las dos listas apiladas
+ * las series quedaban a varias pantallas de distancia. El conmutador solo
+ * aparece si hay de los dos tipos; con uno solo seria un boton que no elige
+ * nada.
+ */
 export default function Favorites() {
   const { items, loading, recargar } = useFavorites();
+  const [tipo, setTipo] = useState<'movie' | 'series'>('movie');
 
   useEffect(() => { recargar(); }, [recargar]);
+
+  const secciones = groupFavorites(items);
+  // Al entrar sin peliculas marcadas, el conmutador no debe empezar vacio.
+  const activa = secciones.find(s => s.kind === tipo) || secciones[0];
 
   return (
     <div className="pb-6">
@@ -16,16 +31,33 @@ export default function Favorites() {
           {loading && items.length === 0 ? 'Cargando…'
             : `${items.length} ${items.length === 1 ? 'título guardado' : 'títulos guardados'}`}
         </p>
+
+        {secciones.length > 1 && (
+          <div className="mt-3 flex rounded-full bg-white/10 p-0.5 text-[12px] w-max">
+            {secciones.map(s => (
+              <button key={s.kind} onClick={() => setTipo(s.kind)}
+                className={`px-4 h-8 rounded-full ${s.kind === activa?.kind ? 'bg-white text-black' : 'text-nf-text2'}`}>
+                {s.title} <span className="opacity-60">{s.total}</span>
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
-      {items.length > 0 && (
-        <div className="grid grid-cols-3 gap-3 px-4">
-          {items.map(i => (
-            <Poster key={i.id} full to={`/t/${i.media_type}/${i.tmdb_id}`} title={i.title} poster={i.poster}
-              subtitle={i.media_type === 'series' && i.episode_count ? `${i.episode_count} ep.` : i.year ? String(i.year) : undefined} />
-          ))}
+      {activa?.groups.map(grupo => (
+        <div key={grupo.genre} className="mb-5">
+          <h2 className="px-4 mb-2 text-[15px] font-semibold">
+            {grupo.genre}
+            <span className="ml-2 text-[12px] font-normal text-nf-text3">{grupo.items.length}</span>
+          </h2>
+          <div className="grid grid-cols-3 gap-3 px-4">
+            {grupo.items.map(i => (
+              <Poster key={i.id} full to={`/t/${i.media_type}/${i.tmdb_id}`} title={i.title} poster={i.poster}
+                subtitle={i.media_type === 'series' && i.episode_count ? `${i.episode_count} ep.` : i.year ? String(i.year) : undefined} />
+            ))}
+          </div>
         </div>
-      )}
+      ))}
 
       {!loading && items.length === 0 && (
         <div className="px-4 pt-6">

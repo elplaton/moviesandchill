@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { fetchMediaFiles } from '../services/media';
 import { useFavorites } from '../contexts/FavoritesContext';
+import { groupFavorites } from '../utils/favorites';
 import Screen from '../components/Screen';
 import Row from '../components/Row';
 import PosterCard from '../components/PosterCard';
@@ -23,9 +24,14 @@ function toFeatured(item: BrowseItem): Featured {
 }
 
 /**
- * Favoritos: lo que la cuenta ha marcado, en dos carriles (peliculas y
- * series). Se separan porque en una tele un carril de 60 caratulas se
- * recorre a ciegas, y porque es como estan el resto de pantallas.
+ * Favoritos: lo que la cuenta ha marcado, en un carril por tipo y genero
+ * ("Peliculas · Accion", "Series · Comedia").
+ *
+ * Se separan porque en una tele un carril de 60 caratulas se recorre a ciegas:
+ * con el mando solo se ve lo que cabe en pantalla y hay que mantener la flecha
+ * pulsada para llegar al final. El tipo va en el titulo del carril en vez de
+ * en una cabecera aparte porque aqui el foco baja de fila en fila y no hay
+ * donde enfocar un encabezado.
  */
 export default function Favorites() {
   const { items, loading, recargar } = useFavorites();
@@ -42,12 +48,12 @@ export default function Favorites() {
     }
   }, []);
 
-  const peliculas = items.filter((i) => i.media_type === 'movie');
-  const series = items.filter((i) => i.media_type === 'series');
-  const carriles = [
-    { titulo: 'Películas', lista: peliculas },
-    { titulo: 'Series', lista: series },
-  ].filter((c) => c.lista.length > 0);
+  const carriles = groupFavorites(items).flatMap((seccion) =>
+    seccion.groups.map((grupo) => ({
+      titulo: `${seccion.title} · ${grupo.genre}`,
+      lista: grupo.items,
+    })),
+  );
 
   return (
     <Screen hero heading="Favoritos" heroFallback={items[0] ? toFeatured(items[0]) : null} ready={items.length > 0}>
