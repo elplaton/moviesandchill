@@ -67,7 +67,7 @@ export default function Channels({ embedded = false }: { embedded?: boolean } = 
       const running = (p.channels || []).some((c: ChannelProgress) =>
         c.status === 'running' || c.status === 'scanning' || c.phase === 'enriching'
       );
-      setPolling(running);
+      setPolling(running);   // solo decide cada cuanto se pregunta, no si se pregunta
       setTmdbRunning(st.phase === 'enriching' && st.running);
     } catch {}
   };
@@ -96,11 +96,15 @@ export default function Channels({ embedded = false }: { embedded?: boolean } = 
     setTimeout(() => setToast(''), 2000);
   };
 
+  // Los contadores siguen moviendose cuando el escaneo ya ha terminado: los
+  // mensajes nuevos se indexan en vivo y antes la cuenta se congelaba en el
+  // numero que hubiera al acabar, hasta recargar la pagina. Mientras algo
+  // escanea se pregunta a menudo; el resto del tiempo, de vez en cuando.
   useEffect(() => {
-    if (!polling) return;
-    const interval = setInterval(loadIndexInfo, 5000);
+    const cada = polling ? 5000 : 20000;
+    const interval = setInterval(() => { if (!document.hidden) loadIndexInfo(); }, cada);
     return () => clearInterval(interval);
-  }, [polling]);
+  }, [polling]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const toggle = (id: number) => {
     setActiveIds(prev => {

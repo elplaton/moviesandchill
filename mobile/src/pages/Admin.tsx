@@ -120,30 +120,57 @@ function Channels() {
   const [progress, setProgress] = useState<any[]>([]);
   const [stats, setStats] = useState<any>(null);
   const load = () => { apiFetch('/channels').then(r => r.json()).then(d => setChannels(d.channels || [])).catch(() => {}); apiFetch('/index/progress').then(r => r.json()).then(d => setProgress(d.channels || [])).catch(() => {}); apiFetch('/index/stats').then(r => r.json()).then(setStats).catch(() => {}); };
-  useEffect(() => { load(); const t = setInterval(load, 5000); return () => clearInterval(t); }, []);
+  // Se sigue preguntando aunque el escaneo haya acabado: los mensajes nuevos
+  // se indexan en vivo y los contadores tienen que moverse con ellos. Deprisa
+  // mientras algo escanea, despacio el resto del tiempo.
+  const escaneando = progress.some((p: any) => p.status === 'running' || p.status === 'scanning' || p.phase === 'enriching');
+  useEffect(() => { load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    const t = setInterval(() => { if (!document.hidden) load(); }, escaneando ? 5000 : 20000);
+    return () => clearInterval(t);
+  }, [escaneando]); // eslint-disable-line react-hooks/exhaustive-deps
   const add = async () => { setMsg('Resolviendo…'); const d = await (await apiFetch('/channels/add', { method: 'POST', body: JSON.stringify({ url: url.trim() }) })).json(); setMsg(d.error || `${d.status === 'added' ? 'Añadido' : 'Actualizado'}: ${d.channel?.name}`); if (!d.error) setUrl(''); load(); };
   const rescan = async (id: number) => { await apiFetch(`/index/channel/${id}`, { method: 'POST' }); toast('Reescaneando canal'); };
   const reclass = async () => { const d = await (await apiFetch('/index/reclassify', { method: 'POST' })).json(); toast(d.status === 'already_running' ? 'Ya está en marcha' : 'Reclasificando catálogo…'); };
+  const rescanAll = async () => { await apiFetch('/index/rescan', { method: 'POST' }); toast('Escaneo completo reiniciado'); };
   // Mismo orden que en escritorio: primero lo indexado, luego los canales y
   // el añadir al final. En el movil estaba justo al reves.
+  //
+  // Las cuatro cifras van en dos filas y no en una: en una fila de telefono le
+  // tocaban ~70 px a cada una y "160.684" no cabia, asi que los numeros salian
+  // enormes y pegados al borde. En rejilla de dos cabe el numero entero.
   const Cifra = ({ n, label }: { n?: number; label: string }) => (
-    <div className="flex-1 rounded-xl bg-black/25 py-3 text-center">
-      <p className="text-[19px] font-bold leading-none">{(n ?? 0).toLocaleString('es-ES')}</p>
-      <p className="text-[11px] text-nf-text3 mt-1">{label}</p>
+    <div className="rounded-xl bg-black/25 px-2 py-3 text-center">
+      <p className="text-[20px] font-bold leading-none tabular-nums">{(n ?? 0).toLocaleString('es-ES')}</p>
+      <p className="text-[11px] text-nf-text3 mt-1.5">{label}</p>
     </div>
   );
+  const buscados = stats?.tmdb_searched ?? 0;
+  const pctTmdb = Math.round((buscados / Math.max(stats?.total || 1, 1)) * 100);
 
   return (
     <div>
       <section className="rounded-2xl bg-white/5 p-4 mb-4">
         <p className="text-[13px] font-semibold text-nf-text2 mb-3">Contenido indexado</p>
-        <div className="flex gap-2">
+        <div className="grid grid-cols-2 gap-2">
           <Cifra n={stats?.total} label="Total" />
           <Cifra n={stats?.movies} label="Películas" />
           <Cifra n={stats?.series} label="Series" />
           <Cifra n={stats?.with_tmdb} label="Con ficha" />
         </div>
-        <button onClick={reclass} className="mt-3 w-full h-11 rounded-xl bg-white/10 text-[15px] font-medium">Reclasificar catálogo</button>
+        {stats && (
+          <div className="mt-4">
+            <div className="flex items-baseline justify-between text-[11px] text-nf-text3 mb-1.5">
+              <span>Progreso TMDB</span>
+              <span className="tabular-nums">{buscados.toLocaleString('es-ES')} / {(stats.total || 0).toLocaleString('es-ES')} · {pctTmdb} %</span>
+            </div>
+            <div className="h-1.5 rounded-full bg-white/10 overflow-hidden">
+              <div className={`h-full ${pctTmdb >= 100 ? 'bg-nf-ok' : 'bg-nf-red'}`} style={{ width: `${Math.min(pctTmdb, 100)}%` }} />
+            </div>
+          </div>
+        )}
+        <button onClick={reclass} className="mt-4 w-full h-11 rounded-xl bg-white/10 text-[15px] font-medium">Reclasificar catálogo</button>
+        <button onClick={rescanAll} className="mt-2 w-full h-11 rounded-xl bg-nf-red text-[15px] font-semibold">Reescanear todo</button>
       </section>
       {channels.map(c => {
         const p = progress.find((x: any) => x.channel_id === c.id);
