@@ -195,9 +195,17 @@ async def adopt_orphans(extract_path: str, admin_id: int) -> int:
                 continue
             if not (os.path.isdir(full) or os.path.isfile(full)):
                 continue
+            # No puede ser ON CONFLICT (folder_path): ese indice unico se
+            # elimina al arrancar desde que varios episodios comparten carpeta
+            # de temporada, y PostgreSQL rechaza un ON CONFLICT cuya columna no
+            # tiene restriccion que lo respalde. Nunca salto porque el bucle ya
+            # descarta lo que tiene dueño, pero habria reventado la adopcion
+            # entera el dia que coincidieran. WHERE NOT EXISTS hace lo mismo y
+            # no depende de ningun indice.
             await conn.execute("""
                 INSERT INTO downloads (owner_id, folder_name, folder_path, base_name, message_id, channel_id, size_bytes, status)
-                VALUES ($1, $2, $3, $2, 0, NULL, $4, 'done') ON CONFLICT (folder_path) DO NOTHING
+                SELECT $1::int, $2::varchar, $3::varchar, $2::varchar, 0, NULL::bigint, $4::bigint, 'done'
+                WHERE NOT EXISTS (SELECT 1 FROM downloads WHERE folder_path = $3)
             """, admin_id, entry, full, dir_size(full))
             added += 1
         for path, row in known.items():
