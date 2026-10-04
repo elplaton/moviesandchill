@@ -227,8 +227,37 @@ def leer_pistas(path: str) -> dict:
         video["ps4"] = apto4
         video["ps4_motivo"] = motivo4
 
+    fmt = datos.get("format") or {}
     return {"ok": True, "video": video, "audio": audio, "subtitles": subs,
-            "container": (datos.get("format") or {}).get("format_name", "")}
+            "container": fmt.get("format_name", ""),
+            **_peso(fmt)}
+
+
+def _peso(fmt: dict) -> dict:
+    """Duracion, tamaño y bitrate del archivo.
+
+    El bitrate es el numero que decide si un archivo se puede ver mientras se
+    descarga: si son 60 Mbps y la red da 30, va a tirones por mucho que el
+    servidor y el reproductor esten bien, y no hay ajuste que lo arregle (un
+    `<video>` baja el archivo tal cual, no hay calidades que elegir). Hasta
+    ahora no se leia, asi que ante un tiron no habia con que comparar.
+
+    ffprobe no siempre trae `bit_rate` en el `format` (en MKV falta a menudo),
+    asi que si no esta se saca del tamaño y la duracion, que es lo mismo
+    promediado.
+    """
+    def _num(v):
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            return None
+
+    duracion, tamano = _num(fmt.get("duration")), _num(fmt.get("size"))
+    bitrate = _num(fmt.get("bit_rate"))
+    if not bitrate and duracion and tamano and duracion > 0:
+        bitrate = tamano * 8 / duracion
+    return {"duration": duracion, "size": int(tamano) if tamano else None,
+            "bitrate": int(bitrate) if bitrate else None}
 
 
 def mejor_audio(audio: list[dict]) -> int:

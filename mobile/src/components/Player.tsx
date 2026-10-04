@@ -121,7 +121,12 @@ export default function Player({ path, title, subtitle, poster, backdrop, onClos
 
   return (
     <div className="fixed inset-0 z-[70] bg-black">
-      <video ref={ref} src={src} controls autoPlay playsInline poster={backdrop}
+      {/* preload="auto" es lo unico que se le puede pedir a iOS sobre cuanto
+          adelanta: cuanto buffer guarda lo decide el reproductor del sistema
+          segun la velocidad que mida, y no hay forma de exigirle "carga dos
+          minutos antes de empezar". Si el archivo pide mas Mbps de los que da
+          la red, va a tirones y eso no se arregla aqui. */}
+      <video ref={ref} src={src} controls autoPlay playsInline preload="auto" poster={backdrop}
         crossOrigin="use-credentials" x-webkit-airplay="allow"
         className="w-full h-full bg-black object-contain">
         {subs.map(sub => (

@@ -20,6 +20,9 @@ router = APIRouter(prefix="/api", tags=["files"])
 
 _stream_semaphore: asyncio.Semaphore | None = None
 
+# Lo que espera un tramo de video por una plaza antes de servirse igualmente.
+ESPERA_PLAZA = 10
+
 
 def init_files_semaphore(max_streams: int = 3):
     global _stream_semaphore
@@ -288,42 +291,53 @@ async def stream(request: Request, path: str = "", user: Annotated[str, Depends(
     if _stream_semaphore is None:
         init_files_semaphore()
 
-    # El semaforo se adquiere aqui y se suelta en el finally del generador.
-    # Con "async with" envolviendo el return se liberaba al construir la
-    # respuesta, antes de enviar un solo byte, asi que no limitaba nada.
-    await _stream_semaphore.acquire()
-    released = False
-    try:
-        CHUNK = 1024 * 1024
-        content_length = end - start + 1
+    CHUNK = 1024 * 1024
+    content_length = end - start + 1
 
-        async def chunked_stream():
+    async def chunked_stream():
+        # La plaza se pide DENTRO del generador y se suelta en su finally, asi
+        # que cogerla y devolverla son el mismo trozo de codigo.
+        #
+        # Pidiendola en la vista habia un hueco entre el acquire y el primer
+        # tramo enviado: si el cliente se iba justo ahi, el generador no
+        # llegaba a arrancar, su finally no corria y la plaza se quedaba cogida
+        # para siempre. Y un <video> de iPhone abre y cancela rangos
+        # constantemente (al buscar, al llenar su buffer, al volver de segundo
+        # plano), asi que con tres plazas bastan tres cancelaciones con suerte
+        # para que la siguiente reproduccion se quede esperando sin recibir un
+        # byte: la pelicula "se queda pillada" y no hay nada en los logs.
+        plaza = False
+        try:
             try:
-                # Lectura asincrona: con open()/read() sincronos cada chunk de 1MB
-                # bloqueaba el event loop y frenaba al resto de peticiones.
-                async with aiofiles.open(target, "rb") as f:
-                    await f.seek(start)
-                    remaining = content_length
-                    while remaining > 0:
-                        chunk = await f.read(min(CHUNK, remaining))
-                        if not chunk:
-                            break
-                        remaining -= len(chunk)
-                        yield chunk
-            finally:
+                await asyncio.wait_for(_stream_semaphore.acquire(), ESPERA_PLAZA)
+                plaza = True
+            except asyncio.TimeoutError:
+                # Se sirve de todas formas: el limite esta para no reventar el
+                # disco con diez reproducciones a la vez, no para dejar a nadie
+                # mirando una pantalla negra. Queda en el log, que es donde se
+                # ve si de verdad hacen falta mas plazas (TMD_STREAM_MAX).
+                logger.warning("Sin plaza de reproduccion en %ss, se sirve igualmente: %s",
+                               ESPERA_PLAZA, os.path.basename(target))
+            # Lectura asincrona: con open()/read() sincronos cada chunk de 1MB
+            # bloqueaba el event loop y frenaba al resto de peticiones.
+            async with aiofiles.open(target, "rb") as f:
+                await f.seek(start)
+                remaining = content_length
+                while remaining > 0:
+                    chunk = await f.read(min(CHUNK, remaining))
+                    if not chunk:
+                        break
+                    remaining -= len(chunk)
+                    yield chunk
+        finally:
+            if plaza:
                 _stream_semaphore.release()
 
-        headers = {**cabeceras, "Content-Length": str(content_length)}
-        if parcial:
-            headers["Content-Range"] = f"bytes {start}-{end}/{file_size}"
-            response = StreamingResponse(chunked_stream(), status_code=206, media_type=content_type, headers=headers)
-        else:
-            response = StreamingResponse(chunked_stream(), media_type=content_type, headers=headers)
-        released = True  # a partir de aqui lo libera el generador
-        return response
-    finally:
-        if not released:
-            _stream_semaphore.release()
+    headers = {**cabeceras, "Content-Length": str(content_length)}
+    if parcial:
+        headers["Content-Range"] = f"bytes {start}-{end}/{file_size}"
+        return StreamingResponse(chunked_stream(), status_code=206, media_type=content_type, headers=headers)
+    return StreamingResponse(chunked_stream(), media_type=content_type, headers=headers)
 
 
 def _dir_size(path):
