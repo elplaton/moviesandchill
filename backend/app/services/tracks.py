@@ -39,6 +39,11 @@ NOMBRE_IDIOMA = {
 PREFERENCIA = ("spa", "es", "esp", "cas", "lat", "spa-mx")
 
 
+# Audio que un iPhone (y Chrome) decodifican dentro de un MP4. No hay AC-3 ni
+# E-AC3 ni DTS: eso lo sueltan un Apple TV o una tele, pero en el telefono la
+# pelicula se ve y no se oye, sin ningun error.
+AUDIO_APPLE = ("aac", "mp4a", "alac", "mp3", "opus")
+
 # Croma que los dispositivos de Apple decodifican por hardware. Todo lo que
 # no sea 4:2:0 se queda fuera, y los 10 bits solo valen en HEVC.
 CROMA_8 = ("yuv420p", "yuvj420p")
@@ -114,6 +119,28 @@ def video_apto_ps4(video: dict | None) -> tuple[bool, str]:
     # Lo que de verdad separa lo que se ve de lo que no es el codec, los bits
     # y el croma. El limite de 20 Mbps tampoco se mira: no se sabe sin leer el
     # bitrate real, y pasarse se nota como tirones, no como pantalla negra.
+    return True, ""
+
+
+def audio_apto_apple(audio: list[dict] | None) -> tuple[bool, str]:
+    """Si un iPhone puede sonar **todas** las pistas de audio del archivo.
+
+    Se mira pista por pista, y con ffprobe, a proposito: `mediainfo
+    --Inform=Audio;%Format%` imprime el formato de cada pista pegado al
+    siguiente ("AACAC-3EAC3"), asi que preguntar si "aac" esta dentro de esa
+    cadena da que si en cuanto UNA de las tres lo sea. Un archivo con el
+    español en AC-3 y el ingles en AAC pasaba por compatible, se copiaba el
+    audio tal cual y el AC-3 se quedaba como pista activa: imagen sin sonido
+    en el telefono y en Chrome, que tampoco decodifica AC-3.
+
+    Con la lista vacia (ffprobe no esta o fallo) se da por bueno, igual que en
+    el resto del modulo: sin datos no se supone lo peor.
+    """
+    for pista in audio or []:
+        codec = (pista.get("codec") or "").lower()
+        if codec and not any(c in codec for c in AUDIO_APPLE):
+            idioma = pista.get("language_name") or "sin identificar"
+            return False, f"{codec.upper()} en la pista de {idioma} (el iPhone no lo decodifica)"
     return True, ""
 
 
@@ -219,6 +246,7 @@ def leer_pistas(path: str) -> dict:
                 "textual": codec in SUBS_TEXTO,
             })
 
+    apto_audio, motivo_audio = audio_apto_apple(audio)
     apto, motivo = video_apto_apple(video)
     if video is not None:
         video["apple"] = apto
@@ -230,6 +258,7 @@ def leer_pistas(path: str) -> dict:
     fmt = datos.get("format") or {}
     return {"ok": True, "video": video, "audio": audio, "subtitles": subs,
             "container": fmt.get("format_name", ""),
+            "audio_apple": apto_audio, "audio_apple_motivo": motivo_audio,
             **_peso(fmt)}
 
 

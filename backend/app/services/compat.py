@@ -12,7 +12,7 @@ import subprocess
 import time
 
 from app.services.subs import extraer_subtitulos
-from app.services.tracks import leer_pistas, mejor_audio, video_apto_apple
+from app.services.tracks import audio_apto_apple, leer_pistas, mejor_audio, video_apto_apple
 
 logger = logging.getLogger("tmd")
 
@@ -129,6 +129,19 @@ def make_compatible(file_list, on_progress=None):
         if video_ok and not apto:
             video_ok = False
             vnorm = f"{vnorm or '?'} ({motivo_apple})"
+
+        # Y lo mismo con el audio, por la misma razon y otra mas: con varias
+        # pistas, `mediainfo --Inform=Audio;%Format%` las imprime pegadas
+        # ("AACAC-3EAC3"), asi que `"aac" in anorm` daba que si en cuanto UNA
+        # lo fuera. Un archivo con el español en AC-3 y el ingles en AAC pasaba
+        # por compatible, se copiaba el audio tal cual y `_mapeo_audio()`
+        # dejaba el AC-3 como pista activa: en el telefono y en Chrome la
+        # pelicula se ve y no se oye, sin ningun error. ffprobe da el codec de
+        # cada pista por separado.
+        apto_audio, motivo_audio = audio_apto_apple(pistas.get("audio"))
+        if audio_ok and not apto_audio:
+            audio_ok = False
+            anorm = f"{anorm or '?'} ({motivo_audio})"
 
         # Un MP4 ya compatible se dejaba tal cual, pero si trae varias pistas
         # de audio puede venir con todas marcadas como activas: hay
