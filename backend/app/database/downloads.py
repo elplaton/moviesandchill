@@ -5,8 +5,13 @@ todos pueden verla, solo su dueño (o un admin) puede borrarla, y nadie puede
 volver a bajar lo mismo. El tamaño en disco de lo que posee cada cuenta es lo
 que se compara con su cuota.
 """
+import logging
 import os
+import shutil
+
 from app.database.connection import get_pool
+
+logger = logging.getLogger(__name__)
 
 ACTIVE_STATES = ("downloading", "paused", "done")
 
@@ -176,6 +181,79 @@ def dir_size(path: str) -> int:
             except OSError:
                 pass
     return total
+
+
+async def reconciliar_interrumpidas(extract_path: str) -> int:
+    """Pone en su sitio las descargas que se quedaron a medias al apagar.
+
+    Una fila nace apuntando a la carpeta de trabajo (`.dl_<lote>`) con estado
+    `downloading`, y de ahi solo la sacan `move_download()` al terminar o
+    `delete_download()` al cancelar. Las dos viven en el proceso, asi que si el
+    backend se para en mitad de una descarga -- un redespliegue basta -- **nadie
+    vuelve a tocar esa fila nunca**: se queda en `downloading` para siempre.
+
+    Eso no es solo cosmetico. `downloading` esta en ACTIVE_STATES, de modo que
+    la descarga fantasma le sigue comiendo cuota a su dueño, `find_existing()`
+    la da por viva y nadie puede volver a bajar ese titulo, y borrarla desde la
+    app tampoco se puede ("esta descarga sigue en curso: cancelala antes").
+    Sin salida por ningun lado.
+
+    Al arrancar nada puede estar descargando todavia, asi que cada fila asi se
+    resuelve, de menos a mas destructivo:
+
+    1. Si el lote sigue guardado en `paused_batches.json`, la fila deberia
+       decir `paused`: se corrige y no se toca el disco, que las partes ya
+       bajadas se pueden reanudar.
+    2. Si la ruta ya no es la carpeta de trabajo y existe, la descarga llego a
+       moverse a su sitio: se da por terminada con su tamaño real, en vez de
+       tirar algo que esta completo.
+    3. Si no, es una carpeta de trabajo que no se puede reanudar (el estado del
+       lote vivia en memoria y se fue con el proceso): se borra lo que quede,
+       se podan las carpetas vacias y se olvida la fila. El titulo vuelve a
+       estar disponible para descargarlo otra vez.
+    """
+    from app.services.layout import WORK_PREFIX, prune_empty_dirs
+    from app.services.storage import load_paused_batches
+
+    pool = get_pool()
+    if not pool:
+        return 0
+
+    try:
+        pausados = {b.get("folder_path") for b in load_paused_batches().values()}
+    except Exception:
+        pausados = set()
+    base = os.path.realpath(extract_path) if extract_path else None
+
+    arregladas = 0
+    async with pool.acquire() as conn:
+        filas = await conn.fetch("""
+            SELECT d.id, d.folder_path, d.folder_name, u.username AS owner
+            FROM downloads d LEFT JOIN users u ON u.id = d.owner_id
+            WHERE d.status = 'downloading'
+        """)
+        for fila in filas:
+            ruta = fila["folder_path"] or ""
+            quien = fila["owner"] or "sin dueño"
+
+            if ruta in pausados:
+                await conn.execute("UPDATE downloads SET status='paused', updated_at=NOW() WHERE id=$1", fila["id"])
+                logger.info("Descarga interrumpida marcada como pausada: %s (%s)", fila["folder_name"], quien)
+            elif ruta and os.path.exists(ruta) and not os.path.basename(ruta).startswith(WORK_PREFIX):
+                await conn.execute("UPDATE downloads SET status='done', size_bytes=$2, updated_at=NOW() WHERE id=$1",
+                                   fila["id"], dir_size(ruta))
+                logger.info("Descarga interrumpida que ya estaba en su sitio: %s (%s)", fila["folder_name"], quien)
+            else:
+                if ruta and os.path.isdir(ruta) and os.path.basename(ruta).startswith(WORK_PREFIX):
+                    shutil.rmtree(ruta, ignore_errors=True)
+                    if base:
+                        prune_empty_dirs(ruta, base)
+                await conn.execute("DELETE FROM downloads WHERE id=$1", fila["id"])
+                logger.info("Descarga interrumpida y no reanudable, descartada: %s (%s) -- liberada su cuota",
+                            fila["folder_name"], quien)
+            arregladas += 1
+
+    return arregladas
 
 
 async def adopt_orphans(extract_path: str, admin_id: int) -> int:

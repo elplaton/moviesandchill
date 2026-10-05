@@ -112,6 +112,16 @@ async def startup():
     from app.routers.download import init_download_router
     init_download_router(downloader, config)
 
+    # Nada puede estar descargando todavia: lo que diga lo contrario se quedo
+    # colgado al apagar el proceso y le sigue comiendo cuota a su dueño.
+    try:
+        from app.database.downloads import reconciliar_interrumpidas
+        colgadas = await reconciliar_interrumpidas(config["extract_path"])
+        if colgadas:
+            logger.info("Descargas que se quedaron a medias al apagar, resueltas: %d", colgadas)
+    except Exception as e:
+        logger.warning("No se pudieron reconciliar las descargas interrumpidas: %s", e)
+
     # Lo que ya habia en disco antes de que las descargas tuvieran dueño pasa
     # al admin: asi las cuotas y los permisos de borrado son uniformes.
     try:
