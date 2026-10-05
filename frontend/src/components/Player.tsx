@@ -3,39 +3,28 @@ import { audioLabel, fetchTracks, puedeCambiarAudio, streamTicket, subtitleUrl,
          type MediaTracks } from '../services/tracks';
 import { useAirplay } from '../hooks/useAirplay';
 import { IconAirplay, IconClose, IconExpand, IconMute, IconPause, IconPlay, IconSubtitles, IconVolume } from './ui/Icon';
+import { markWatched, resumePoint, setWatched } from '../utils/progress';
 
 interface Props {
   path: string;
   title: string;
   subtitle?: string;
+  /** Para la fila "Continuar viendo": sin esto la tarjeta sale sin caratula
+   *  si el titulo solo se ha visto desde el escritorio. */
+  poster?: string;
+  backdrop?: string;
+  tmdbId?: number;
+  mediaType?: 'movie' | 'series';
   onClose: () => void;
 }
 
 const KEY_HELP = 'Espacio: pausa · ← →: 10 s · ↑ ↓: volumen · F: pantalla completa · M: silencio · Esc: salir';
-const RESUME_KEY = 'mc.progress';
 
 function fmt(s: number): string {
   if (!isFinite(s) || s < 0) s = 0;
   const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = Math.floor(s % 60);
   const mm = String(m).padStart(2, '0'), ss = String(sec).padStart(2, '0');
   return h ? `${h}:${mm}:${ss}` : `${m}:${ss}`;
-}
-
-/** Posición guardada por archivo, compartida con el resto de clientes. */
-function readProgress(path: string): number {
-  try {
-    const list = JSON.parse(localStorage.getItem(RESUME_KEY) || '[]');
-    const hit = list.find((w: any) => w.path === path);
-    if (!hit?.duration) return 0;
-    return hit.position > 60 && hit.position / hit.duration < 0.95 ? hit.position : 0;
-  } catch { return 0; }
-}
-function writeProgress(path: string, title: string, subtitle: string | undefined, position: number, duration: number) {
-  try {
-    const list = JSON.parse(localStorage.getItem(RESUME_KEY) || '[]').filter((w: any) => w.path !== path);
-    if (duration && position / duration < 0.97) list.unshift({ path, title, subtitle, position, duration, updated: Date.now() });
-    localStorage.setItem(RESUME_KEY, JSON.stringify(list.slice(0, 40)));
-  } catch { /* almacenamiento lleno */ }
 }
 
 /**
@@ -45,7 +34,7 @@ function writeProgress(path: string, title: string, subtitle: string | undefined
  * que espera cualquiera, y los controles nativos del navegador no dan ni el
  * título ni un salto de 10 s. La barra se esconde sola mientras se reproduce.
  */
-export default function Player({ path, title, subtitle, onClose }: Props) {
+export default function Player({ path, title, subtitle, poster, backdrop, tmdbId, mediaType, onClose }: Props) {
   const ref = useRef<HTMLVideoElement>(null);
   const boxRef = useRef<HTMLDivElement>(null);
   const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -128,20 +117,48 @@ export default function Player({ path, title, subtitle, onClose }: Props) {
 
   useEffect(() => {
     const v = ref.current; if (!v) return;
-    const start = readProgress(path);
+    // El punto de reanudacion lo da el servidor, asi que llega tarde: puede
+    // resolverse antes o despues de que el video tenga metadatos. Lo aplica el
+    // que llegue el ultimo de los dos, y una sola vez.
+    let inicio = -1;
+    const aplicarInicio = () => {
+      if (inicio <= 0 || !v.duration) return;
+      v.currentTime = inicio;
+      setHint(`Desde ${fmt(inicio)}`);
+      inicio = -1;
+    };
+    resumePoint(path).then((s) => { inicio = s; if (v.readyState >= 1) aplicarInicio(); });
     let lastSave = 0;
 
-    const onMeta = () => { setDuration(v.duration || 0); if (start > 0) { v.currentTime = start; setHint(`Desde ${fmt(start)}`); } };
+    const entrada = () => ({ path, title, subtitle, poster, backdrop,
+                             tmdb_id: tmdbId, media_type: mediaType,
+                             position: v.currentTime, duration: v.duration });
+    const onMeta = () => { setDuration(v.duration || 0); aplicarInicio(); };
     const onTime = () => {
       setTime(v.currentTime);
       const now = Date.now();
-      if (now - lastSave > 5000 && v.duration) { lastSave = now; writeProgress(path, title, subtitle, v.currentTime, v.duration); }
+      if (now - lastSave > 5000 && v.duration) {
+        lastSave = now;
+        // Lo terminado se marca, no se borra: es lo que deja al servidor
+        // ofrecer el episodio siguiente.
+        if (v.currentTime / v.duration >= 0.97) markWatched(entrada());
+        else setWatched(entrada());
+      }
     };
     const onPlay = () => { setPlaying(true); setBuffering(false); wake(); };
     const onPause = () => { setPlaying(false); setUi(true); };
     const onWaiting = () => setBuffering(true);
-    const onEnded = () => { writeProgress(path, title, subtitle, 0, 0); onClose(); };
+    const onEnded = () => {
+      markWatched({ ...entrada(), position: v.duration || 0, duration: v.duration || 0 });
+      onClose();
+    };
+    // Cerrar la pestaña o el navegador no desmonta el componente: sin esto se
+    // perdia justo el minuto por el que se dejo la pelicula.
+    const onSalir = () => { if (v.duration && v.currentTime > 0) setWatched(entrada(), true); };
+    const onOculta = () => { if (document.hidden) onSalir(); };
 
+    window.addEventListener('pagehide', onSalir);
+    document.addEventListener('visibilitychange', onOculta);
     v.addEventListener('loadedmetadata', onMeta);
     v.addEventListener('timeupdate', onTime);
     v.addEventListener('play', onPlay);
@@ -174,11 +191,13 @@ export default function Player({ path, title, subtitle, onClose }: Props) {
       v.removeEventListener('pause', onPause);
       v.removeEventListener('waiting', onWaiting);
       v.removeEventListener('ended', onEnded);
+      window.removeEventListener('pagehide', onSalir);
+      document.removeEventListener('visibilitychange', onOculta);
       window.removeEventListener('keydown', onKey);
       document.body.style.overflow = '';
       if (hideTimer.current) clearTimeout(hideTimer.current);
       if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
-      if (v.duration && v.currentTime > 0) writeProgress(path, title, subtitle, v.currentTime, v.duration);
+      if (v.duration && v.currentTime > 0) setWatched(entrada(), true);
     };
   }, [path]); // eslint-disable-line react-hooks/exhaustive-deps
 

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { apiFetch, streamUrl } from '../services/api';
 import { fetchMediaFiles } from '../services/media';
-import { continueWatching, type Watched } from '../tv/progress';
+import { cachedContinueWatching, continueWatching, importLocalProgress, type Watched } from '../tv/progress';
 import { toast } from '../tv/toast';
 import Screen from '../components/Screen';
 import Row from '../components/Row';
@@ -33,14 +33,20 @@ function toFeatured(item: BrowseItem, rowKey: string): Featured {
 }
 
 function watchedToFeatured(w: Watched): Featured {
+  // La tarjeta del episodio siguiente no lleva porcentaje: no se ha visto
+  // nada de el todavia, el 0 % solo seria ruido.
+  const visto = w.duration > 0 ? Math.round((w.position / w.duration) * 100) : 0;
+  const subtitulo = w.next_episode
+    ? `Empezar ${w.subtitle || 'el siguiente'}`
+    : w.subtitle ? `${w.subtitle} · ${visto} %` : `${visto} % visto`;
   return {
     key: `cw-${w.path}`,
     title: w.title,
     kind: 'file',
     poster: w.poster,
     backdrop: w.backdrop,
-    subtitle: w.subtitle ? `${w.subtitle} · ${Math.round((w.position / w.duration) * 100)} %` : `${Math.round((w.position / w.duration) * 100)} % visto`,
-    progress: w.position / w.duration,
+    subtitle: subtitulo,
+    progress: w.duration > 0 ? w.position / w.duration : 0,
   };
 }
 
@@ -54,7 +60,17 @@ export default function Catalog({ filter, heading }: Props) {
   const [focusRow, setFocusRow] = useState(0);
   const [detail, setDetail] = useState<DetailInput | null>(null);
   const [playing, setPlaying] = useState<Watched | null>(null);
-  const [resume, setResume] = useState<Watched[]>(() => (filter ? [] : continueWatching()));
+  // De la cache primero, para que la fila este ahi nada mas abrir, y acto
+  // seguido lo que diga el servidor (que sabe lo visto en el movil o la web).
+  const [resume, setResume] = useState<Watched[]>(() => (filter ? [] : cachedContinueWatching()));
+
+  useEffect(() => {
+    if (filter) return;
+    // Lo que esta tele tuviera guardado de antes se sube una sola vez.
+    importLocalProgress().finally(() => {
+      continueWatching().then(setResume).catch(() => {});
+    });
+  }, [filter]);
 
   useEffect(() => {
     (async () => {
@@ -90,7 +106,7 @@ export default function Catalog({ filter, heading }: Props) {
 
   const onPlayerClose = useCallback(() => {
     setPlaying(null);
-    setResume(continueWatching());
+    continueWatching().then(setResume).catch(() => {});
   }, []);
 
   const hasResume = resume.length > 0;

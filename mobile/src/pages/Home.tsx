@@ -4,7 +4,7 @@ import { apiFetch } from '../services/api';
 import Poster from '../components/Poster';
 import Row from '../components/Row';
 import Player from '../components/Player';
-import { continueWatching, type Watched } from '../utils/progress';
+import { cachedContinueWatching, continueWatching, importLocalProgress, type Watched } from '../utils/progress';
 import { IPlay, IStar } from '../components/Icons';
 import type { BrowseRow } from '../types';
 
@@ -12,11 +12,29 @@ import type { BrowseRow } from '../types';
 export default function Home() {
   const [rows, setRows] = useState<BrowseRow[]>([]);
   const [loading, setLoading] = useState(true);
-  const [resume, setResume] = useState<Watched[]>(() => continueWatching());
+  // De la cache primero, para que la fila este ahi al abrir la app, y acto
+  // seguido lo que diga el servidor (que es quien manda y quien sabe lo visto
+  // en la tele o en el escritorio).
+  const [resume, setResume] = useState<Watched[]>(() => cachedContinueWatching());
   const [playing, setPlaying] = useState<Watched | null>(null);
 
   useEffect(() => {
     apiFetch('/browse/home').then(r => r.json()).then(d => setRows(d.rows || [])).catch(() => {}).finally(() => setLoading(false));
+  }, []);
+
+  // Al volver a la pestaña se relee: el telefono suspende la app y lo que se
+  // haya visto mientras tanto en otro aparato no llegaria solo.
+  useEffect(() => {
+    const refrescar = () => { continueWatching().then(setResume).catch(() => {}); };
+    // Lo que este aparato tuviera guardado de antes se sube una sola vez.
+    importLocalProgress().finally(refrescar);
+    const alVolver = () => { if (!document.hidden) refrescar(); };
+    document.addEventListener('visibilitychange', alVolver);
+    window.addEventListener('focus', refrescar);
+    return () => {
+      document.removeEventListener('visibilitychange', alVolver);
+      window.removeEventListener('focus', refrescar);
+    };
   }, []);
 
   const hero = rows.find(r => r.genre === 'Novedades')?.items[0] || rows[0]?.items[0];
@@ -48,10 +66,12 @@ export default function Home() {
               <div className="relative rounded-lg overflow-hidden bg-nf-card aspect-video">
                 {(w.backdrop || w.poster) && <img src={w.backdrop || w.poster} alt="" className="absolute inset-0 w-full h-full object-cover" />}
                 <span className="absolute inset-0 flex items-center justify-center"><span className="w-10 h-10 rounded-full bg-black/60 flex items-center justify-center"><span className="w-5 h-5 ml-0.5"><IPlay /></span></span></span>
-                <div className="absolute left-0 right-0 bottom-0 h-1 bg-white/25"><div className="h-full bg-nf-red" style={{ width: `${Math.round((w.position / w.duration) * 100)}%` }} /></div>
+                {w.duration > 0 && <div className="absolute left-0 right-0 bottom-0 h-1 bg-white/25"><div className="h-full bg-nf-red" style={{ width: `${Math.round((w.position / w.duration) * 100)}%` }} /></div>}
               </div>
               <p className="mt-1.5 text-[12px] font-medium truncate">{w.title}</p>
-              {w.subtitle && <p className="text-[11px] text-nf-text3 truncate">{w.subtitle}</p>}
+              <p className="text-[11px] text-nf-text3 truncate">
+                {w.next_episode ? `Empezar ${w.subtitle || 'el siguiente'}` : w.subtitle || '\u00a0'}
+              </p>
             </button>
           ))}
         </Row>
@@ -65,7 +85,7 @@ export default function Home() {
       {loading && <p className="px-4 text-nf-text3 text-[14px]">Cargando…</p>}
       {!loading && rows.length === 0 && <p className="px-4 text-nf-text3 text-[14px]">Todavía no hay nada indexado.</p>}
 
-      {playing && <Player path={playing.path} title={playing.title} subtitle={playing.subtitle} poster={playing.poster} backdrop={playing.backdrop} onClose={() => { setPlaying(null); setResume(continueWatching()); }} />}
+      {playing && <Player path={playing.path} title={playing.title} subtitle={playing.subtitle} poster={playing.poster} backdrop={playing.backdrop} onClose={() => { setPlaying(null); continueWatching().then(setResume).catch(() => {}); }} />}
     </div>
   );
 }

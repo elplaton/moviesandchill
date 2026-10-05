@@ -3,7 +3,7 @@ import { apiFetch, streamUrl } from '../services/api';
 import { fetchMetadataBatch } from '../services/tmdb';
 import { fetchMediaFiles } from '../services/media';
 import { useDownloadsCtx } from '../contexts/DownloadsContext';
-import { continueWatching, type Watched } from '../tv/progress';
+import { cachedContinueWatching, continueWatching, type Watched } from '../tv/progress';
 import { toast } from '../tv/toast';
 import { cleanTitle } from '../utils/text';
 import Screen from '../components/Screen';
@@ -35,7 +35,9 @@ export default function Library() {
   const [playing, setPlaying] = useState<{ path: string; title: string; subtitle?: string; poster?: string; backdrop?: string } | null>(null);
   const [detail, setDetail] = useState<DetailInput | null>(null);
   const [batchDialog, setBatchDialog] = useState<Batch | null>(null);
-  const [resume, setResume] = useState<Watched[]>(() => continueWatching());
+  const [resume, setResume] = useState<Watched[]>(() => cachedContinueWatching());
+
+  useEffect(() => { continueWatching().then(setResume).catch(() => {}); }, []);
 
   const load = useCallback(async () => {
     try {
@@ -154,7 +156,9 @@ export default function Library() {
         <Row index={idx('resume')} title="Continuar viendo">
           {resume.map((w, i) => (
             <PosterCard key={w.path} index={i} autoFocus={i === 0}
-              item={{ key: `cw-${w.path}`, kind: 'file', title: w.title, poster: w.poster, backdrop: w.backdrop, subtitle: w.subtitle, progress: w.position / w.duration }}
+              item={{ key: `cw-${w.path}`, kind: 'file', title: w.title, poster: w.poster, backdrop: w.backdrop,
+                      subtitle: w.next_episode ? `Empezar ${w.subtitle || 'el siguiente'}` : w.subtitle,
+                      progress: w.duration > 0 ? w.position / w.duration : 0 }}
               onSelect={() => setPlaying({ path: w.path, title: w.title, subtitle: w.subtitle, poster: w.poster, backdrop: w.backdrop })} />
           ))}
         </Row>
@@ -211,7 +215,7 @@ export default function Library() {
       {playing && (
         <Player src={streamUrl(playing.path)} path={playing.path} title={playing.title} subtitle={playing.subtitle}
           poster={playing.poster} backdrop={playing.backdrop}
-          onClose={() => { setPlaying(null); setResume(continueWatching()); }} />
+          onClose={() => { setPlaying(null); continueWatching().then(setResume).catch(() => {}); }} />
       )}
     </Screen>
   );

@@ -75,6 +75,9 @@ body {
   .card:hover { transform: scale(1.06); z-index: 30; }
   .card:hover .card-media { box-shadow: 0 18px 44px rgba(0,0,0,0.65); }
   .card:hover .card-info { opacity: 1; transform: translateY(0); pointer-events: auto; }
+  /* El aspa de "quitar de Continuar viendo" solo con el ratón encima: es una
+     acción destructiva y no tiene por qué estar siempre a la vista. */
+  .card:hover .card-quitar { opacity: 1; }
 }
 .card:focus-within { transform: scale(1.06); z-index: 30; }
 .card:focus-within .card-info { opacity: 1; transform: translateY(0); pointer-events: auto; }

@@ -268,7 +268,9 @@ export default function TitleSheet({ input, onClose }: Props) {
       )}
 
       {playing && (
-        <Player path={playing.path} title={meta.title} subtitle={playing.subtitle} onClose={() => setPlaying(null)} />
+        <Player path={playing.path} title={meta.title} subtitle={playing.subtitle}
+          poster={meta.poster} backdrop={meta.backdrop} tmdbId={input.tmdbId} mediaType={kind}
+          onClose={() => setPlaying(null)} />
       )}
     </div>
   );

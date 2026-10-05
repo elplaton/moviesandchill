@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { fetchSubtitles, streamTicket, subtitleUrl, type ExternalSubtitle } from '../services/tracks';
 import { useAirplay } from '../hooks/useAirplay';
 import { IAirplay } from './Icons';
-import { clearWatched, resumePoint, setWatched } from '../utils/progress';
+import { markWatched, resumePoint, setWatched } from '../utils/progress';
 
 interface Props { path: string; title: string; subtitle?: string; poster?: string; backdrop?: string; onClose: () => void }
 
@@ -45,18 +45,38 @@ export default function Player({ path, title, subtitle, poster, backdrop, onClos
 
   useEffect(() => {
     const v = ref.current; if (!v) return;
-    const start = resumePoint(path);
+    // El punto de reanudacion lo da el servidor, asi que llega tarde: puede
+    // resolverse antes o despues de que el video tenga metadatos. Lo aplica el
+    // que llegue el ultimo de los dos, y una sola vez.
+    let inicio = -1;
+    const aplicarInicio = () => {
+      if (inicio <= 0 || !v.duration) return;
+      v.currentTime = inicio;
+      inicio = -1;
+    };
+    resumePoint(path).then((s) => { inicio = s; if (v.readyState >= 1) aplicarInicio(); });
     let last = 0;
     let closed = false;
     const close = () => { if (closed) return; closed = true; onClose(); };
 
-    const onMeta = () => { if (start > 0) v.currentTime = start; };
+    const entrada = () => ({ path, title, subtitle, poster, backdrop,
+                             position: v.currentTime, duration: v.duration });
+    const onMeta = () => aplicarInicio();
     const onTime = () => {
       const now = Date.now(); if (now - last < 5000 || !v.duration) return; last = now;
-      if (v.currentTime / v.duration >= 0.97) clearWatched(path);
-      else setWatched({ path, title, subtitle, poster, backdrop, position: v.currentTime, duration: v.duration });
+      // Lo terminado se marca, no se borra: es lo que deja al servidor ofrecer
+      // el episodio siguiente.
+      if (v.currentTime / v.duration >= 0.97) markWatched(entrada());
+      else setWatched(entrada());
     };
-    const onEnded = () => { clearWatched(path); history.state?.player ? history.back() : close(); };
+    const onEnded = () => {
+      markWatched({ ...entrada(), position: v.duration || 0, duration: v.duration || 0 });
+      history.state?.player ? history.back() : close();
+    };
+    // El telefono no desmonta nada al bloquear la pantalla o cambiar de app:
+    // sin esto se perdia justo el minuto por el que se dejo la pelicula.
+    const onSalir = () => { if (v.duration && v.currentTime > 0) setWatched(entrada(), true); };
+    const onOculta = () => { if (document.hidden) onSalir(); };
 
     let entered = false;
     const goFull = () => {
@@ -93,6 +113,8 @@ export default function Player({ path, title, subtitle, poster, backdrop, onClos
 
     history.pushState({ player: true }, '');
     window.addEventListener('popstate', onPop);
+    window.addEventListener('pagehide', onSalir);
+    document.addEventListener('visibilitychange', onOculta);
     v.addEventListener('loadedmetadata', onMeta);
     v.addEventListener('timeupdate', onTime);
     v.addEventListener('ended', onEnded);
@@ -103,6 +125,8 @@ export default function Player({ path, title, subtitle, poster, backdrop, onClos
 
     return () => {
       window.removeEventListener('popstate', onPop);
+      window.removeEventListener('pagehide', onSalir);
+      document.removeEventListener('visibilitychange', onOculta);
       v.removeEventListener('loadedmetadata', onMeta);
       v.removeEventListener('timeupdate', onTime);
       v.removeEventListener('ended', onEnded);
@@ -115,7 +139,7 @@ export default function Player({ path, title, subtitle, poster, backdrop, onClos
       (screen.orientation as any)?.unlock?.();
       // Si se cerro sin pasar por el historial (fin del video), se retira la entrada.
       if (history.state?.player) history.back();
-      if (v.duration && v.currentTime > 0) setWatched({ path, title, subtitle, poster, backdrop, position: v.currentTime, duration: v.duration });
+      if (v.duration && v.currentTime > 0) setWatched(entrada(), true);
     };
   }, [path]); // eslint-disable-line react-hooks/exhaustive-deps
 

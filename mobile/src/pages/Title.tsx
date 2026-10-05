@@ -6,7 +6,7 @@ import { useLibrary, type LocalFile } from '../contexts/LibraryContext';
 import { useAuth } from '../contexts/AuthContext';
 import { useFavorites } from '../contexts/FavoritesContext';
 import { toast } from '../utils/toast';
-import { resumePoint } from '../utils/progress';
+import { cachedResumePoint } from '../utils/progress';
 import { groupEpisodes, groupVersions, seasonLabel, episodeLabel, type Version } from '../utils/versions';
 import Player from '../components/Player';
 import { IBack, IHeart, IPlay, IStar, ITrash } from '../components/Icons';
@@ -118,8 +118,8 @@ export default function Title() {
   const playable = useMemo(() => {
     const ready = versions.map(v => ({ v, f: v.localPath ? { name: v.fileName, path: v.localPath, owner: v.owner || 'admin', canDelete: !!v.canDelete } : localFor(v.fileName, v.season, v.episode, meta?.title) })).filter(x => x.f) as { v: Version; f: LocalFile }[];
     if (!ready.length) return null;
-    const r = ready.find(x => resumePoint(x.f.path) > 0) || ready[0];
-    return { path: r.f.path, resume: !!ready.find(x => resumePoint(x.f.path) > 0), subtitle: r.v.episode !== undefined ? `${r.v.season ?? ''}x${String(r.v.episode).padStart(2, '0')}` : undefined };
+    const r = ready.find(x => cachedResumePoint(x.f.path) > 0) || ready[0];
+    return { path: r.f.path, resume: !!ready.find(x => cachedResumePoint(x.f.path) > 0), subtitle: r.v.episode !== undefined ? `${r.v.season ?? ''}x${String(r.v.episode).padStart(2, '0')}` : undefined };
   }, [versions, localFor, meta]);
 
   const marcado = !!tmdbId && esFavorito(tmdbId, isSeries ? 'series' : 'movie');

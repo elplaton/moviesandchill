@@ -147,6 +147,37 @@ async def _ensure_tables():
                 PRIMARY KEY (user_id, tmdb_id, media_type)
             )
         """)
+        # Por donde va cada cuenta en cada archivo. La clave es la ruta
+        # **relativa** a la biblioteca: la absoluta cambia entre Docker y el
+        # modo de desarrollo, y entonces el mismo video seria otro.
+        #
+        # `grupo` es la carpeta del titulo (la de primer nivel dentro de la
+        # biblioteca) y es lo que hace que "Continuar viendo" enseñe **una
+        # tarjeta por titulo**: los episodios de una serie y las dos calidades
+        # de una pelicula comparten grupo, asi que solo sale el mas reciente.
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS playback_progress (
+                user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                path       VARCHAR(1000) NOT NULL,
+                grupo      VARCHAR(500) NOT NULL,
+                title      VARCHAR(500),
+                subtitle   VARCHAR(300),
+                poster     VARCHAR(500),
+                backdrop   VARCHAR(500),
+                tmdb_id    INTEGER,
+                tmdb_type  VARCHAR(10),
+                season     INTEGER,
+                episode    INTEGER,
+                position   DOUBLE PRECISION NOT NULL DEFAULT 0,
+                duration   DOUBLE PRECISION NOT NULL DEFAULT 0,
+                updated_at TIMESTAMP DEFAULT NOW(),
+                PRIMARY KEY (user_id, path)
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_progress_reciente
+            ON playback_progress (user_id, updated_at DESC)
+        """)
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS downloads (
                 id          SERIAL PRIMARY KEY,

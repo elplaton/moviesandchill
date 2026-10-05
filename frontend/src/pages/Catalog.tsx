@@ -1,11 +1,15 @@
-import { useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import Shell from '../components/Shell';
 import Rail from '../components/Rail';
 import Card from '../components/Card';
+import ContinueCard from '../components/ContinueCard';
 import Hero from '../components/Hero';
+import Player from '../components/Player';
 import TitleSheet from '../components/TitleSheet';
 import Button from '../components/ui/Button';
 import { useCatalog } from '../hooks/useCatalog';
+import { cachedContinueWatching, clearWatched, continueWatching, importLocalProgress,
+         type Watched } from '../utils/progress';
 import { IconInfo, IconPlay } from '../components/ui/Icon';
 import type { BrowseItem } from '../types';
 
@@ -18,6 +22,30 @@ interface Props {
 /** Portada, Películas y Series: los tres son carriles sobre el mismo catálogo. */
 export default function Catalog({ filter, heading }: Props) {
   const { rows, loading, sheet, setSheet, open } = useCatalog(filter);
+  // "Continuar viendo" solo en la portada: en Películas y Series estorbaría.
+  // De la caché primero para que esté ahí sin esperar a la red, y acto seguido
+  // lo que diga el servidor, que es quien sabe lo visto en el móvil o la tele.
+  const [resume, setResume] = useState<Watched[]>(() => (filter ? [] : cachedContinueWatching()));
+  const [playing, setPlaying] = useState<Watched | null>(null);
+
+  const refrescar = useCallback(() => {
+    if (filter) return;
+    // Lo que este navegador tuviera guardado de antes se sube una sola vez,
+    // para que nadie pierda por dónde iba al actualizar.
+    importLocalProgress().finally(() => {
+      continueWatching().then(setResume).catch(() => {});
+    });
+  }, [filter]);
+
+  useEffect(() => { refrescar(); }, [refrescar]);
+
+  const quitar = useCallback((w: Watched) => {
+    // Se quita a la vista antes de que conteste el servidor, y si falla la
+    // próxima lectura lo devuelve. Es lo mismo que hace el corazón de
+    // favoritos: una lista que tarda en reaccionar parece rota.
+    setResume(prev => prev.filter(x => x.path !== w.path));
+    clearWatched(w.path).catch(() => {});
+  }, []);
 
   // El destacado sale de Novedades, que es lo más reciente y con mejor imagen.
   const hero = useMemo(() => {
@@ -54,6 +82,15 @@ export default function Catalog({ filter, heading }: Props) {
         </div>
       )}
 
+      {resume.length > 0 && (
+        <Rail title="Continuar viendo">
+          {resume.map(w => (
+            <ContinueCard key={w.path} item={w}
+              onPlay={() => setPlaying(w)} onRemove={() => quitar(w)} />
+          ))}
+        </Rail>
+      )}
+
       {rows.map(row => (
         <Rail key={row.genre} title={row.genre}>
           {row.items.map(item => card(item, row.genre))}
@@ -70,6 +107,12 @@ export default function Catalog({ filter, heading }: Props) {
 
       <div className="h-16" />
       {sheet && <TitleSheet input={sheet} onClose={() => setSheet(null)} />}
+      {playing && (
+        <Player path={playing.path} title={playing.title} subtitle={playing.subtitle}
+          poster={playing.poster} backdrop={playing.backdrop}
+          tmdbId={playing.tmdb_id ?? undefined} mediaType={playing.media_type}
+          onClose={() => { setPlaying(null); refrescar(); }} />
+      )}
     </Shell>
   );
 }

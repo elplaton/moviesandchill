@@ -5,7 +5,7 @@ import { apiFetch, streamUrl } from '../services/api';
 import { useDownloadsCtx } from '../contexts/DownloadsContext';
 import { useFavorites } from '../contexts/FavoritesContext';
 import { toast } from '../tv/toast';
-import { resumePoint } from '../tv/progress';
+import { cachedResumePoint } from '../tv/progress';
 import { bigBackdrop } from './Hero';
 import Dialog from './Dialog';
 import Overlay from './Overlay';
@@ -284,7 +284,7 @@ export default function TitleDetail({ input, onClose }: Props) {
   const playable = useMemo(() => {
     const ready = versions.map((v) => ({ v, p: pathOf(v) })).filter((x) => !!x.p) as { v: Version; p: string }[];
     if (!ready.length) return null;
-    const resumed = ready.find((x) => resumePoint(x.p) > 0);
+    const resumed = ready.find((x) => cachedResumePoint(x.p) > 0);
     const pick = resumed || ready[0];
     const sub = pick.v.episode !== undefined ? `${pick.v.season ?? ''}x${String(pick.v.episode).padStart(2, '0')}` : undefined;
     return { path: pick.p, subtitle: sub, resume: !!resumed };

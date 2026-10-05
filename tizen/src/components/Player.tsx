@@ -5,7 +5,7 @@ import { pushMediaHandler, pushRawHandler } from '../focus/keys';
 import { audioLabel, fetchTracks, subtitleUrl, type MediaTracks } from '../services/tracks';
 import { streamTicket, streamUrl } from '../services/api';
 import { soloPuntero } from '../tv/platform';
-import { clearWatched, resumePoint, setWatched } from '../tv/progress';
+import { markWatched, resumePoint, setWatched } from '../tv/progress';
 import { toast } from '../tv/toast';
 import { IconPause, IconPlay } from './Icons';
 
@@ -81,8 +81,13 @@ export default function Player({ src, path, title, subtitle, poster, backdrop, o
     const now = Date.now();
     if (!force && now - lastSave.current < SAVE_EVERY_MS) return;
     lastSave.current = now;
-    if (v.currentTime / v.duration >= 0.97) clearWatched(path);
-    else setWatched({ path, title, subtitle, poster, backdrop, position: v.currentTime, duration: v.duration });
+    const entrada = { path, title, subtitle, poster, backdrop,
+                      position: v.currentTime, duration: v.duration };
+    // Lo terminado se marca, no se borra: es lo que deja al servidor ofrecer
+    // el episodio siguiente. `force` va tambien como keepalive, porque los
+    // guardados forzados son los de cerrar y ahi la peticion normal se cancela.
+    if (v.currentTime / v.duration >= 0.97) markWatched(entrada);
+    else setWatched(entrada, force);
   }, [path, title, subtitle, poster, backdrop]);
 
   const close = useCallback(() => {
@@ -236,16 +241,31 @@ export default function Player({ src, path, title, subtitle, poster, backdrop, o
   useEffect(() => {
     const v = videoRef.current;
     if (!v) return;
-    const start = resumePoint(path);
+    // El punto de reanudacion lo da el servidor, asi que llega tarde: puede
+    // resolverse antes o despues de que el video tenga metadatos. Lo aplica el
+    // que llegue el ultimo de los dos, y una sola vez.
+    let inicio = -1;
+    const aplicarInicio = () => {
+      if (inicio <= 0 || !v.duration) return;
+      v.currentTime = inicio;
+      toast(`Continuando desde ${fmt(inicio)}`);
+      inicio = -1;
+    };
+    resumePoint(path).then((s) => { inicio = s; if (v.readyState >= 1) aplicarInicio(); });
     const onMeta = () => {
       setDuration(v.duration || 0);
-      if (start > 0) {
-        v.currentTime = start;
-        toast(`Continuando desde ${fmt(start)}`);
-      }
+      aplicarInicio();
     };
     const onTime = () => { setTime(v.currentTime); save(); };
-    const onEnded = () => { clearWatched(path); onClose(); };
+    const onEnded = () => {
+      markWatched({ path, title, subtitle, poster, backdrop,
+                    position: v.duration || 0, duration: v.duration || 0 });
+      onClose();
+    };
+    // Salir de la app o apagar la tele no desmonta nada: sin esto se perdia
+    // justo el minuto por el que se dejo la pelicula, que es el que importa.
+    const onSalir = () => save(true);
+    const onOculta = () => { if (document.hidden) save(true); };
     const onWaiting = () => setBuffering(true);
     // El estado se lee del elemento, no se supone: si el navegador bloquea el
     // arranque automatico (pasa en WebKit cuando el src llega despues del
@@ -265,6 +285,8 @@ export default function Player({ src, path, title, subtitle, poster, backdrop, o
     v.addEventListener('playing', onPlaying);
     v.addEventListener('canplay', onPlaying);
     v.addEventListener('error', onError);
+    window.addEventListener('pagehide', onSalir);
+    document.addEventListener('visibilitychange', onOculta);
     showOsd();
     return () => {
       v.removeEventListener('loadedmetadata', onMeta);
@@ -276,6 +298,8 @@ export default function Player({ src, path, title, subtitle, poster, backdrop, o
       v.removeEventListener('playing', onPlaying);
       v.removeEventListener('canplay', onPlaying);
       v.removeEventListener('error', onError);
+      window.removeEventListener('pagehide', onSalir);
+      document.removeEventListener('visibilitychange', onOculta);
       if (osdTimer.current) clearTimeout(osdTimer.current);
     };
   }, [path, save, onClose, showOsd]);
