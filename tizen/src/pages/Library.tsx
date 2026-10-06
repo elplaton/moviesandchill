@@ -37,6 +37,12 @@ export default function Library() {
   const [detail, setDetail] = useState<DetailInput | null>(null);
   const [batchDialog, setBatchDialog] = useState<Batch | null>(null);
   const [resume, setResume] = useState<Watched[]>(() => cachedContinueWatching());
+  // Estable a proposito: si cambia en cada render, el efecto del reproductor se
+  // vuelve a montar con el y reanuda el video otra vez (ver Player.tsx).
+  const cerrarPlayer = useCallback(() => {
+    setPlaying(null);
+    continueWatching().then(setResume).catch(() => {});
+  }, []);
 
   useEffect(() => { continueWatching().then(setResume).catch(() => {}); }, []);
 
@@ -218,7 +224,7 @@ export default function Library() {
         <Player src={streamUrl(playing.path)} path={playing.path} title={playing.title} subtitle={playing.subtitle}
           poster={playing.poster} backdrop={playing.backdrop}
           tmdbId={playing.tmdb_id ?? undefined} mediaType={playing.media_type}
-          onClose={() => { setPlaying(null); continueWatching().then(setResume).catch(() => {}); }} />
+          onClose={cerrarPlayer} />
       )}
     </Screen>
   );

@@ -128,6 +128,9 @@ export default function TitleDetail({ input, onClose }: Props) {
   const { downloadStates, download, cancelBatch, pauseBatch, rutaDe, rutaEpisodio, recargar } = useDownloadsCtx();
   const { esFavorito, alternar } = useFavorites();
   const [playing, setPlaying] = useState<{ path: string; title: string; subtitle?: string } | null>(null);
+  // Estable a proposito: si cambia en cada render, el efecto del reproductor
+  // se vuelve a montar con el y reanuda el video otra vez (ver Player.tsx).
+  const cerrarPlayer = useCallback(() => setPlaying(null), []);
   const [dialog, setDialog] = useState<{
     title: string; text?: string; actions: { label: string; onSelect: () => void; primary?: boolean }[];
     /** Version cuyo progreso se enseña en vivo; si deja de estar en curso, el cuadro se cierra. */
@@ -436,7 +439,7 @@ export default function TitleDetail({ input, onClose }: Props) {
         <Player src={streamUrl(playing.path)} path={playing.path} title={playing.title} subtitle={playing.subtitle}
           poster={meta.poster} backdrop={meta.backdrop}
           tmdbId={input.tmdbId} mediaType={kind}
-          onClose={() => setPlaying(null)} />
+          onClose={cerrarPlayer} />
       )}
     </div>
     </Overlay>

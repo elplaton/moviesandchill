@@ -102,6 +102,12 @@ export default function Player({ src, path, title, subtitle, poster, backdrop, t
     onClose();
   }, [save, onClose]);
 
+  // Lo ultimo que se sabe de las funciones que usa el efecto de abajo, para
+  // que ese efecto pueda depender solo de `path` sin quedarse con versiones
+  // viejas. Se actualiza en cada render, que es justo lo que hace falta.
+  const ultimas = useRef({ save, onClose, showOsd });
+  ultimas.current = { save, onClose, showOsd };
+
   const togglePlay = useCallback(() => {
     const v = videoRef.current;
     if (!v) return;
@@ -245,35 +251,52 @@ export default function Player({ src, path, title, subtitle, poster, backdrop, t
     else if (key === 'forward') seek(1);
   }), [togglePlay, seek, close, showOsd]);
 
+  /**
+   * Que archivo se ha reanudado ya.
+   *
+   * Vive en un ref y no en el efecto porque **tiene que sobrevivir a que el
+   * efecto se vuelva a montar**, y se monta: sus dependencias incluian
+   * `onClose`, que en la ficha es `() => setPlaying(null)` —una funcion nueva
+   * en cada render del padre—. Cada render volvia a pedir el punto de
+   * reanudacion y a aplicarlo, o sea que el capitulo saltaba al minuto
+   * guardado una y otra vez, sin parar. No se veia hasta hoy porque el
+   * progreso no llegaba al servidor (`/api/api/progress`) y el punto era
+   * siempre 0, que no mueve nada.
+   */
+  const reanudado = useRef<string | null>(null);
+
   useEffect(() => {
     const v = videoRef.current;
     if (!v) return;
     // El punto de reanudacion lo da el servidor, asi que llega tarde: puede
     // resolverse antes o despues de que el video tenga metadatos. Lo aplica el
-    // que llegue el ultimo de los dos, y una sola vez.
+    // que llegue el ultimo de los dos, y una sola vez por archivo.
     let inicio = -1;
     const aplicarInicio = () => {
-      if (inicio <= 0 || !v.duration) return;
+      if (inicio <= 0 || !v.duration || reanudado.current === path) return;
+      reanudado.current = path;
       v.currentTime = inicio;
       toast(`Continuando desde ${fmt(inicio)}`);
       inicio = -1;
     };
-    resumePoint(path).then((s) => { inicio = s; if (v.readyState >= 1) aplicarInicio(); });
+    if (reanudado.current !== path) {
+      resumePoint(path).then((s) => { inicio = s; if (v.readyState >= 1) aplicarInicio(); });
+    }
     const onMeta = () => {
       setDuration(v.duration || 0);
       aplicarInicio();
     };
-    const onTime = () => { setTime(v.currentTime); save(); };
+    const onTime = () => { setTime(v.currentTime); ultimas.current.save(); };
     const onEnded = () => {
       markWatched({ path, title, subtitle, poster, backdrop,
                     tmdb_id: tmdbId ?? null, media_type: mediaType,
                     position: v.duration || 0, duration: v.duration || 0 });
-      onClose();
+      ultimas.current.onClose();
     };
     // Salir de la app o apagar la tele no desmonta nada: sin esto se perdia
     // justo el minuto por el que se dejo la pelicula, que es el que importa.
-    const onSalir = () => save(true);
-    const onOculta = () => { if (document.hidden) save(true); };
+    const onSalir = () => ultimas.current.save(true);
+    const onOculta = () => { if (document.hidden) ultimas.current.save(true); };
     const onWaiting = () => setBuffering(true);
     // El estado se lee del elemento, no se supone: si el navegador bloquea el
     // arranque automatico (pasa en WebKit cuando el src llega despues del
@@ -295,7 +318,7 @@ export default function Player({ src, path, title, subtitle, poster, backdrop, t
     v.addEventListener('error', onError);
     window.addEventListener('pagehide', onSalir);
     document.addEventListener('visibilitychange', onOculta);
-    showOsd();
+    ultimas.current.showOsd();
     return () => {
       v.removeEventListener('loadedmetadata', onMeta);
       v.removeEventListener('timeupdate', onTime);
@@ -310,7 +333,11 @@ export default function Player({ src, path, title, subtitle, poster, backdrop, t
       document.removeEventListener('visibilitychange', onOculta);
       if (osdTimer.current) clearTimeout(osdTimer.current);
     };
-  }, [path, save, onClose, showOsd]);
+    // Solo `path`: lo demas va por referencia (ver `ultimas`). Con `save`,
+    // `onClose` y `showOsd` aqui, el efecto se desmontaba y volvia a montarse
+    // en cada render del padre —diez oyentes fuera y diez dentro— y de paso
+    // reanudaba el video otra vez.
+  }, [path]);
 
   useEffect(() => {
     if (!seekHint) return;
