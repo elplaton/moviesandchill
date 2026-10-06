@@ -30,8 +30,12 @@ export default defineConfig(({ mode }) => ({
     // no sabe leer y la pagina se queda en blanco. Safari 11 cubre el WebKit
     // de los firmwares que se ven hoy (605 y posteriores); si una consola muy
     // vieja se queda en blanco, baja a safari10.
+    //
+    // El modo `tv` es el que sirve nginx en /tv/ y lo cargan TODAS las teles,
+    // asi que se compila para el suelo de todas ellas (el de webOS 5 y Fire
+    // OS 7), no para el de la mas moderna.
     target: mode === 'ps4' ? 'safari11'
-      : mode === 'webos' || mode === 'firetv' ? 'chrome68'
+      : mode === 'webos' || mode === 'firetv' || mode === 'tv' ? 'chrome68'
       : 'chrome85',
   },
   server: {

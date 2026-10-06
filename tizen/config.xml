@@ -15,4 +15,9 @@
     <tizen:privilege name="http://tizen.org/privilege/tv.display"/>
     <tizen:setting screen-orientation="landscape" context-menu="enable" background-support="disable" encryption="disable" install-location="auto" hwkey-event="enable"/>
     <access origin="*" subdomains="true"/>
+    <!-- Permite que la app salte a la interfaz servida en http://<servidor>/tv/
+     para actualizarse sola (ver tv/README.md). `access` solo abre las
+     peticiones XHR; para *navegar* fuera del paquete hace falta esto, y sin
+     ello el salto se queda en nada y la tele sigue con la copia instalada. -->
+    <tizen:allow-navigation>*</tizen:allow-navigation>
 </widget>

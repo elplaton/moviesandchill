@@ -9,6 +9,7 @@
     "preview": "vite preview",
     "test": "sh test/run.sh",
     "build:ps4": "npm run build -- --mode ps4 --outDir ../ps4/dist --emptyOutDir",
+    "build:tv": "npm run build -- --mode tv --outDir ../tv/dist --emptyOutDir",
     "deploy": "./deploy.sh",
     "deploy:debug": "./deploy.sh --debug",
     "tv:console": "../venv/bin/python tools/debug-server.py",

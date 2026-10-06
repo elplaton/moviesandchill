@@ -2,6 +2,23 @@
 
 Es **la misma app que `../tizen`**: mismo código, mismas pantallas, mismo mando. Aquí solo vive el empaquetado para webOS (`appinfo.json`, iconos y los scripts que generan e instalan el `.ipk`). Cualquier cambio de interfaz se hace en `tizen/src` y sale en las dos teles.
 
+## Se actualiza sola
+
+El paquete instalado es **solo el arranque**. Al abrir la app comprueba si el
+servidor sirve la interfaz en `http://<servidor>/tv/` y, si contesta, la carga
+de ahí: así cada vez que abres la tele tienes la última versión sin instalar
+nada. Si el servidor no contesta en un segundo y medio, se carga la copia que
+viene dentro del paquete (vieja, pero funcionando).
+
+Solo hay que volver a instalar el paquete si cambia la parte nativa (el
+armazón), que casi nunca cambia. **La primera vez sí hay que instalarlo a
+mano**: lo que se actualiza solo es la interfaz, no el paquete.
+
+Al pasar de la copia instalada a la servida cambia el origen, y la sesión se
+guarda por origen: hay que entrar una vez más. Solo la primera.
+
+Ver `tv/README.md` para el montaje completo.
+
 ## Requisitos
 
 - Tele LG con webOS 5 o superior (2020+). Se compila para Chromium 68, el de webOS 5.

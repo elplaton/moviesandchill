@@ -21,6 +21,8 @@ import android.webkit.WebViewClient;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -54,7 +56,31 @@ public class MainActivity extends Activity {
      * y asi no hay contenido mixto que justificar.
      */
     private static final String HOST_APP = "appassets.androidplatform.net";
-    private static final String URL_INICIO = "http://" + HOST_APP + "/index.html";
+    private static final String URL_EMPAQUETADA = "http://" + HOST_APP + "/index.html";
+
+    /**
+     * La app se actualiza sola: la interfaz se carga del servidor de casa.
+     *
+     * Un APK hay que instalarlo con adb, asi que cada arreglo de la interfaz
+     * obligaba a levantarse del sofa. Ahora el APK es **solo el arranque**:
+     * mira si el servidor sirve /tv/ y carga esa, de modo que al abrir la app
+     * ya esta la ultima version. Solo hay que volver a instalar el APK si
+     * cambia esta parte nativa, que casi nunca cambia.
+     *
+     * Si el servidor no contesta en un segundo y medio se carga la copia que
+     * viene dentro del APK: puede estar vieja, pero una interfaz vieja que
+     * funciona es mejor que una pantalla en negro.
+     *
+     * De paso se arregla algo que venia de regalo: cargada del servidor, la
+     * interfaz y la API comparten origen, asi que las llamadas dejan de ser
+     * cross-origin y de depender de que TMD_CORS_ORIGINS sea "*".
+     *
+     * La direccion tiene que coincidir con la de tizen/.env.firetv (es el
+     * mismo servidor). Si cambia la IP de casa, se cambia en los dos sitios.
+     */
+    private static final String SERVIDOR = "http://192.168.1.44";
+    private static final String URL_SERVIDOR = SERVIDOR + "/tv/";
+    private static final int ESPERA_SERVIDOR_MS = 1500;
 
     private WebView web;
 
@@ -106,7 +132,58 @@ public class MainActivity extends Activity {
 
         setContentView(web);
         pantallaCompleta();
-        web.loadUrl(URL_INICIO);
+        cargarInterfaz();
+    }
+
+    /**
+     * Carga la interfaz del servidor si contesta, y si no la del APK.
+     *
+     * La comprobacion va en un hilo aparte porque Android prohibe tocar la red
+     * en el hilo de la interfaz (y con razon: si el servidor esta apagado, la
+     * espera congelaria la app antes de dibujar nada).
+     */
+    private void cargarInterfaz() {
+        new Thread(new Runnable() {
+            @Override public void run() {
+                final boolean hayServidor = servidorDisponible();
+                runOnUiThread(new Runnable() {
+                    @Override public void run() {
+                        if (web == null) return;   // la app se cerro mientras se comprobaba
+                        if (hayServidor) {
+                            Log.i(TAG, "interfaz desde el servidor: " + URL_SERVIDOR);
+                            web.loadUrl(URL_SERVIDOR);
+                        } else {
+                            Log.i(TAG, "servidor no disponible, interfaz del APK");
+                            web.loadUrl(URL_EMPAQUETADA);
+                        }
+                    }
+                });
+            }
+        }, "comprobar-servidor").start();
+    }
+
+    /** Un GET corto a /tv/index.html. No vale con que algo conteste 200: un
+     *  portal cautivo tambien lo hace, asi que se busca la marca de la app. */
+    private boolean servidorDisponible() {
+        HttpURLConnection conexion = null;
+        try {
+            URL url = new URL(URL_SERVIDOR + "index.html?v=" + System.currentTimeMillis());
+            conexion = (HttpURLConnection) url.openConnection();
+            conexion.setConnectTimeout(ESPERA_SERVIDOR_MS);
+            conexion.setReadTimeout(ESPERA_SERVIDOR_MS);
+            conexion.setRequestProperty("Cache-Control", "no-cache");
+            if (conexion.getResponseCode() != 200) return false;
+            byte[] trozo = new byte[2048];
+            InputStream entrada = conexion.getInputStream();
+            int leidos = entrada.read(trozo);
+            entrada.close();
+            return leidos > 0 && new String(trozo, 0, leidos, "utf-8").contains("<div id=\"app\"");
+        } catch (Exception e) {
+            Log.i(TAG, "servidor no alcanzable (" + e.getClass().getSimpleName() + ")");
+            return false;
+        } finally {
+            if (conexion != null) conexion.disconnect();
+        }
     }
 
     /** Sin barras del sistema: una app de tele ocupa la pantalla entera. */

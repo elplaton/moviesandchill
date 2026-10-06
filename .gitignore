@@ -28,3 +28,4 @@ firetv/.build/
 
 # La app de la PS4 se sirve desde nginx, no se empaqueta.
 ps4/dist/
+tv/dist/

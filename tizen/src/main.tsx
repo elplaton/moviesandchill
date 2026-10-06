@@ -61,6 +61,90 @@ window.visualViewport?.addEventListener('resize', fitToWindow);
 // entero del paquete: las compilaciones normales no llevan consola remota.
 if (import.meta.env.VITE_DEBUG_HOST) startRemoteConsole();
 
+/**
+ * La app se actualiza sola: si el servidor tiene la interfaz, se carga de ahi.
+ *
+ * Las apps de television se instalan a mano (un .wgt por Tizen Studio, un .ipk
+ * con ares-install, un .apk por adb), asi que cada arreglo obligaba a
+ * levantarse del sofa. Con esto el paquete instalado es **solo el arranque**:
+ * comprueba si el servidor sirve `/tv/` y le pasa el control, de modo que al
+ * abrir la tele ya esta la ultima version. Solo hay que reinstalar el paquete
+ * si cambia la parte nativa.
+ *
+ * Tres detalles que lo hacen seguro:
+ *
+ * - **La direccion sale de `VITE_API_BASE`**, que es la del servidor y ya va
+ *   dentro de cada paquete. La version servida se compila sin ella (ver
+ *   `.env.tv`), asi que no se reenvia a si misma y no hay bucle. La
+ *   comparacion con la URL actual es el cinturon de seguridad por si alguien
+ *   compila `/tv/` con la direccion puesta.
+ * - **Si el servidor no contesta en un segundo y medio, se sigue con la copia
+ *   del paquete.** Puede estar vieja, pero una interfaz vieja que funciona es
+ *   mejor que una pantalla en negro; y en una LAN un segundo y medio es
+ *   eternidad.
+ * - **No se monta React antes de decidir.** Arrancar la app para tirarla a
+ *   continuacion se veria como un parpadeo, y en una tele lenta como un
+ *   arranque doble.
+ *
+ * Ojo: al pasar de la copia empaquetada a la servida cambia el origen, y la
+ * sesion se guarda por origen. Hay que entrar una vez mas, solo la primera.
+ */
+function urlDelServidor(): string | null {
+  const base = (import.meta.env.VITE_API_BASE || '').replace(/\/+$/, '');
+  if (!base) return null;
+  const destino = `${base}/tv/`;
+  // Ya estamos ahi: no hay nada que hacer (y desde luego no recargar).
+  if (window.location.href.indexOf(destino) === 0) return null;
+  return destino;
+}
+
+function montar() {
+  ReactDOM.createRoot(document.getElementById('app')!).render(
+    <HashRouter>
+      <AuthProvider>
+        <FocusRoot>
+          <App />
+        </FocusRoot>
+      </AuthProvider>
+    </HashRouter>
+  );
+}
+
+function arrancar() {
+  const destino = urlDelServidor();
+  if (!destino) { montar(); return; }
+
+  let decidido = false;
+  const seguirAqui = () => { if (!decidido) { decidido = true; montar(); } };
+  const reloj = setTimeout(seguirAqui, 1500);
+
+  // XMLHttpRequest y no fetch: el WebView de webOS 5 va por Chromium 68 y
+  // AbortController para cortar un fetch no esta en todos los suelos.
+  const peticion = new XMLHttpRequest();
+  peticion.open('GET', `${destino}index.html?v=${Date.now()}`, true);
+  peticion.timeout = 1500;
+  peticion.onload = () => {
+    clearTimeout(reloj);
+    if (decidido) return;
+    decidido = true;
+    // 200 y algo que parezca la app: un portal cautivo o el 404 de otro
+    // servidor devuelven 200 con cualquier cosa.
+    if (peticion.status === 200 && peticion.responseText.indexOf('<div id="app"') >= 0) {
+      window.location.replace(destino);
+      return;
+    }
+    montar();
+  };
+  peticion.onerror = () => { clearTimeout(reloj); seguirAqui(); };
+  peticion.ontimeout = () => { clearTimeout(reloj); seguirAqui(); };
+  try {
+    peticion.send();
+  } catch {
+    clearTimeout(reloj);
+    seguirAqui();
+  }
+}
+
 // Sin StrictMode: en desarrollo monta y desmonta cada efecto dos veces, lo que
 // con un motor de foco imperativo confunde mas de lo que ayuda. En produccion
 // no hacia nada de todos modos.
@@ -68,12 +152,4 @@ if (import.meta.env.VITE_DEBUG_HOST) startRemoteConsole();
 // file:///, asi que pushState a una ruta absoluta deja la URL en "file:///" y
 // la webview responde ERR_ACCESS_DENIED. Con el hash la navegacion se queda
 // dentro de index.html.
-ReactDOM.createRoot(document.getElementById('app')!).render(
-  <HashRouter>
-    <AuthProvider>
-      <FocusRoot>
-        <App />
-      </FocusRoot>
-    </AuthProvider>
-  </HashRouter>
-);
+arrancar();

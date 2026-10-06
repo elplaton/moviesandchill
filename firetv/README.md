@@ -6,6 +6,23 @@ exactamente el mismo que corre en los televisores Samsung y LG. Lo que hay en
 esta carpeta es una `Activity` con un `WebView` a pantalla completa y los
 scripts para construir e instalar.
 
+## Se actualiza sola
+
+El paquete instalado es **solo el arranque**. Al abrir la app comprueba si el
+servidor sirve la interfaz en `http://<servidor>/tv/` y, si contesta, la carga
+de ahí: así cada vez que abres la tele tienes la última versión sin instalar
+nada. Si el servidor no contesta en un segundo y medio, se carga la copia que
+viene dentro del paquete (vieja, pero funcionando).
+
+Solo hay que volver a instalar el paquete si cambia la parte nativa (el
+armazón), que casi nunca cambia. **La primera vez sí hay que instalarlo a
+mano**: lo que se actualiza solo es la interfaz, no el paquete.
+
+Al pasar de la copia instalada a la servida cambia el origen, y la sesión se
+guarda por origen: hay que entrar una vez más. Solo la primera.
+
+Ver `tv/README.md` para el montaje completo.
+
 ## Construir
 
 ```bash
