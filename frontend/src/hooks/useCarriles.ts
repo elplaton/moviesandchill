@@ -210,17 +210,25 @@ export function useCarriles(filter?: 'movie' | 'series') {
   useEffect(() => {
     if (restaurarScrollY.current || !carriles.length) return;
     restaurarScrollY.current = true;
+    // Siempre, aunque sea a 0: el navegador no mueve el scroll al cambiar de
+    // ruta en una SPA, asi que ir de una portada desplazada a Peliculas
+    // aterrizaba a mitad de pagina.
     const y = memoria.get(k)?.scrollY || 0;
-    if (y > 0) requestAnimationFrame(() => window.scrollTo(0, y));
+    requestAnimationFrame(() => window.scrollTo(0, y));
   }, [k, carriles.length]);
 
+  // La posicion se anota en cada scroll y en ningun otro sitio. Anotarla
+  // tambien en la limpieza del efecto parece mas seguro y es como se perdio
+  // una vez: React corre los `useLayoutEffect` antes que las limpiezas de los
+  // `useEffect`, asi que si algo ha puesto el scroll a 0 por el camino, ese
+  // "ultimo guardado" escribe el 0 encima de la posicion buena.
   useEffect(() => {
     const guardar = () => {
       const m = memoria.get(k);
       if (m) m.scrollY = window.scrollY;
     };
     window.addEventListener('scroll', guardar, { passive: true });
-    return () => { window.removeEventListener('scroll', guardar); guardar(); };
+    return () => window.removeEventListener('scroll', guardar);
   }, [k]);
 
   return { carriles, loading, cargarMas, scrollXDe, recordarScrollX };
