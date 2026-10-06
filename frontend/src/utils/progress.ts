@@ -8,6 +8,10 @@
  * fila al instante al abrir la app y aguanta un corte de red.
  *
  * Es el mismo archivo en `frontend/`, `mobile/` y `tizen/`.
+ *
+ * Las rutas van sin el prefijo /api: lo pone `apiFetch`. Con el escrito a mano
+ * las peticiones salian a /api/api/progress, que no existe, y todo se quedaba
+ * en la cache del navegador sin que el servidor viera nada.
  */
 import { apiFetch } from '../services/api';
 
@@ -57,7 +61,7 @@ export function cachedContinueWatching(): Watched[] {
 /** La fila "Continuar viendo": una tarjeta por titulo, la monta el servidor. */
 export async function continueWatching(): Promise<Watched[]> {
   try {
-    const res = await apiFetch('/api/progress');
+    const res = await apiFetch('/progress');
     if (!res.ok) return leerCache();
     const data = await res.json();
     const items: Watched[] = data.items || [];
@@ -89,7 +93,7 @@ export function cachedResumePoint(path: string): number {
 /** Por donde arrancar este archivo. 0 si es nuevo o si ya se vio entero. */
 export async function resumePoint(path: string): Promise<number> {
   try {
-    const res = await apiFetch(`/api/progress/point?path=${encodeURIComponent(path)}`);
+    const res = await apiFetch(`/progress/point?path=${encodeURIComponent(path)}`);
     if (res.ok) return (await res.json()).position || 0;
   } catch { /* se cae a la cache */ }
   return cachedResumePoint(path);
@@ -98,7 +102,7 @@ export async function resumePoint(path: string): Promise<number> {
 function enviar(e: Entrada, keepalive = false) {
   // Sin await a proposito: guardar la posicion no debe frenar el reproductor,
   // y si falla una vez la siguiente (cada pocos segundos) lo arregla.
-  apiFetch('/api/progress', {
+  apiFetch('/progress', {
     method: 'POST',
     body: JSON.stringify({
       path: e.path, position: e.position, duration: e.duration,
@@ -134,7 +138,7 @@ export function markWatched(e: Entrada) {
 export async function clearWatched(path: string) {
   escribirCache(leerCache().filter((w) => w.path !== path));
   try {
-    await apiFetch(`/api/progress?path=${encodeURIComponent(path)}`, { method: 'DELETE' });
+    await apiFetch(`/progress?path=${encodeURIComponent(path)}`, { method: 'DELETE' });
   } catch { /* se reintenta la proxima vez */ }
 }
 
@@ -153,7 +157,7 @@ export async function importLocalProgress() {
     return;
   }
   try {
-    const res = await apiFetch('/api/progress/import', {
+    const res = await apiFetch('/progress/import', {
       method: 'POST',
       body: JSON.stringify({
         items: viejo
