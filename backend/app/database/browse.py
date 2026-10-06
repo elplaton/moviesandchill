@@ -112,6 +112,21 @@ _SIN_NOTA = "(CASE WHEN COALESCE(rating, 0) = 0 THEN 1 ELSE 0 END)"
 # que es donde `numeric` empieza a dar problemas.
 _PESO_NOTA = f"GREATEST(LEAST(POWER(GREATEST({_NOTA} - 4, 0.1), 4), 1000), 0.5)"
 
+# Ancho de los bloques de epoca de "Recomendado para ti", en años distintos.
+#
+# La fila va de lo actual a lo viejo, pero no titulo a titulo: por bloques, y
+# dentro de cada bloque mezclado. Con 16 años caben juntos 2026 y 2011 (15 de
+# diferencia como mucho, que es lo que se pidio), despues 2010-1995, y asi
+# hacia abajo. Ordenar por año a secas daria una escalera: todo 2026, luego
+# todo 2025... y dos peliculas de 2014 y 2012 no se cruzarian nunca.
+ANCHO_EPOCA = 16
+
+# A que bloque pertenece un titulo: 0 es el de ahora mismo. La division entera
+# de Postgres ya trunca, y GREATEST evita que un "estreno de 2028" (un
+# emparejamiento erroneo) caiga en un bloque negativo y se ponga por delante.
+_EPOCA = (f"(GREATEST(EXTRACT(YEAR FROM CURRENT_DATE)::int - COALESCE(year, 1900), 0)"
+          f" / {ANCHO_EPOCA})")
+
 
 def _filtro_tipo(media_type: str | None) -> str:
     if media_type in ("movie", "tv"):
@@ -228,9 +243,15 @@ async def get_recomendados(semilla: str, gustos: dict[str, float], liked_years: 
     las "mejores recomendaciones" eran las mejores **de una muestra al azar**.
     Aqui se puntua el catalogo entero: los puntos son la suma de los pesos de
     los generos que gustan, mas un empujon por acercarse a los años marcados en
-    el onboarding y otro a lo reciente. El desempate es la clave determinista
-    de la semilla, asi que el orden rota por sesion pero la pagina 2 continua a
-    la 1.
+    el onboarding y otro a lo reciente. Eso decide **que** entra en la fila.
+
+    El orden es por **epocas**: primero el bloque de ahora mismo (2026-2011,
+    quince años de diferencia como mucho) mezclado por dentro, luego el
+    siguiente (2010-1995) y asi hacia abajo. Dentro de cada bloque manda la
+    nota ponderada con la clave determinista de la semilla, asi que la fila
+    rota por sesion pero la pagina 2 continua a la 1. Ordenar por año a secas
+    daria una escalera (todo 2026, luego todo 2025...) y dos peliculas de 2014
+    y 2012 no se cruzarian nunca.
 
     Los pesos van como dos arrays en paralelo (genero y peso) y no como JSON:
     asi el filtro es un `= ANY(...)` contra el array de generos del titulo.
@@ -256,11 +277,12 @@ async def get_recomendados(semilla: str, gustos: dict[str, float], liked_years: 
             WHERE TRUE {_filtro_tipo(media_type)}
         ),
         elegidos AS (
-            SELECT p.*, {_clave("$1")} AS clave, {_SIN_NOTA} AS sin_nota
+            SELECT p.*, {_clave("$1")} AS clave, {_SIN_NOTA} AS sin_nota,
+                   {_EPOCA} AS epoca
             FROM puntuado p
             WHERE p.puntos >= 2
         )
-    """, *_pagina("elegidos", "sin_nota, clave DESC, puntos DESC, tmdb_id", "$6", "$7"))
+    """, *_pagina("elegidos", "epoca, sin_nota, clave DESC, puntos DESC, tmdb_id", "$6", "$7"))
     filas = await _filas(sql, semilla, generos, pesos, liked_years or [],
                          corte_reciente, offset, limit)
     return filas, (filas[0]["total"] if filas else 0)
