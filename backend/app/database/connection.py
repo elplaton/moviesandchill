@@ -194,6 +194,26 @@ async def _ensure_tables():
                 PRIMARY KEY (user_id, tmdb_id)
             )
         """)
+        # Lo que cada cuenta ya ha visto. Es a nivel de **titulo**, no de
+        # archivo: "ya me he visto esta pelicula" vale aunque no este
+        # descargada, y por eso no sirve `playback_progress` (que va por ruta).
+        #
+        # `season = 0, episode = 0` significa el titulo entero: la pelicula, o
+        # la serie completa. Un episodio concreto lleva sus numeros. Se usan
+        # ceros y no NULL para que la clave primaria y el ON CONFLICT sean
+        # directos.
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS user_watched (
+                user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                tmdb_id    INTEGER NOT NULL,
+                media_type VARCHAR(10) NOT NULL,
+                season     INTEGER NOT NULL DEFAULT 0,
+                episode    INTEGER NOT NULL DEFAULT 0,
+                created_at TIMESTAMP DEFAULT NOW(),
+                PRIMARY KEY (user_id, tmdb_id, media_type, season, episode)
+            )
+        """)
+
         # Donde mandar los avisos. Una cuenta tiene tantas como aparatos: el
         # telefono, la PWA instalada y el navegador del escritorio son
         # suscripciones distintas, y el `endpoint` es su identidad (por eso es

@@ -110,6 +110,23 @@ async def _vacio() -> list[dict]:
     return []
 
 
+async def _gustos_de(user_id: int, prefs: dict | None = None) -> dict[str, float]:
+    """Los gustos de una cuenta: lo que marco en el onboarding **mas** los
+    generos de lo que ha visto desde entonces.
+
+    Las dos cosas estan en la misma escala (cuantos titulos de cada genero),
+    asi que se suman sin normalizar: con seis elegidos al entrar y veinte
+    vistos despues, lo visto pesa mas. Eso es lo que hace que las
+    recomendaciones se vayan moviendo poco a poco.
+    """
+    from app.database.preferences import get_preferences
+    from app.database.watched import gustos_por_lo_visto, sumar_gustos
+
+    if prefs is None:
+        prefs = await get_preferences(user_id) or {}
+    return sumar_gustos((prefs or {}).get("genres"), await gustos_por_lo_visto(user_id))
+
+
 async def _favoritos_pagina(user_id: int, offset: int, limit: int,
                             tipo: str | None) -> tuple[list[dict], int]:
     from app.database.favorites import count_favorites, list_favorites
@@ -176,7 +193,10 @@ async def browse_home(user: Annotated[str, Depends(get_current_user)],
 
     db_user = await get_user_by_username(user)
     prefs = await get_preferences(db_user["id"]) if db_user else None
-    gustos = (prefs or {}).get("genres") or {}
+    # Los gustos no son solo los del onboarding: se les suman los generos de lo
+    # que la cuenta ha visto, asi que la fila de recomendados se mueve sola en
+    # vez de quedarse con lo que se marco el primer dia.
+    gustos = await _gustos_de(db_user["id"], prefs) if db_user else {}
     liked_years = (prefs or {}).get("liked_years") or []
 
     # Todo a la vez: la parte cara (agrupar media_items) la repite cada
@@ -188,7 +208,7 @@ async def browse_home(user: Annotated[str, Depends(get_current_user)],
     }
     if gustos:
         tareas["recomendado"] = get_recomendados(semilla, gustos, liked_years,
-                                                 0, ITEMS_PER_ROW, tipo)
+                                                 0, ITEMS_PER_ROW, tipo, db_user["id"])
     if db_user:
         tareas["favoritos"] = _favoritos_pagina(db_user["id"], 0, ITEMS_PER_ROW, tipo)
 
@@ -278,11 +298,11 @@ async def _pagina_de(key: str, user: str, semilla: str, offset: int, limit: int,
         return [], 0
     if key == CLAVE_RECOMENDADO:
         prefs = await get_preferences(db_user["id"]) or {}
-        gustos = prefs.get("genres") or {}
+        gustos = await _gustos_de(db_user["id"], prefs)
         if not gustos:
             return [], 0
         return await get_recomendados(semilla, gustos, prefs.get("liked_years") or [],
-                                      offset, limit, tipo)
+                                      offset, limit, tipo, db_user["id"])
     if key == CLAVE_FAVORITOS:
         return await _favoritos_pagina(db_user["id"], offset, limit, tipo)
     return [], 0

@@ -119,7 +119,8 @@ def _episodios_en_disco(grupo: str) -> list[tuple[int, int, str]]:
     return sorted(fuera)
 
 
-def siguiente_episodio(rel: str, terminados: set[str] | None = None) -> dict | None:
+def siguiente_episodio(rel: str, terminados: set[str] | None = None,
+                       marcados: set[tuple[int, int]] | None = None) -> dict | None:
     """El episodio que va despues del de `rel`, si esta descargado.
 
     Se compara por (temporada, episodio) y no por el orden del listado, asi el
@@ -127,14 +128,16 @@ def siguiente_episodio(rel: str, terminados: set[str] | None = None) -> dict | N
 
     `terminados` son las rutas que esta cuenta ya ha visto enteras: se saltan.
     Sin eso, a quien se viera el 8 y luego volviera a ver el 7 se le ofrecia el
-    8 otra vez.
+    8 otra vez. `marcados` son los (temporada, episodio) que ha marcado a mano
+    como vistos, que es lo mismo pero sin haberlos reproducido aqui.
     """
     t, e = temporada_y_episodio(rel)
     if t is None or e is None:
         return None
     terminados = terminados or set()
+    marcados = marcados or set()
     for ts, es, ruta in _episodios_en_disco(grupo_de(rel)):
-        if (ts, es) > (t, e) and ruta not in terminados:
+        if (ts, es) > (t, e) and ruta not in terminados and (ts, es) not in marcados:
             return {"path": ruta, "season": ts, "episode": es}
     return None
 
@@ -171,11 +174,14 @@ def _tarjeta(fila: dict, path: str, position: float, duration: float,
     }
 
 
-def continuar_viendo(filas: list[dict], limite: int = 20) -> list[dict]:
+def continuar_viendo(filas: list[dict], limite: int = 20,
+                     marcados: dict[int, set[tuple[int, int]]] | None = None) -> list[dict]:
     """Las tarjetas de la fila, a partir del historial de la cuenta.
 
     `filas` llega ya ordenada de lo mas reciente a lo mas viejo, asi que la
-    primera de cada grupo es la que manda.
+    primera de cada grupo es la que manda. `marcados` son los episodios que la
+    cuenta ha marcado como vistos a mano, por tmdb_id: no se ofrecen como
+    siguiente aunque esten en disco y sin reproducir.
     """
     vistos: set[str] = set()
     tarjetas: list[dict] = []
@@ -202,7 +208,8 @@ def continuar_viendo(filas: list[dict], limite: int = 20) -> list[dict]:
                 continue  # se borro de la biblioteca
             tarjetas.append(_tarjeta(fila, rel, posicion, duracion, temporada, episodio, False))
         else:
-            sig = siguiente_episodio(rel, terminados)
+            sig = siguiente_episodio(rel, terminados,
+                                     (marcados or {}).get(fila.get("tmdb_id")))
             if not sig:
                 continue  # pelicula terminada, o serie sin mas episodios en disco
             tarjetas.append(_tarjeta(fila, sig["path"], 0.0, 0.0,

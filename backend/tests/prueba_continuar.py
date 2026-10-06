@@ -101,6 +101,22 @@ comprueba("lo borrado de la biblioteca no sale", [], [t["path"] for t in r])
 r = continuar_viendo([fila("Suits/Temporada 4/4x02.mp4", 2399, 2400, 1)])
 comprueba("serie terminada sin mas episodios desaparece", [], [t["path"] for t in r])
 
+# Lo marcado como visto a mano: no se ofrece como siguiente aunque este en
+# disco y sin reproducir.
+r = continuar_viendo([fila("Suits/Temporada 3/3x07.mp4", 2399, 2400, 1, tmdb_id=37680)],
+                     20, {37680: {(3, 8)}})
+comprueba("un episodio marcado visto no se ofrece como siguiente",
+          ["Suits/Temporada 4/4x01.mp4"], [t["path"] for t in r])
+
+r = continuar_viendo([fila("Suits/Temporada 3/3x07.mp4", 2399, 2400, 1, tmdb_id=37680)],
+                     20, {37680: {(3, 8), (4, 1), (4, 2)}})
+comprueba("con todo lo que queda marcado, el titulo desaparece", [], [t["path"] for t in r])
+
+r = continuar_viendo([fila("Suits/Temporada 3/3x07.mp4", 2399, 2400, 1, tmdb_id=37680)],
+                     20, {99999: {(3, 8)}})
+comprueba("lo marcado de otra serie no estorba",
+          ["Suits/Temporada 3/3x08.mp4"], [t["path"] for t in r])
+
 print()
-print(f"{9 + 9 - len(fallos)} correctas, {len(fallos)} fallidas")
+print(f"{9 + 9 + 3 - len(fallos)} correctas, {len(fallos)} fallidas")
 sys.exit(1 if fallos else 0)

@@ -84,13 +84,25 @@ async def _guardar(uid: int, req: ProgressRequest) -> bool:
 
 @router.get("/progress")
 async def get_progress_list(user: Annotated[str, Depends(get_current_user)], limit: int = 20):
-    """La fila "Continuar viendo": una tarjeta por titulo."""
+    """La fila "Continuar viendo": una tarjeta por titulo.
+
+    Lo que la cuenta ha marcado como visto no sale: decir "ya me la he visto" y
+    seguir viendola en la portada es contradictorio. Y los episodios marcados a
+    mano no se ofrecen como siguiente, aunque esten en disco sin reproducir.
+    """
+    import asyncio
+
     from app.database.progress import list_progress
+    from app.database.watched import episodios_vistos_todos, titulos_vistos
 
     uid = await _user_id(user)
     if uid is None:
         return {"items": []}
-    return {"items": continuar_viendo(await list_progress(uid), limit)}
+    filas, vistos, marcados = await asyncio.gather(
+        list_progress(uid), titulos_vistos(uid), episodios_vistos_todos(uid))
+    filas = [f for f in filas
+             if (f.get("tmdb_id"), f.get("tmdb_type")) not in vistos]
+    return {"items": continuar_viendo(filas, limit, marcados)}
 
 
 @router.get("/progress/point")

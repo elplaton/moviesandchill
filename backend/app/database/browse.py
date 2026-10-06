@@ -235,7 +235,8 @@ async def get_recently_added(limit: int = 20, media_type: str | None = None,
 
 async def get_recomendados(semilla: str, gustos: dict[str, float], liked_years: list[int],
                            offset: int = 0, limit: int = 20,
-                           media_type: str | None = None) -> tuple[list[dict], int]:
+                           media_type: str | None = None,
+                           user_id: int | None = None) -> tuple[list[dict], int]:
     """"Recomendado para ti", puntuado en la base y paginado.
 
     Antes se puntuaba en Python sobre una muestra aleatoria de 800 titulos, lo
@@ -254,7 +255,9 @@ async def get_recomendados(semilla: str, gustos: dict[str, float], liked_years: 
     y 2012 no se cruzarian nunca.
 
     Los pesos van como dos arrays en paralelo (genero y peso) y no como JSON:
-    asi el filtro es un `= ANY(...)` contra el array de generos del titulo.
+    asi el filtro es un `= ANY(...)` contra el array de generos del titulo. Y
+    los pesos no son solo los del onboarding: `sumar_gustos()` les añade los
+    generos de lo que la cuenta ha visto, asi que la fila se mueve sola.
     """
     generos = list(gustos.keys())
     pesos = [float(v) for v in gustos.values()]
@@ -275,6 +278,15 @@ async def get_recomendados(semilla: str, gustos: dict[str, float], liked_years: 
                    + CASE WHEN f.year >= $5::int THEN 2 ELSE 0 END AS puntos
             FROM fichas f
             WHERE TRUE {_filtro_tipo(media_type)}
+              -- Lo que ya se ha visto entero no se recomienda: recomendar algo
+              -- que alguien acaba de terminar es ruido, y encima le quita el
+              -- sitio a lo que no conoce.
+              AND NOT EXISTS (
+                  SELECT 1 FROM user_watched w
+                  WHERE w.user_id = $8::int AND w.tmdb_id = f.tmdb_id
+                    AND w.media_type = f.tmdb_type
+                    AND w.season = 0 AND w.episode = 0
+              )
         ),
         elegidos AS (
             SELECT p.*, {_clave("$1")} AS clave, {_SIN_NOTA} AS sin_nota,
@@ -284,7 +296,7 @@ async def get_recomendados(semilla: str, gustos: dict[str, float], liked_years: 
         )
     """, *_pagina("elegidos", "epoca, sin_nota, clave DESC, puntos DESC, tmdb_id", "$6", "$7"))
     filas = await _filas(sql, semilla, generos, pesos, liked_years or [],
-                         corte_reciente, offset, limit)
+                         corte_reciente, offset, limit, user_id or 0)
     return filas, (filas[0]["total"] if filas else 0)
 
 

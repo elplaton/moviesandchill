@@ -6,11 +6,12 @@ import { useLibrary, type LocalFile } from '../contexts/LibraryContext';
 import { useAuth } from '../contexts/AuthContext';
 import { useFavorites } from '../contexts/FavoritesContext';
 import { useFollows } from '../contexts/FollowsContext';
+import { useWatched } from '../hooks/useWatched';
 import { toast } from '../utils/toast';
 import { cachedResumePoint } from '../utils/progress';
 import { groupEpisodes, groupVersions, seasonLabel, episodeLabel, type Version } from '../utils/versions';
 import Player from '../components/Player';
-import { IBack, IBell, IHeart, IPlay, IStar, ITrash } from '../components/Icons';
+import { IBack, IBell, ICheck, IHeart, IPlay, IStar, ITrash } from '../components/Icons';
 import type { DownloadState, SearchResult, TMDBMetadata } from '../types';
 
 type RowState = { s: 'ready'; f: LocalFile } | { s: 'busy'; ds: DownloadState } | { s: 'idle' };
@@ -50,6 +51,7 @@ export default function Title() {
   const { sigue, alternar: alternarSeguimiento } = useFollows();
   const tmdbId = parseInt(id) || 0;
   const isSeries = kind === 'series';
+  const visto = useWatched(tmdbId || undefined, isSeries ? 'series' : 'movie');
   const [meta, setMeta] = useState<(TMDBMetadata & { tmdb_id?: number }) | null>(null);
   const [files, setFiles] = useState<SearchResult[]>([]);
   const [loading, setLoading] = useState(true);
@@ -171,6 +173,18 @@ export default function Title() {
             </button>
           ) : null}
         </div>
+        {tmdbId ? (
+          /* "Ya me lo he visto" es del titulo, no del archivo: vale aunque no
+             este descargado, saca el titulo de "Continuar viendo" y mueve las
+             recomendaciones (el servidor suma sus generos). Va a lo ancho y
+             debajo porque cuatro botones no caben en una fila de telefono. */
+          <button onClick={visto.alternarTitulo}
+            className={`mt-2 w-full h-11 rounded-xl text-[15px] font-semibold flex items-center justify-center gap-2 active:opacity-80 ${
+              visto.entero ? 'bg-nf-ok/20 text-nf-ok' : 'bg-white/10 text-nf-text2'}`}>
+            <span className="w-4 h-4"><ICheck /></span>
+            {visto.entero ? (isSeries ? 'Serie vista' : 'Vista') : 'Ya me la he visto'}
+          </button>
+        ) : null}
       </div>
 
       <div className="mt-6">
@@ -189,13 +203,23 @@ export default function Title() {
           const st = stateOf(best);
           const name = names.get(`${e.season}:${e.episode}`) || best.baseName;
           const sub = `${episodeLabel(e)} · ${name}`;
+          const marcado = visto.esVisto(e.season, e.episode ?? 0);
           return (
-            <div key={`${e.season}:${e.episode}`} className="flex items-center gap-3 px-4 py-2.5 border-b border-white/5">
+            <div key={`${e.season}:${e.episode}`} className={`flex items-center gap-3 px-4 py-2.5 border-b border-white/5 ${
+                marcado ? 'opacity-55' : ''}`}>
               <span className="w-10 shrink-0 text-[13px] text-nf-text3 font-semibold tabular-nums">{episodeLabel(e)}</span>
               <div className="flex-1 min-w-0">
                 <p className="text-[15px] font-medium truncate">{name}</p>
                 <p className="text-[12px] text-nf-text3 truncate">{best.quality} · {best.sizeStr}{e.variants.length > 1 ? ` · ${e.variants.length} versiones` : ''}</p>
               </div>
+              {tmdbId ? (
+                <button onClick={() => visto.alternarEpisodio(e.season, e.episode ?? 0)}
+                  aria-label={marcado ? 'Marcar como no visto' : 'Marcar como visto'}
+                  className={`w-9 h-9 shrink-0 rounded-full border flex items-center justify-center ${
+                    marcado ? 'border-nf-ok/60 bg-nf-ok/20 text-nf-ok' : 'border-white/20 text-nf-text3'}`}>
+                  <span className="w-4 h-4"><ICheck /></span>
+                </button>
+              ) : null}
               <Action state={st}
                 onPlay={() => st.s === 'ready' && setPlaying({ path: st.f.path, subtitle: sub })}
                 onDelete={st.s === 'ready' ? () => del(st.f) : undefined}

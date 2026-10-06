@@ -4,6 +4,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useLibrary, type LocalFile } from '../contexts/LibraryContext';
 import { useFavorites } from '../contexts/FavoritesContext';
 import { useFollows } from '../contexts/FollowsContext';
+import { useWatched } from '../hooks/useWatched';
 import { useDownloads } from '../hooks/useDownloads';
 import { groupEpisodes, groupVersions, episodeLabel, seasonLabel, type Episode, type Version } from '../utils/versions';
 import Button from './ui/Button';
@@ -38,6 +39,7 @@ export default function TitleSheet({ input, onClose }: Props) {
   const { localFor, remove, version } = useLibrary();
   const { esFavorito, alternar } = useFavorites();
   const { sigue, alternar: alternarSeguimiento } = useFollows();
+  const visto = useWatched(input.tmdbId, kind);
   const { downloadStates, download, cancelBatch } = useDownloads();
   const [season, setSeason] = useState<number | null | undefined>(undefined);
   const [names, setNames] = useState<Map<string, string>>(new Map());
@@ -127,16 +129,27 @@ export default function TitleSheet({ input, onClose }: Props) {
   ].filter(Boolean);
 
   /** Fila de la lista: episodio de una serie o versión de una película. */
-  const Row = ({ label, title, sub, st, onEnter, onDelete }: {
+  const Row = ({ label, title, sub, st, onEnter, onDelete, marcado, onMarcar }: {
     label: string; title: string; sub: string; st: RowState; onEnter: () => void; onDelete?: () => void;
+    /** Visto por capítulo: solo en series, y solo si el título está en TMDB. */
+    marcado?: boolean; onMarcar?: () => void;
   }) => (
-    <div className="group flex items-center gap-4 rounded px-3 py-2.5 hover:bg-white/[0.06]">
+    <div className={`group flex items-center gap-4 rounded px-3 py-2.5 hover:bg-white/[0.06] ${marcado ? 'opacity-55' : ''}`}>
       <span className="w-14 shrink-0 text-base font-semibold tabular-nums text-nf-faint">{label}</span>
       <button onClick={onEnter} className="min-w-0 flex-1 text-left">
         <p className="truncate text-base font-medium">{title}</p>
         <p className="truncate text-xs text-nf-faint">{sub}</p>
       </button>
       <div className="flex shrink-0 items-center gap-2">
+        {onMarcar && (
+          <button onClick={onMarcar} title={marcado ? 'Marcar como no visto' : 'Marcar como visto'}
+            aria-label={marcado ? 'Marcar como no visto' : 'Marcar como visto'}
+            className={`grid h-8 w-8 place-items-center rounded-pill border transition-colors ${
+              marcado ? 'border-nf-ok/60 bg-nf-ok/20 text-nf-ok'
+                      : 'border-white/20 text-nf-faint opacity-0 hover:border-white/50 hover:text-white group-hover:opacity-100'}`}>
+            <span className="w-4 h-4"><IconCheck /></span>
+          </button>
+        )}
         {st.s === 'busy' ? (
           <div className="w-32">
             <p className="mb-1 text-right text-xs text-nf-dim">{st.label}</p>
@@ -201,6 +214,16 @@ export default function TitleSheet({ input, onClose }: Props) {
                   {seguida ? 'Siguiendo' : 'Seguir'}
                 </Button>
               ) : null}
+              {input.tmdbId ? (
+                /* "Ya me lo he visto" es del título, no del archivo: vale
+                   aunque no esté descargado, y de paso mueve las
+                   recomendaciones (el servidor suma sus géneros). */
+                <Button variant="ghost" onClick={visto.alternarTitulo}
+                  className={visto.entero ? 'text-nf-ok' : ''}
+                  icon={<IconCheck />}>
+                  {visto.entero ? (isSeries ? 'Serie vista' : 'Vista') : 'Ya me la he visto'}
+                </Button>
+              ) : null}
               {onDisk > 0 && (
                 <span className="inline-flex items-center gap-1.5 text-base font-medium text-nf-ok">
                   <span className="w-4 h-4"><IconCheck /></span>{onDisk} en disco
@@ -240,6 +263,8 @@ export default function TitleSheet({ input, onClose }: Props) {
                   <Row key={`${e.season}:${e.episode}`} label={episodeLabel(e)} title={name}
                     sub={`${best.quality} · ${best.sizeStr}${e.variants.length > 1 ? ` · ${e.variants.length} versiones` : ''}${best.channelName ? ` · ${best.channelName}` : ''}`}
                     st={st} onEnter={() => onEpisode(e)}
+                    marcado={visto.esVisto(e.season, e.episode ?? 0)}
+                    onMarcar={input.tmdbId ? () => visto.alternarEpisodio(e.season, e.episode ?? 0) : undefined}
                     onDelete={st.s === 'ready' ? () => del(st.f, `${episodeLabel(e)} · ${name}`) : undefined} />
                 );
               })}
