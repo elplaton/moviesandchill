@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { getElement } from '../focus/engine';
 import { FocusScope } from '../focus/react';
+import { guardarUltimaBusqueda, leerUltimaBusqueda, ultimaBusquedaEnMemoria } from '../services/estado';
 import { apiFetch } from '../services/api';
 import { fetchMediaFiles } from '../services/media';
 import { groupSearchResults, type SearchSeriesGroup } from '../utils/search';
@@ -28,7 +29,10 @@ function metaOf(r: SearchResult, key: string, kind: 'movie' | 'series', title: s
  * No hay campo de texto ni IME: todo va con el mando.
  */
 export default function Search() {
-  const [query, setQuery] = useState('');
+  // Lo ultimo buscado es de la cuenta: se ve igual en la tele, en el movil y
+  // en la web. Con el mando, no tener que volver a teclear un titulo letra a
+  // letra es media pantalla de trabajo menos.
+  const [query, setQuery] = useState(ultimaBusquedaEnMemoria() || '');
   const [searching, setSearching] = useState(false);
   const [series, setSeries] = useState<SearchSeriesGroup[]>([]);
   const [movies, setMovies] = useState<[string, SearchResult[]][]>([]);
@@ -42,6 +46,20 @@ export default function Search() {
 
   useScreenBack();
   useContentFocus(true, 'search-keyboard');
+
+  useEffect(() => {
+    if (ultimaBusquedaEnMemoria() !== null) return;
+    let vivo = true;
+    leerUltimaBusqueda().then((t) => { if (vivo && t) setQuery((actual) => actual || t); }).catch(() => {});
+    return () => { vivo = false; };
+  }, []);
+
+  // No antes de saber lo que habia guardado: al entrar el campo esta vacio, y
+  // guardar ese vacio borraria el termino antes de poder leerlo.
+  useEffect(() => {
+    if (ultimaBusquedaEnMemoria() === null) return;
+    guardarUltimaBusqueda(query);
+  }, [query]);
 
   useEffect(() => {
     if (timer.current) clearTimeout(timer.current);

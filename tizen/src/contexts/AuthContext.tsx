@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, useEffect, type ReactNode } from 'react';
 import { apiFetch, setTokens, clearTokens, getAccessToken } from '../services/api';
 import { olvidarCache } from '../tv/progress';
+import { olvidarEstado } from '../services/estado';
 import { connectProgressWs, disconnectProgressWs } from '../services/ws';
 
 interface AuthContextType {
@@ -82,6 +83,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // en un aparato compartido, entrar con otro usuario pintaba la fila del
       // anterior hasta que contestara el servidor (o para siempre sin red).
       olvidarCache();
+      olvidarEstado();
       setIsAuthenticated(true);
       setUsername(user);
       apiFetch('/auth/me')
@@ -98,6 +100,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logout = () => {
     clearTokens();
     olvidarCache();
+    olvidarEstado();
     disconnectProgressWs();
     setIsAuthenticated(false);
     setUsername(null);

@@ -194,6 +194,21 @@ async def _ensure_tables():
                 PRIMARY KEY (user_id, tmdb_id)
             )
         """)
+        # Estado de la interfaz que es **de la cuenta** y no del aparato: lo
+        # ultimo que se busco, por ejemplo. Es el gemelo por usuario de
+        # `app_settings`, y existe para que estas cosas no acaben en el
+        # localStorage del navegador, que es del aparato y se acaba viendo
+        # desde otra cuenta.
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS user_state (
+                user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                clave      VARCHAR(50) NOT NULL,
+                valor      TEXT,
+                updated_at TIMESTAMP DEFAULT NOW(),
+                PRIMARY KEY (user_id, clave)
+            )
+        """)
+
         # Lo que cada cuenta ya ha visto. Es a nivel de **titulo**, no de
         # archivo: "ya me he visto esta pelicula" vale aunque no este
         # descargada, y por eso no sirve `playback_progress` (que va por ruta).

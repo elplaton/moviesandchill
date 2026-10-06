@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { guardarUltimaBusqueda, leerUltimaBusqueda, ultimaBusquedaEnMemoria } from '../services/estado';
 import { apiFetch } from '../services/api';
 import { groupSearchResults } from '../utils/search';
 import { cleanTitle } from '../utils/text';
@@ -15,18 +16,11 @@ function Result({ to, poster, title, meta }: { to: string; poster?: string; titl
   );
 }
 
-/**
- * Lo último que se buscó, en memoria y no en el almacenamiento del navegador.
- *
- * Sirve para volver de una ficha y encontrar la búsqueda donde estaba. En
- * memoria se va al recargar, que es justo lo que se quiere: lo que alguien
- * busca es cosa suya y no tiene por qué quedarse escrito en el aparato.
- */
-let ultimaBusqueda = '';
-
 /** Búsqueda con el teclado del sistema; resultados según se escribe. */
 export default function Search() {
-  const [q, setQ] = useState(ultimaBusqueda);
+  // Lo último buscado es de la cuenta: se ve igual en el móvil, en la web y en
+  // la tele. Si ya se sabe en esta sesión se pinta de entrada; si no, se pide.
+  const [q, setQ] = useState(ultimaBusquedaEnMemoria() || '');
   const [results, setResults] = useState<SearchResult[]>([]);
   const [busy, setBusy] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -35,8 +29,22 @@ export default function Search() {
   // no debe pisar los resultados de lo que se está escribiendo ahora.
   const lastRequest = useRef(0);
 
+  // Se pide una vez, y solo se aplica si no se ha empezado a escribir ya.
   useEffect(() => {
-    ultimaBusqueda = q;
+    if (ultimaBusquedaEnMemoria() !== null) return;
+    let vivo = true;
+    leerUltimaBusqueda().then(t => { if (vivo && t) setQ(actual => actual || t); }).catch(() => {});
+    return () => { vivo = false; };
+  }, []);
+
+  // Guardar, pero no antes de saber lo que había guardado: al montar el campo
+  // está vacío, y guardar ese vacío borraría el término antes de poder leerlo.
+  useEffect(() => {
+    if (ultimaBusquedaEnMemoria() === null) return;
+    guardarUltimaBusqueda(q);
+  }, [q]);
+
+  useEffect(() => {
     if (timer.current) clearTimeout(timer.current);
     if (q.trim().length < 2) { setResults([]); setBusy(false); return; }
     setBusy(true);

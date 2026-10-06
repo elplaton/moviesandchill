@@ -221,6 +221,7 @@ from app.routers.progress_router import router as progress_router
 from app.routers.follows_router import router as follows_router
 from app.routers.push_router import router as push_router
 from app.routers.watched_router import router as watched_router
+from app.routers.state_router import router as state_router
 
 app.include_router(search_router)
 app.include_router(download_router)
@@ -243,6 +244,7 @@ app.include_router(progress_router)
 app.include_router(follows_router)
 app.include_router(push_router)
 app.include_router(watched_router)
+app.include_router(state_router)
 
 
 @app.get("/health")

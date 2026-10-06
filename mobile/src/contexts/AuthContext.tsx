@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 import { apiFetch, setTokens, clearTokens, getAccessToken } from '../services/api';
 import { olvidarCache } from '../utils/progress';
+import { olvidarEstado } from '../services/estado';
 import { connectProgressWs, disconnectProgressWs } from '../services/ws';
 
 export interface Me { id: number; username: string; role: 'admin' | 'user'; quota_bytes: number | null; used_bytes: number }
@@ -60,6 +61,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // en un aparato compartido, entrar con otro usuario pintaba la fila del
       // anterior hasta que contestara el servidor (o para siempre sin red).
       olvidarCache();
+      olvidarEstado();
       await refresh();
       await refreshPrefs();
       connectProgressWs();
@@ -67,7 +69,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch { return 'Sin conexión con el servidor'; }
   };
 
-  const logout = () => { clearTokens(); olvidarCache(); disconnectProgressWs(); setMe(null); setHasPrefs(null); };
+  const logout = () => { clearTokens(); olvidarCache(); olvidarEstado(); disconnectProgressWs(); setMe(null); setHasPrefs(null); };
 
   return <AuthCtx.Provider value={{ me, loading, hasPrefs, login, logout, refresh, refreshPrefs }}>{children}</AuthCtx.Provider>;
 }

@@ -4,6 +4,7 @@ import Shell from '../components/Shell';
 import Card from '../components/Card';
 import TitleSheet, { type SheetInput } from '../components/TitleSheet';
 import Button from '../components/ui/Button';
+import { guardarUltimaBusqueda, leerUltimaBusqueda, ultimaBusquedaEnMemoria } from '../services/estado';
 import { apiFetch } from '../services/api';
 import { fetchMediaFiles } from '../services/media';
 import { groupSearchResults, type SearchSeriesGroup } from '../utils/search';
@@ -51,6 +52,19 @@ export default function Search() {
 
   useEffect(() => { inputRef.current?.focus(); }, []);
 
+  // Lo último buscado es de la cuenta, así que se ve igual en la web, en el
+  // móvil y en la tele. Si se entra con un término en la URL (la lupa de la
+  // barra, un enlace) manda ese; si no, se recupera el de la cuenta. Se lee
+  // igualmente en los dos casos, porque hasta saber lo guardado no se puede
+  // guardar nada: escribir el campo vacío del arranque lo borraría.
+  useEffect(() => {
+    let vivo = true;
+    leerUltimaBusqueda()
+      .then(t => { if (vivo && t && !q) setText(actual => actual || t); })
+      .catch(() => {});
+    return () => { vivo = false; };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   useEffect(() => {
     if (timer.current) clearTimeout(timer.current);
     const term = text.trim();
@@ -66,6 +80,7 @@ export default function Search() {
         setResults(d.results || []);
         pushed.current = term;
         setParams(term ? { q: term } : {}, { replace: true });
+        if (ultimaBusquedaEnMemoria() !== null) guardarUltimaBusqueda(term);
       } catch { /* sin resultados */ } finally {
         if (mine === lastRequest.current) setBusy(false);
       }
