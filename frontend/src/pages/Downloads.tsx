@@ -92,7 +92,7 @@ function SeriesPanel({ t, meta, onPlay, onDelete }: {
 export default function Downloads() {
   const { username, isAdmin, usedBytes, quotaBytes, refreshMe } = useAuth();
   const { reload: reloadIndex, version } = useLibrary();
-  const { batches, pausedBatches, downloadStates, loadPaused, loadStatus, cancelBatch, pauseBatch, resumeBatch } = useDownloads();
+  const { batches, pausedBatches, loadPaused, loadStatus, cancelBatch, pauseBatch, resumeBatch } = useDownloads();
   const [titles, setTitles] = useState<Title[]>([]);
   const [metas, setMetas] = useState<Map<string, TMDBMetadata>>(new Map());
   const [loading, setLoading] = useState(true);
@@ -175,7 +175,6 @@ export default function Downloads() {
             <h2 className="mb-3 text-lg font-semibold">Descargando</h2>
             <div className="space-y-2">
               {active.map(b => {
-                const ds = [...downloadStates.values()].find(s => s.batchId === b.batch_id);
                 const label = b.status === 'extracting' ? 'Extrayendo' : b.status === 'converting' ? 'Convirtiendo' : `${b.downloaded_parts}/${b.total_parts} partes`;
                 const canManage = isAdmin || !b.owner || b.owner === username;
                 return (
@@ -183,7 +182,14 @@ export default function Downloads() {
                     <div className="flex items-center justify-between gap-4">
                       <div className="min-w-0">
                         <p className="truncate text-base font-medium">{cleanTitle(b.folder_name)}</p>
-                        <p className="text-xs text-nf-faint">{label}{ds?.speed ? ` · ${ds.speed}` : ''}{b.owner && b.owner !== username ? ` · ${b.owner}` : ''}</p>
+                        <p className="text-xs text-nf-faint">{label}{b.owner && b.owner !== username ? ` · ${b.owner}` : ''}</p>
+                        {/* Lo descargado, a qué velocidad y lo que queda: es
+                            lo que se quiere saber mirando una descarga. */}
+                        <p className="mt-0.5 text-xs text-nf-dim tabular-nums">
+                          {b.downloaded_size_str ? `${b.downloaded_size_str} de ${b.total_size_str}` : b.total_size_str}
+                          {b.speed_str ? ` · ${b.speed_str}` : ''}
+                          {b.eta_str ? ` · faltan ${b.eta_str}` : ''}
+                        </p>
                       </div>
                       <div className="flex shrink-0 items-center gap-3">
                         <span className="text-base tabular-nums text-nf-dim">{b.progress} %</span>

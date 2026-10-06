@@ -12,7 +12,8 @@ from app.auth.dependencies import get_current_user, get_current_account
 from app.services.compat import make_compatible
 from app.services.layout import plan as plan_layout, finalize_episode
 from app.services.extractor import extract_archive, find_first_archive
-from app.services.storage import format_size, get_free_space, suggest_folder_name, create_movie_folder
+from app.services.storage import (format_size, format_speed, format_eta, get_free_space,
+                                   suggest_folder_name, create_movie_folder)
 from app.services.storage import save_paused_batch, load_paused_batches, delete_paused_batch
 from app.routers.ws_router import broadcast_progress
 
@@ -189,8 +190,55 @@ async def resume(req: PauseRequest, background_tasks: BackgroundTasks, account: 
 async def status(user: Annotated[str, Depends(get_current_user)]):
     batches = []
     for bid, b in downloader.active_batches.items():
-        batches.append({"batch_id": b["batch_id"], "folder_name": b["folder_name"], "status": b["status"], "total_parts": b["total_parts"], "downloaded_parts": b["downloaded_parts"], "total_size_str": b["total_size_str"], "progress": b.get("progress", 0), "error": b.get("error"), "owner": b.get("owner"), "parts": [{"message_id": p["message_id"], "file_name": p["file_name"], "status": p["status"], "progress": p["progress"], "size_str": p["size_str"]} for p in b["parts"]]})
+        velocidad = _velocidad_vigente(b)
+        restante = max(0, b.get("total_size", 0) - b.get("downloaded_size", 0))
+        batches.append({"batch_id": b["batch_id"], "folder_name": b["folder_name"], "status": b["status"], "total_parts": b["total_parts"], "downloaded_parts": b["downloaded_parts"], "total_size_str": b["total_size_str"],
+                        # Lo descargado y la velocidad tambien aqui: el telefono
+                        # suspende el WebSocket al apagar la pantalla y al
+                        # volver esto es lo unico que tiene.
+                        "downloaded_size": b.get("downloaded_size", 0),
+                        "downloaded_size_str": format_size(b.get("downloaded_size", 0)),
+                        "total_size": b.get("total_size", 0),
+                        "speed": velocidad, "speed_str": format_speed(velocidad),
+                        "eta_str": format_eta(restante / velocidad) if velocidad > 0 else "",
+                        "progress": b.get("progress", 0), "error": b.get("error"), "owner": b.get("owner"), "parts": [{"message_id": p["message_id"], "file_name": p["file_name"], "status": p["status"], "progress": p["progress"], "size_str": p["size_str"]} for p in b["parts"]]})
     return {"active_batches": batches, "disk_free": format_size(get_free_space(config["extract_path"]))}
+
+
+# Cuanto puede llevar la ultima medida sin que la velocidad deje de valer. Si
+# no llegan bytes, el callback no se llama y el numero se queda congelado: a
+# partir de aqui se da por que no hay velocidad en vez de mentir.
+VELOCIDAD_CADUCA_S = 6
+
+
+def _medir_velocidad(batch, ahora, descargado):
+    """Velocidad de la descarga, suavizada.
+
+    Se mide por bytes y no por el texto formateado, y se promedia con la medida
+    anterior porque Telegram manda a rafagas: la velocidad instantanea salta
+    entre 2 y 40 MB/s de un segundo a otro y un numero asi no se puede leer.
+
+    El peso (0,8 a lo anterior) esta medido sobre rafagas simuladas con esa
+    forma: con 0,5 el numero daba saltos de 7 MB/s entre segundos consecutivos,
+    con 0,8 de 2 MB/s, y la media sigue siendo la de verdad.
+    """
+    medida = batch.get("_medida")
+    if medida:
+        transcurrido = ahora - medida[0]
+        avance = descargado - medida[1]
+        if transcurrido > 0 and avance >= 0:
+            instantanea = avance / transcurrido
+            anterior = batch.get("speed") or 0
+            batch["speed"] = instantanea if not anterior else anterior * 0.8 + instantanea * 0.2
+    batch["_medida"] = (ahora, descargado)
+
+
+def _velocidad_vigente(batch):
+    """La velocidad guardada, o 0 si la ultima medida es ya vieja."""
+    medida = batch.get("_medida")
+    if not medida or time.monotonic() - medida[0] > VELOCIDAD_CADUCA_S:
+        return 0
+    return batch.get("speed") or 0
 
 
 async def _download_batch(batch_id):
@@ -210,6 +258,10 @@ async def _download_batch(batch_id):
         parallel = config.get("download_parallel", 3)
         sem = asyncio.Semaphore(parallel)
         batch["_last_broadcast"] = 0
+        # (momento, bytes) de la ultima medida, para la velocidad. Aparte de
+        # `_last_broadcast` porque ese empieza en 0 y el primer intervalo
+        # saldria de horas.
+        batch["_medida"] = None
 
         async def _download_one_part(idx, part):
             if part.get("status") == "error":
@@ -233,7 +285,26 @@ async def _download_batch(batch_id):
                         now = time.monotonic()
                         if now - batch["_last_broadcast"] >= 1.0:
                             batch["_last_broadcast"] = now
-                            asyncio.ensure_future(broadcast_progress({"type": "batch_progress", "batch_id": batch_id, "part_message_id": msg_id, "part_idx": idx, "part_progress": pct, "overall_progress": batch["progress"], "downloaded_size_str": format_size(total_downloaded), "total_size_str": batch["total_size_str"]}))
+                            _medir_velocidad(batch, now, total_downloaded)
+                            restante = max(0, batch["total_size"] - total_downloaded)
+                            velocidad = batch.get("speed") or 0
+                            asyncio.ensure_future(broadcast_progress({
+                                "type": "batch_progress", "batch_id": batch_id,
+                                "part_message_id": msg_id, "part_idx": idx,
+                                "part_progress": pct, "overall_progress": batch["progress"],
+                                # Los bytes van tal cual ademas del texto: el
+                                # cliente sacaba la velocidad deshaciendo la
+                                # cadena ("1.2 GB" -> bytes) y a esa escala la
+                                # resolucion es de 100 MB, asi que el numero
+                                # salia a saltos o en blanco.
+                                "downloaded_size": total_downloaded,
+                                "total_size": batch["total_size"],
+                                "downloaded_size_str": format_size(total_downloaded),
+                                "total_size_str": batch["total_size_str"],
+                                "speed": velocidad,
+                                "speed_str": format_speed(velocidad),
+                                "eta_str": format_eta(restante / velocidad) if velocidad > 0 else "",
+                            }))
                     return cb
 
                 try:
@@ -255,6 +326,7 @@ async def _download_batch(batch_id):
             raise asyncio.CancelledError()
 
         batch["status"] = "extracting"; batch["progress"] = 100
+        batch["speed"] = 0; batch["_medida"] = None
         logger.info("Extraction starting | %s", batch.get("folder_name", ""))
         downloaded_files = [os.path.join(folder, p["file_name"]) for p in batch["parts"]]
         all_extracted = []

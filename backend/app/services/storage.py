@@ -13,6 +13,29 @@ def format_size(bytes_val):
     return f"{bytes_val:.1f} PB"
 
 
+def format_speed(bytes_per_sec):
+    """Velocidad legible: "8,3 MB/s". Por debajo de 1 KB/s no se dice nada: a
+    esa escala el numero es ruido y da la impresion de que algo va mal."""
+    if not bytes_per_sec or bytes_per_sec < 1024:
+        return ""
+    return f"{format_size(bytes_per_sec)}/s"
+
+
+def format_eta(seconds):
+    """Lo que queda, redondeado hacia arriba y sin falsa precision: a nadie le
+    sirve "4 min 37 s" en una descarga cuya velocidad baila."""
+    if not seconds or seconds <= 0 or seconds > 86400 * 2:
+        return ""
+    segundos = int(seconds)
+    if segundos < 60:
+        return f"{segundos} s"
+    minutos = (segundos + 59) // 60
+    if minutos < 60:
+        return f"{minutos} min"
+    horas = minutos / 60
+    return f"{horas:.1f} h"
+
+
 def get_free_space(path):
     try:
         stat = os.statvfs(path)

@@ -143,8 +143,23 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
     reload();
     return onProgress((d: any) => {
       if (d?.type === 'batch_progress' && d.part_message_id) {
-        setStates(prev => { const n = new Map(prev); const cur = n.get(d.part_message_id); if (cur) n.set(d.part_message_id, { ...cur, progress: d.part_progress ?? d.overall_progress ?? cur.progress, downloadedStr: d.downloaded_size_str, totalStr: d.total_size_str }); return n; });
-        setBatches(prev => prev.map(b => b.batch_id === d.batch_id ? { ...b, progress: d.overall_progress ?? b.progress } : b));
+        setStates(prev => {
+          const n = new Map(prev);
+          const cur = n.get(d.part_message_id);
+          if (cur) n.set(d.part_message_id, { ...cur,
+            progress: d.part_progress ?? d.overall_progress ?? cur.progress,
+            downloadedStr: d.downloaded_size_str, totalStr: d.total_size_str,
+            // La velocidad y lo que queda los calcula el servidor con los bytes
+            // exactos: aqui solo se pintan.
+            speedStr: d.speed_str || '', etaStr: d.eta_str || '' });
+          return n;
+        });
+        setBatches(prev => prev.map(b => b.batch_id === d.batch_id ? { ...b,
+          progress: d.overall_progress ?? b.progress,
+          downloaded_size_str: d.downloaded_size_str ?? b.downloaded_size_str,
+          total_size_str: d.total_size_str || b.total_size_str,
+          speed_str: d.speed_str ?? b.speed_str,
+          eta_str: d.eta_str ?? b.eta_str } : b));
       }
       if (d?.type === 'batch_status') {
         if (d.status === 'done') reload(); else loadStatus();

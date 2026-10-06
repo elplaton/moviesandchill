@@ -427,7 +427,7 @@ export default function TitleDetail({ input, onClose }: Props) {
         if (dialog.live) {
           const st = stateOf(dialog.live);
           if (st.status !== 'busy') { setTimeout(() => setDialog(null), 0); return null; }
-          text = `${dialog.live.baseName} · ${stateLabel(st.ds)}${st.ds.downloadedStr && st.ds.totalStr ? ` · ${st.ds.downloadedStr} / ${st.ds.totalStr}` : ''}${st.ds.speed ? ` · ${st.ds.speed}` : ''}`;
+          text = `${dialog.live.baseName} · ${stateLabel(st.ds)}${st.ds.downloadedStr && st.ds.totalStr ? ` · ${st.ds.downloadedStr} / ${st.ds.totalStr}` : ''}${st.ds.speedStr ? ` · ${st.ds.speedStr}` : ''}${st.ds.etaStr ? ` · faltan ${st.ds.etaStr}` : ''}`;
         }
         return <Dialog title={dialog.title} text={text} actions={dialog.actions} onClose={() => setDialog(null)} />;
       })()}

@@ -109,7 +109,11 @@ export function useDownloads() {
       // Descargas, que leen `batches` y no el estado por archivo.
       if (data.type === 'batch_progress' && data.batch_id) {
         setBatches(prev => prev.map(b => b.batch_id === data.batch_id
-          ? { ...b, progress: data.overall_progress ?? b.progress, status: 'downloading' }
+          ? { ...b, progress: data.overall_progress ?? b.progress, status: 'downloading',
+              downloaded_size_str: data.downloaded_size_str ?? b.downloaded_size_str,
+              total_size_str: data.total_size_str || b.total_size_str,
+              speed_str: data.speed_str ?? b.speed_str,
+              eta_str: data.eta_str ?? b.eta_str }
           : b));
       }
       if (data.type === 'batch_status' && data.batch_id) {
@@ -126,30 +130,14 @@ export function useDownloads() {
           const next = new Map(prev);
           const existing = next.get(data.part_message_id);
           if (existing) {
-            const now = Date.now();
-            let speed = existing.speed || '';
             if (data.downloaded_size_str) {
-              const prevTime = existing._lastTime || now;
-              const elapsed = (now - prevTime) / 1000;
-              const sizeMatch = data.downloaded_size_str.match(/([\d.]+)\s*(GB|MB|KB|B)/i);
-              const prevMatch = existing.downloadedStr?.match(/([\d.]+)\s*(GB|MB|KB|B)/i);
-              if (sizeMatch && prevMatch && elapsed > 0.5) {
-                const toBytes = (v: number, u: string) => {
-                  const m: Record<string, number> = { B: 1, KB: 1024, MB: 1048576, GB: 1073741824 };
-                  return v * (m[u.toUpperCase()] || 1);
-                };
-                const bytesPerSec = (toBytes(parseFloat(sizeMatch[1]), sizeMatch[2]) - toBytes(parseFloat(prevMatch[1]), prevMatch[2])) / elapsed;
-                if (bytesPerSec > 0) {
-                  const units = ['B/s', 'KB/s', 'MB/s', 'GB/s'];
-                  let v = bytesPerSec, i = 0;
-                  while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
-                  speed = `${v.toFixed(1)} ${units[i]}`;
-                }
-              }
-              // ?? y no ||: part_progress puede valer 0, que es falsy, y
-              // entonces se colaba el progreso global del lote. Por eso el
-              // anillo mostraba un porcentaje que no correspondia al fichero.
-              next.set(data.part_message_id, { ...existing, progress: data.part_progress ?? existing.progress, downloadedStr: data.downloaded_size_str, totalStr: data.total_size_str || existing.totalStr || '', speed, _lastBytes: 0, _lastTime: now });
+              next.set(data.part_message_id, { ...existing,
+                progress: data.part_progress ?? existing.progress,
+                downloadedStr: data.downloaded_size_str,
+                totalStr: data.total_size_str || existing.totalStr || '',
+                speedStr: data.speed_str || '',
+                etaStr: data.eta_str || '',
+              });
             } else {
               next.set(data.part_message_id, { ...existing, progress: data.part_progress ?? existing.progress ?? 0 });
             }

@@ -261,7 +261,11 @@ export default function Title() {
         <div className="fixed inset-0 z-[65] bg-black/70 flex items-end" onClick={() => setMenu(null)}>
           <div className="w-full bg-nf-raised rounded-t-2xl p-4 rise" style={{ paddingBottom: 'calc(16px + var(--safe-b))' }} onClick={e => e.stopPropagation()}>
             <p className="text-[15px] font-semibold">{menu.v.baseName}</p>
-            <p className="text-[13px] text-nf-text2 mb-3">{menu.ds.progress} %{menu.ds.downloadedStr ? ` · ${menu.ds.downloadedStr} / ${menu.ds.totalStr}` : ''}</p>
+            <p className="text-[13px] text-nf-text2 mb-3 tabular-nums">
+              {menu.ds.progress} %{menu.ds.downloadedStr ? ` · ${menu.ds.downloadedStr} de ${menu.ds.totalStr}` : ''}
+              {menu.ds.speedStr ? ` · ${menu.ds.speedStr}` : ''}
+              {menu.ds.etaStr ? ` · faltan ${menu.ds.etaStr}` : ''}
+            </p>
             <button onClick={() => { pause(menu.ds.batchId); setMenu(null); toast('Descarga pausada'); }} className="w-full h-12 rounded-xl bg-white/10 text-[15px] font-medium mb-2">Pausar</button>
             <button onClick={() => { cancel(menu.ds.batchId); setMenu(null); toast('Descarga cancelada'); }} className="w-full h-12 rounded-xl bg-nf-red/20 text-red-300 text-[15px] font-medium">Cancelar descarga</button>
           </div>

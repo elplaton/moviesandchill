@@ -15,7 +15,7 @@ import type { IndexChannelStatus } from '../types';
  */
 export default function ActivityDock() {
   const { isAdmin, username } = useAuth();
-  const { batches, downloadStates, pauseBatch, cancelBatch } = useDownloads();
+  const { batches, pauseBatch, cancelBatch } = useDownloads();
   const [open, setOpen] = useState(true);
   const [channels, setChannels] = useState<IndexChannelStatus[]>([]);
   const [hidden, setHidden] = useState<Set<string>>(new Set());
@@ -48,7 +48,6 @@ export default function ActivityDock() {
       {open && (
         <div className="max-h-[46vh] overflow-y-auto border-t border-nf-line">
           {live.map(b => {
-            const ds = [...downloadStates.values()].find(s => s.batchId === b.batch_id);
             const label = b.status === 'extracting' ? 'Extrayendo' : b.status === 'converting' ? 'Convirtiendo' : `${b.downloaded_parts}/${b.total_parts} partes`;
             const mine = isAdmin || !b.owner || b.owner === username;
             return (
@@ -62,7 +61,10 @@ export default function ActivityDock() {
                 </div>
                 <div className="flex items-center justify-between gap-2 text-xs text-nf-faint">
                   <span className="truncate">
-                    {label}{ds?.speed ? ` · ${ds.speed}` : ''}{b.owner && b.owner !== username ? ` · ${b.owner}` : ''}
+                    {b.downloaded_size_str ? `${b.downloaded_size_str} de ${b.total_size_str}` : label}
+                    {b.speed_str ? ` · ${b.speed_str}` : ''}
+                    {b.eta_str ? ` · faltan ${b.eta_str}` : ''}
+                    {b.owner && b.owner !== username ? ` · ${b.owner}` : ''}
                   </span>
                   {mine && b.status === 'downloading' && (
                     <span className="flex shrink-0 gap-3">

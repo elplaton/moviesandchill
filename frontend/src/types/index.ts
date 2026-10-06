@@ -66,6 +66,12 @@ export interface Batch {
   total_size: number;
   total_size_str: string;
   downloaded_size: number;
+  /** Lo descargado y la velocidad, tal y como los manda el servidor: los
+   *  calcula el con los bytes exactos (ver download_router). */
+  downloaded_size_str?: string;
+  speed_str?: string;
+  /** Lo que queda ("6 min"); vacio si no se puede estimar. */
+  eta_str?: string;
   progress: number;
   status: string;
   extracted_files: string[];
@@ -130,9 +136,12 @@ export interface DownloadState {
   status: 'downloading' | 'extracting' | 'converting' | 'done' | 'error';
   downloadedStr?: string;
   totalStr?: string;
-  speed?: string;
-  _lastBytes?: number;
-  _lastTime?: number;
+  /** Velocidad y tiempo restante, ya en texto. Antes se calculaba aqui
+   *  deshaciendo la cadena de lo descargado ("1.2 GB" -> bytes), y a esa
+   *  escala la resolucion es de 100 MB: el numero salia a saltos o en blanco.
+   *  Los bytes exactos los tiene el servidor, asi que los manda el. */
+  speedStr?: string;
+  etaStr?: string;
 }
 
 export interface IndexChannelStatus {

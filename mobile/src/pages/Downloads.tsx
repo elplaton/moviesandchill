@@ -44,7 +44,7 @@ function Caratula({ poster, title, className = '' }: { poster?: string; title: s
  * de una a otra.
  */
 export default function Downloads() {
-  const { titles, batches, paused, states, cancel, pause, resume, remove, loadStatus } = useLibrary();
+  const { titles, batches, paused, cancel, pause, resume, remove, loadStatus } = useLibrary();
   const { me, refresh } = useAuth();
   const [playing, setPlaying] = useState<LocalFile | null>(null);
   const [filter, setFilter] = useState<'all' | 'mine'>('all');
@@ -113,7 +113,6 @@ export default function Downloads() {
       {active.length > 0 && (
         <Section title="Descargando" count={`${active.length}`}>
           {active.map(b => {
-            const ds = [...states.values()].find(s => s.batchId === b.batch_id);
             const l = b.status === 'extracting' ? 'Extrayendo' : b.status === 'converting' ? 'Convirtiendo' : `${b.downloaded_parts}/${b.total_parts} partes`;
             const canManage = !b.owner || b.owner === me?.username || me?.role === 'admin';
             const meta = metas.get(cleanTitle(b.folder_name));
@@ -124,9 +123,14 @@ export default function Downloads() {
                   <div className="flex-1 min-w-0">
                     <p className="text-[15px] font-medium truncate">{cleanTitle(b.folder_name)}</p>
                     <p className="text-[12px] text-nf-text3 truncate">
-                      {l}{ds?.speed ? ` · ${ds.speed}` : ''}{b.owner && b.owner !== me?.username ? ` · ${b.owner}` : ''}
+                      {l}{b.owner && b.owner !== me?.username ? ` · ${b.owner}` : ''}
                     </p>
-                    {ds?.downloadedStr && <p className="text-[11px] text-nf-text3 truncate">{ds.downloadedStr} de {ds.totalStr || b.total_size_str}</p>}
+                    {/* Lo descargado, a qué velocidad y lo que queda. */}
+                    <p className="text-[11px] text-nf-text3 truncate tabular-nums">
+                      {b.downloaded_size_str ? `${b.downloaded_size_str} de ${b.total_size_str}` : b.total_size_str}
+                      {b.speed_str ? ` · ${b.speed_str}` : ''}
+                      {b.eta_str ? ` · faltan ${b.eta_str}` : ''}
+                    </p>
                     <div className="mt-2 flex items-center gap-2">
                       <div className="flex-1 h-1.5 rounded-full bg-white/10 overflow-hidden">
                         <div className="h-full bg-nf-red transition-[width] duration-500" style={{ width: `${b.progress}%` }} />
