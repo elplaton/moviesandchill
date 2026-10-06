@@ -15,9 +15,18 @@ function Result({ to, poster, title, meta }: { to: string; poster?: string; titl
   );
 }
 
+/**
+ * Lo último que se buscó, en memoria y no en el almacenamiento del navegador.
+ *
+ * Sirve para volver de una ficha y encontrar la búsqueda donde estaba. En
+ * memoria se va al recargar, que es justo lo que se quiere: lo que alguien
+ * busca es cosa suya y no tiene por qué quedarse escrito en el aparato.
+ */
+let ultimaBusqueda = '';
+
 /** Búsqueda con el teclado del sistema; resultados según se escribe. */
 export default function Search() {
-  const [q, setQ] = useState(() => sessionStorage.getItem('mc.q') || '');
+  const [q, setQ] = useState(ultimaBusqueda);
   const [results, setResults] = useState<SearchResult[]>([]);
   const [busy, setBusy] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -27,7 +36,7 @@ export default function Search() {
   const lastRequest = useRef(0);
 
   useEffect(() => {
-    sessionStorage.setItem('mc.q', q);
+    ultimaBusqueda = q;
     if (timer.current) clearTimeout(timer.current);
     if (q.trim().length < 2) { setResults([]); setBusy(false); return; }
     setBusy(true);

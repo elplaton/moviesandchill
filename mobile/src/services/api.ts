@@ -1,3 +1,14 @@
+/*
+ * Lo UNICO que se guarda en el navegador es la sesion.
+ *
+ * Nada mas puede vivir en localStorage: el almacenamiento es del aparato y los
+ * datos son de la cuenta, asi que en un movil o una tele que use mas de una
+ * persona se acaba viendo lo de otra. Ya paso con la fila de "Continuar
+ * viendo" y con el nombre de usuario del formulario de entrada. Si hace falta
+ * recordar algo entre pantallas, una variable de modulo (se va al recargar, y
+ * eso esta bien); si hace falta que sobreviva, va al servidor, que es quien
+ * sabe de quien es cada cosa.
+ */
 const API_BASE = '/api';
 
 let accessToken: string | null = localStorage.getItem('access_token');

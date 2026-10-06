@@ -4,8 +4,9 @@
  * Esto vivia en el localStorage de cada aparato, y por eso no servia de mucho:
  * lo empezado en la tele no existia en el movil, y en la web ni siquiera habia
  * un sitio donde verlo. Ahora manda el servidor (`/api/progress`), igual que
- * con los favoritos, y el localStorage se queda **solo como cache**: pinta la
- * fila al instante al abrir la app y aguanta un corte de red.
+ * con los favoritos. Lo que queda aqui es una cache **en memoria**, que se va
+ * al recargar: guardarla en el navegador hacia que en un aparato compartido se
+ * viera la fila de otra cuenta.
  *
  * Es el mismo archivo en `frontend/`, `mobile/` y `tizen/`.
  *
@@ -35,30 +36,43 @@ export interface Watched {
 /** Lo que el reproductor sabe del video que esta poniendo. */
 export type Entrada = Omit<Watched, 'next_episode' | 'grupo'>;
 
-const CACHE = 'mc.continuar';
+const MAX_EN_MEMORIA = 40;
+
+/**
+ * La ultima fila que dijo el servidor, **solo en memoria**.
+ *
+ * Antes esto era `localStorage`, y ahi estaba el problema: la fila es de la
+ * cuenta y el navegador es del aparato. En un movil o una tele compartidos se
+ * pintaba lo que habia visto otro (y sin red se quedaba ahi), asi que no se
+ * guarda nada en disco: se vacia al recargar y al cambiar de cuenta, y el
+ * servidor es el unico que sabe por donde va cada uno.
+ *
+ * Sigue haciendo falta: la ficha pregunta de forma sincrona si un archivo esta
+ * a medias para decir "Continuar viendo" en vez de "Reproducir", y eso se
+ * decide al pintar, sin tiempo de ir al servidor.
+ */
+let enMemoria: Watched[] = [];
+
+// Lo que dejaron las versiones anteriores en el navegador se borra al cargar:
+// era historial de la cuenta —y a veces de OTRA cuenta— guardado en el
+// aparato, y ya no lo lee nadie.
+for (const vieja of ['mc.continuar', 'mc.progress', 'mc.continuar.migrado']) {
+  try { localStorage.removeItem(vieja); } catch { /* sin localStorage */ }
+}
 
 function leerCache(): Watched[] {
-  try {
-    const raw = localStorage.getItem(CACHE);
-    return raw ? (JSON.parse(raw) as Watched[]) : [];
-  } catch {
-    return [];
-  }
+  return enMemoria;
 }
 
 function escribirCache(lista: Watched[]) {
-  try { localStorage.setItem(CACHE, JSON.stringify(lista.slice(0, 40))); } catch { /* sin espacio */ }
+  enMemoria = lista.slice(0, MAX_EN_MEMORIA);
 }
 
 /**
- * Olvida la cache. Se llama al entrar y al salir de una cuenta.
- *
- * Es necesario porque la cache es del **navegador** y la fila es de la
- * **cuenta**: en un aparato compartido, al entrar con otro usuario se pintaba
- * la fila del anterior (y ahi se quedaba si la red tardaba o fallaba).
+ * Olvida lo que haya en memoria. Se llama al entrar y al salir de una cuenta.
  */
 export function olvidarCache() {
-  try { localStorage.removeItem(CACHE); } catch { /* da igual */ }
+  enMemoria = [];
 }
 
 /** La fila tal y como quedo la ultima vez. Sirve para pintar sin esperar a la

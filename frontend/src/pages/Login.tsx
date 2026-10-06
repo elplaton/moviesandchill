@@ -5,10 +5,12 @@ import Button from '../components/ui/Button';
 
 /** Entrada a la aplicación: una sola tarjeta sobre el rojo de la marca. */
 export default function Login() {
-  const [username, setUsername] = useState(localStorage.getItem('saved_user') || '');
+  // El nombre no se recuerda en el aparato: era el de quien entró la última
+  // vez, que en una tele o un móvil compartidos es otra persona. Lo único que
+  // se guarda al entrar es la sesión, y para eso está «Recuérdame».
+  const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
-  // Por defecto marcado: es lo que hacía antes (la sesión se guardaba siempre).
-  const [remember, setRemember] = useState(localStorage.getItem('remember_me') !== '0');
+  const [remember, setRemember] = useState(true);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const { login } = useAuth();
@@ -21,9 +23,6 @@ export default function Login() {
     const err = await login(username.trim(), password, remember);
     setBusy(false);
     if (err) { setError(err); return; }
-    localStorage.setItem('remember_me', remember ? '1' : '0');
-    if (remember) localStorage.setItem('saved_user', username.trim());
-    else localStorage.removeItem('saved_user');
     navigate('/');
   };
 

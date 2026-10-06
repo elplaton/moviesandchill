@@ -46,16 +46,17 @@ function Recuerdame({ index, value, onToggle }: { index: number; value: boolean;
  * la app); sin el, se pierde al cerrar la aplicacion.
  */
 export default function Login() {
-  const [username, setUsername] = useState(localStorage.getItem('saved_user') || '');
+  // El nombre no se recuerda en la tele: era el de quien entró la última vez,
+  // y una tele la usa toda la casa. Lo único que se guarda al entrar es la
+  // sesión, y para eso está «Recuérdame».
+  const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [field, setField] = useState<'user' | 'pass'>('user');
-  const [remember, setRemember] = useState(localStorage.getItem('remember_me') !== '0');
+  const [remember, setRemember] = useState(true);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const { login } = useAuth();
   const navigate = useNavigate();
-
-  useEffect(() => { if (username) setField('pass'); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const submit = async () => {
     if (loading || !username || !password) return;
@@ -64,9 +65,6 @@ export default function Login() {
     const err = await login(username, password, remember);
     setLoading(false);
     if (err) { setError(err); return; }
-    localStorage.setItem('remember_me', remember ? '1' : '0');
-    if (remember) localStorage.setItem('saved_user', username);
-    else localStorage.removeItem('saved_user');
     navigate('/');
   };
 

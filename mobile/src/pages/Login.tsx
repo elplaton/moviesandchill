@@ -5,7 +5,9 @@ import { useAuth } from '../contexts/AuthContext';
 export default function Login() {
   const { login } = useAuth();
   const navigate = useNavigate();
-  const [u, setU] = useState(localStorage.getItem('saved_user') || '');
+  // El nombre no se recuerda en el aparato: era el de quien entró la última
+  // vez, que en un teléfono compartido es otra persona.
+  const [u, setU] = useState('');
   const [p, setP] = useState('');
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
@@ -13,7 +15,7 @@ export default function Login() {
     e.preventDefault(); setErr(''); setBusy(true);
     const r = await login(u.trim(), p); setBusy(false);
     if (r) { setErr(r); return; }
-    localStorage.setItem('saved_user', u.trim()); navigate('/', { replace: true });
+    navigate('/', { replace: true });
   };
   const input = 'w-full h-12 rounded-xl bg-white/10 border border-white/10 px-4 text-[16px] outline-none focus:border-white/40';
   return (
