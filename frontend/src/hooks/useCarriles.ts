@@ -33,7 +33,8 @@ const FRESCO = 10 * 60 * 1000;
 
 export interface Carril {
   genre: string;
-  /** El genero con el que se piden mas paginas. null = fila que no se pagina. */
+  /** Con que se piden mas paginas ("novedades", "genero:Accion", "favoritos"...).
+   *  null = fila que no se pagina (el respaldo de recomendados, por ejemplo). */
   key: string | null;
   items: BrowseItem[];
   total: number;
@@ -176,10 +177,10 @@ export function useCarriles(filter?: 'movie' | 'series') {
     try {
       const offset = dir > 0 ? c.hasta : Math.max(0, c.desde - PAGINA);
       const pedidos = dir > 0 ? PAGINA : c.desde - offset;
-      const q = new URLSearchParams({ genre: c.key, seed: m.seed,
+      const q = new URLSearchParams({ key: c.key, seed: m.seed,
                                       offset: String(offset), limit: String(pedidos) });
       if (filter) q.set('media_type', filter);
-      const d = await (await apiFetch(`/browse/genre?${q}`)).json();
+      const d = await (await apiFetch(`/browse/row?${q}`)).json();
       const nuevos: BrowseItem[] = d.items || [];
       const actual = memoria.get(k);
       if (!actual) return;

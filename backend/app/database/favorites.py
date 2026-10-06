@@ -11,7 +11,12 @@ from app.database.connection import get_pool
 _LISTA = """
     WITH fav AS (
         SELECT tmdb_id, media_type, created_at
-        FROM user_favorites WHERE user_id = $1
+        FROM user_favorites
+        WHERE user_id = $1
+          -- El tipo se filtra aqui y no en Python: las pantallas de Peliculas
+          -- y Series paginan esta fila, y contar mal el total deja al carril
+          -- pidiendo paginas que no existen.
+          AND ($4::text IS NULL OR media_type = $4)
     ), archivos AS (
         SELECT mi.tmdb_id, mi.tmdb_type,
                MIN(mi.id) AS id,
@@ -38,17 +43,31 @@ _LISTA = """
     JOIN tmdb_cache tc ON tc.tmdb_id = fav.tmdb_id AND tc.media_type = fav.media_type
     LEFT JOIN archivos a ON a.tmdb_id = fav.tmdb_id AND a.tmdb_type = fav.media_type
     ORDER BY fav.created_at DESC
-    LIMIT $2
+    LIMIT $2 OFFSET $3
 """
 
 
-async def list_favorites(user_id: int, limit: int = 200) -> list[dict]:
+async def list_favorites(user_id: int, limit: int = 200, offset: int = 0,
+                         media_type: str | None = None) -> list[dict]:
     """Los favoritos con su ficha de TMDB, lo ultimo marcado primero."""
     pool = get_pool()
     if not pool:
         return []
     async with pool.acquire() as conn:
-        return [dict(r) for r in await conn.fetch(_LISTA, user_id, limit)]
+        return [dict(r) for r in await conn.fetch(_LISTA, user_id, limit, offset, media_type)]
+
+
+async def count_favorites(user_id: int, media_type: str | None = None) -> int:
+    """Cuantos hay en total: es lo que necesita el carril para saber si queda
+    algo por traer."""
+    pool = get_pool()
+    if not pool:
+        return 0
+    async with pool.acquire() as conn:
+        return await conn.fetchval("""
+            SELECT COUNT(*) FROM user_favorites
+            WHERE user_id = $1 AND ($2::text IS NULL OR media_type = $2)
+        """, user_id, media_type) or 0
 
 
 async def favorite_keys(user_id: int) -> list[tuple[int, str]]:

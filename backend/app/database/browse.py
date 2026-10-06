@@ -109,30 +109,42 @@ async def get_browse_pool(tmdb_type: str, limit: int = 300) -> list[dict]:
     """), tmdb_type, limit)
 
 
-async def get_novedades(limit: int = 20, media_type: str | None = None,
-                        meses: int = 24) -> list[dict]:
-    """Lo estrenado hace poco, rotando en cada visita.
+async def get_estrenos(limit: int = 20, media_type: str | None = None,
+                        meses: int = 24, semilla: str = "", offset: int = 0) -> tuple[list[dict], int]:
+    """La fila "Novedades": lo estrenado hace poco, rotando y paginado.
+
+    Se llama `get_estrenos` y no `get_novedades` porque eso ya existe en
+    `connection.py` para el registro de lo que llega en vivo a los canales, que
+    es otra cosa: aqui son estrenos de TMDB, alli ficheros de Telegram.
+
+    El orden es el mismo muestreo ponderado de siempre, pero con la clave
+    **determinista** de la semilla en vez de RANDOM(): con RANDOM() la pagina 2
+    no continuaba a la 1, repetia titulos y se saltaba otros. La semilla cambia
+    en cada visita, asi que la fila sigue rotando.
 
     Se admite algo de futuro (45 dias) porque TMDB fecha el estreno en cines y
     aqui puede llegar antes; mas alla de eso un "estreno de 2028" es un
-    emparejamiento erroneo y no cuenta. Si la ventana da poco (los estrenos
-    todavia sin fecha exacta mientras el relleno no termina), se completa con
-    el criterio de antes, por año, para que la fila no se quede corta.
+    emparejamiento erroneo y no cuenta.
     """
     ventana = meses * 31
-    filas = await _filas(_consulta(f"""
-        SELECT * FROM fichas
-        WHERE fecha BETWEEN CURRENT_DATE - INTERVAL '{meses} months'
-                        AND CURRENT_DATE + INTERVAL '45 days'
-          {_filtro_tipo(media_type)}
-        ORDER BY RANDOM() ^ (1.0 / {_peso_dias(ventana)}) DESC
-        LIMIT $1
-    """), limit)
-    if len(filas) >= limit:
-        return filas
+    sql = _consulta(f"""
+        , recientes AS (
+            SELECT f.*, {_clave("$1", _peso_dias(ventana))} AS clave
+            FROM fichas f
+            WHERE f.fecha BETWEEN CURRENT_DATE - INTERVAL '{meses} months'
+                               AND CURRENT_DATE + INTERVAL '45 days'
+              {_filtro_tipo(media_type)}
+        )
+    """, *_pagina("recientes", "clave DESC, tmdb_id", "$2", "$3"))
+    filas = await _filas(sql, semilla, offset, limit)
+    total = filas[0]["total"] if filas else 0
+    if offset > 0 or len(filas) >= limit:
+        return filas, total
 
-    # El respaldo se acota por arriba: un "estreno de 2028" es un
-    # emparejamiento erroneo, no una novedad.
+    # La ventana da poco: pasa mientras el relleno de fechas no ha llegado a
+    # todo. Se completa con el criterio de antes, por año, solo en la primera
+    # pagina; `total` se queda en lo que hay en la ventana, asi que el cliente
+    # no pide una pagina 2 que no existe.
     vistos = {(f["tmdb_id"], f["tmdb_type"]) for f in filas}
     for extra in await get_recent_releases(limit, max_year=date.today().year,
                                            media_type=media_type):
@@ -140,12 +152,12 @@ async def get_novedades(limit: int = 20, media_type: str | None = None,
             filas.append(extra)
             if len(filas) >= limit:
                 break
-    return filas
+    return filas, total
 
 
 async def get_recent_releases(limit: int = 20, min_year: int = 0, max_year: int = 9999,
                               media_type: str | None = None) -> list[dict]:
-    """Lo mas nuevo por año, sin aleatoriedad. Es el respaldo de get_novedades
+    """Lo mas nuevo por año, sin aleatoriedad. Es el respaldo de get_estrenos
     y lo que se usaba antes de que hubiera fecha de estreno."""
     return await _filas(_consulta(f"""
         SELECT * FROM fichas
@@ -155,13 +167,65 @@ async def get_recent_releases(limit: int = 20, min_year: int = 0, max_year: int 
     """), min_year, max_year, limit)
 
 
-async def get_recently_added(limit: int = 20, media_type: str | None = None) -> list[dict]:
-    return await _filas(_consulta(f"""
-        SELECT * FROM fichas
-        WHERE TRUE {_filtro_tipo(media_type)}
-        ORDER BY last_indexed DESC, id DESC
-        LIMIT $1
-    """), limit)
+async def get_recently_added(limit: int = 20, media_type: str | None = None,
+                             offset: int = 0) -> tuple[list[dict], int]:
+    """Lo ultimo que ha entrado. Aqui el orden ya era reproducible (la fecha de
+    indexado no depende del azar), asi que paginar es solo contar y cortar."""
+    sql = _consulta(f"""
+        , entradas AS (
+            SELECT f.* FROM fichas f WHERE TRUE {_filtro_tipo(media_type)}
+        )
+    """, *_pagina("entradas", "last_indexed DESC, id DESC", "$1", "$2"))
+    filas = await _filas(sql, offset, limit)
+    return filas, (filas[0]["total"] if filas else 0)
+
+
+async def get_recomendados(semilla: str, gustos: dict[str, float], liked_years: list[int],
+                           offset: int = 0, limit: int = 20,
+                           media_type: str | None = None) -> tuple[list[dict], int]:
+    """"Recomendado para ti", puntuado en la base y paginado.
+
+    Antes se puntuaba en Python sobre una muestra aleatoria de 800 titulos, lo
+    que tenia dos problemas: la fila se acababa a las veinte tarjetas y, peor,
+    las "mejores recomendaciones" eran las mejores **de una muestra al azar**.
+    Aqui se puntua el catalogo entero: los puntos son la suma de los pesos de
+    los generos que gustan, mas un empujon por acercarse a los años marcados en
+    el onboarding y otro a lo reciente. El desempate es la clave determinista
+    de la semilla, asi que el orden rota por sesion pero la pagina 2 continua a
+    la 1.
+
+    Los pesos van como dos arrays en paralelo (genero y peso) y no como JSON:
+    asi el filtro es un `= ANY(...)` contra el array de generos del titulo.
+    """
+    generos = list(gustos.keys())
+    pesos = [float(v) for v in gustos.values()]
+    corte_reciente = date.today().year - 2
+    sql = _consulta(f"""
+        , gustos AS (
+            SELECT g.genero, g.peso FROM unnest($2::text[], $3::float8[]) AS g(genero, peso)
+        ),
+        puntuado AS (
+            SELECT f.*,
+                   COALESCE((SELECT SUM(g.peso) FROM gustos g WHERE g.genero = ANY(f.genres)), 0)
+                   -- Cercania a lo que marco en el onboarding. Un año nulo no
+                   -- entra en ninguna condicion y se queda en 0, no en NULL.
+                   + COALESCE((SELECT MAX(CASE WHEN abs(f.year - ly) <= 3 THEN 3
+                                               WHEN abs(f.year - ly) <= 8 THEN 1
+                                               ELSE 0 END)
+                               FROM unnest($4::int[]) AS ly), 0)
+                   + CASE WHEN f.year >= $5::int THEN 2 ELSE 0 END AS puntos
+            FROM fichas f
+            WHERE TRUE {_filtro_tipo(media_type)}
+        ),
+        elegidos AS (
+            SELECT p.*, {_clave("$1")} AS clave
+            FROM puntuado p
+            WHERE p.puntos >= 2
+        )
+    """, *_pagina("elegidos", "puntos DESC, clave DESC, tmdb_id", "$6", "$7"))
+    filas = await _filas(sql, semilla, generos, pesos, liked_years or [],
+                         corte_reciente, offset, limit)
+    return filas, (filas[0]["total"] if filas else 0)
 
 
 # ---------------------------------------------------------------------------
@@ -182,8 +246,30 @@ _CLAVE = """
 """
 
 
-def _clave(param: str) -> str:
-    return _CLAVE.replace("$SEMILLA$", param).replace("_PESO_", _PESO_AÑO)
+def _clave(param: str, peso: str | None = None) -> str:
+    return _CLAVE.replace("$SEMILLA$", param).replace("_PESO_", peso or _PESO_AÑO)
+
+
+# Numera y cuenta sobre un conjunto ya ordenado por `clave`. Es el mismo molde
+# para novedades, añadidos y recomendados: lo unico que cambia es de donde
+# salen las filas y con que se desempata.
+_PAGINADO = """,
+    clasificado AS (
+        SELECT c.*,
+               COUNT(*) OVER () AS total,
+               ROW_NUMBER() OVER (ORDER BY {orden}) AS pos
+        FROM {origen} c
+    )
+"""
+
+
+def _pagina(origen: str, orden: str, p_offset: str, p_limit: str) -> list[str]:
+    """Los dos ultimos trozos de una consulta paginada."""
+    return [
+        _PAGINADO.format(origen=origen, orden=orden),
+        f"SELECT * FROM clasificado WHERE pos > {p_offset}::int "
+        f"AND pos <= {p_offset}::int + {p_limit}::int ORDER BY pos",
+    ]
 
 
 # Empieza por coma: son dos CTE que se añaden a las de `_consulta()`. Sin ella
