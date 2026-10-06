@@ -1,4 +1,5 @@
 import { memo, useState, type ReactNode } from 'react';
+import { fondoDeTitulo } from '../utils/text';
 import { IconStar } from './ui/Icon';
 
 export interface CardProps {
@@ -19,12 +20,6 @@ export interface CardProps {
   busy?: ReactNode;
 }
 
-function hue(s: string): number {
-  let h = 0;
-  for (let i = 0; i < s.length; i++) h = ((h << 5) - h + s.charCodeAt(i)) | 0;
-  return Math.abs(h) % 360;
-}
-
 /**
  * Carátula 2:3 con el título debajo.
  *
@@ -35,7 +30,6 @@ function hue(s: string): number {
  */
 function Card({ title, poster, meta, rating, onOpen, actions, badge, badgeTone = 'neutral', progress, busy }: CardProps) {
   const [broken, setBroken] = useState(false);
-  const h = hue(title);
 
   return (
     <div className="card relative shrink-0" style={{ width: 'var(--card-w)' }}>
@@ -49,7 +43,7 @@ function Card({ title, poster, meta, rating, onOpen, actions, badge, badgeTone =
             className="absolute inset-0 w-full h-full object-cover" />
         ) : (
           <span className="absolute inset-0 flex items-end p-3 text-sm font-semibold text-white/90 line-clamp-4"
-            style={{ background: `linear-gradient(160deg, hsl(${h},42%,32%), hsl(${(h + 40) % 360},38%,13%))` }}>
+            style={{ background: fondoDeTitulo(title) }}>
             {title}
           </span>
         )}

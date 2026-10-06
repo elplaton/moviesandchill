@@ -47,3 +47,23 @@ export function parseTitle(name: string): { seriesName: string; season: number; 
   }
   return null;
 }
+
+/**
+ * Tono de color estable para un título, de 0 a 359.
+ *
+ * Es lo que pinta la "carátula" de los títulos sin imagen: un degradado que
+ * siempre es el mismo para el mismo título, así que se reconoce aunque no haya
+ * cartel. Mejor eso que un hueco gris con el nombre escrito, que parece que la
+ * tarjeta se ha roto.
+ */
+export function tonoDeTitulo(s: string): number {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = ((h << 5) - h + s.charCodeAt(i)) | 0;
+  return Math.abs(h) % 360;
+}
+
+/** El degradado completo, listo para `style={{ background }}`. */
+export function fondoDeTitulo(s: string): string {
+  const h = tonoDeTitulo(s);
+  return `linear-gradient(160deg, hsl(${h},42%,32%), hsl(${(h + 40) % 360},38%,13%))`;
+}

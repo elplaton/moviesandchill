@@ -5,6 +5,7 @@ import Row from '../components/Row';
 import Player from '../components/Player';
 import { cachedContinueWatching, continueWatching, importLocalProgress, type Watched } from '../utils/progress';
 import { IPlay, IStar } from '../components/Icons';
+import { fondoDeTitulo } from '../utils/text';
 import { useCarriles } from '../hooks/useCarriles';
 
 /** Portada: un destacado grande, "Continuar viendo" y los carriles del servidor. */
@@ -61,7 +62,12 @@ export default function Home() {
           {resume.map(w => (
             <button key={w.path} onClick={() => setPlaying(w)} className="shrink-0 w-[160px] text-left active:opacity-70">
               <div className="relative rounded-lg overflow-hidden bg-nf-card aspect-video">
-                {(w.backdrop || w.poster) && <img src={w.backdrop || w.poster} alt="" className="absolute inset-0 w-full h-full object-cover" />}
+                {w.backdrop || w.poster
+                  ? <img src={w.backdrop || w.poster} alt="" className="absolute inset-0 w-full h-full object-cover" />
+                  // Sin imagen, una caratula generada: un hueco gris con el
+                  // titulo debajo parece que la tarjeta se ha roto.
+                  : <span className="absolute inset-0 flex items-end p-2 text-[12px] font-semibold leading-tight text-white/90"
+                          style={{ background: fondoDeTitulo(w.title) }}>{w.title}</span>}
                 <span className="absolute inset-0 flex items-center justify-center"><span className="w-10 h-10 rounded-full bg-black/60 flex items-center justify-center"><span className="w-5 h-5 ml-0.5"><IPlay /></span></span></span>
                 {w.duration > 0 && <div className="absolute left-0 right-0 bottom-0 h-1 bg-white/25"><div className="h-full bg-nf-red" style={{ width: `${Math.round((w.position / w.duration) * 100)}%` }} /></div>}
               </div>

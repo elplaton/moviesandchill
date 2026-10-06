@@ -79,6 +79,14 @@ export default function Downloads() {
   };
   const pct = me?.quota_bytes ? Math.min(100, Math.round((me.used_bytes / me.quota_bytes) * 100)) : 0;
 
+  // De que titulo es el archivo que se esta reproduciendo. La caratula y el id
+  // de TMDB se guardan junto a la posicion, y son lo que hace que la tarjeta
+  // de "Continuar viendo" tenga imagen en vez de solo el titulo escrito.
+  const tituloEnJuego = playing
+    ? titles.find(t => t.versions.includes(playing) || t.episodes.includes(playing))
+    : undefined;
+  const fichaEnJuego = tituloEnJuego ? metaDe(tituloEnJuego) : undefined;
+
   /** A dónde lleva una serie: a su ficha si TMDB la conoce. */
   const fichaDe = (t: LocalTitle) => {
     const id = metaDe(t)?.tmdb_id;
@@ -253,7 +261,10 @@ export default function Downloads() {
         </div>
       )}
 
-      {playing && <Player path={playing.path} title={playing.series || cleanTitle(playing.name)} subtitle={epLabel(playing) || undefined} onClose={() => setPlaying(null)} />}
+      {playing && <Player path={playing.path} title={playing.series || cleanTitle(playing.name)} subtitle={epLabel(playing) || undefined}
+        poster={fichaEnJuego?.poster} backdrop={fichaEnJuego?.backdrop}
+        tmdbId={fichaEnJuego?.tmdb_id} mediaType={tituloEnJuego?.isSeries ? 'series' : 'movie'}
+        onClose={() => setPlaying(null)} />}
     </div>
   );
 }

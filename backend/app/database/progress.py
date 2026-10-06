@@ -68,16 +68,40 @@ async def get_progress(user_id: int, path: str) -> dict | None:
         return dict(row) if row else None
 
 
+# La caratula y el titulo se completan con la ficha de TMDB.
+#
+# Lo que se guarda aqui es lo que manda el cliente, y no todos saben la
+# caratula: reproducir desde Descargas, desde una busqueda o desde un archivo
+# suelto guardaba la posicion sin imagen, y la tarjeta de "Continuar viendo"
+# salia con el titulo en texto y un hueco gris. Teniendo `tmdb_id` la imagen
+# esta a un JOIN de distancia, asi que se pone aqui y no en cada cliente.
+#
+# COALESCE y no EXCLUDED: lo que el cliente guardo manda (puede ser el
+# fotograma de un episodio concreto), y TMDB solo rellena lo que falte.
+_HISTORIAL = """
+    SELECT p.user_id, p.path, p.grupo,
+           COALESCE(p.title, tc.title) AS title,
+           p.subtitle,
+           COALESCE(p.poster, tc.poster) AS poster,
+           COALESCE(p.backdrop, tc.backdrop, tc.poster) AS backdrop,
+           p.tmdb_id, p.tmdb_type, p.season, p.episode,
+           p.position, p.duration, p.updated_at
+    FROM playback_progress p
+    LEFT JOIN tmdb_cache tc
+           ON tc.tmdb_id = p.tmdb_id AND tc.media_type = p.tmdb_type
+    WHERE p.user_id = $1
+    ORDER BY p.updated_at DESC
+    LIMIT $2
+"""
+
+
 async def list_progress(user_id: int, limit: int = MAX_FILAS) -> list[dict]:
     """Todo el historial de la cuenta, lo ultimo visto primero."""
     pool = get_pool()
     if not pool:
         return []
     async with pool.acquire() as conn:
-        return [dict(r) for r in await conn.fetch("""
-            SELECT * FROM playback_progress WHERE user_id = $1
-            ORDER BY updated_at DESC LIMIT $2
-        """, user_id, limit)]
+        return [dict(r) for r in await conn.fetch(_HISTORIAL, user_id, limit)]
 
 
 async def delete_progress(user_id: int, path: str | None = None, grupo: str | None = None) -> int:

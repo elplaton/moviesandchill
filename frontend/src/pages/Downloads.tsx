@@ -97,9 +97,19 @@ export default function Downloads() {
   const [metas, setMetas] = useState<Map<string, TMDBMetadata>>(new Map());
   const [loading, setLoading] = useState(true);
   const [notice, setNotice] = useState('');
-  const [playing, setPlaying] = useState<{ path: string; title: string; subtitle?: string } | null>(null);
+  // La caratula y el id de TMDB viajan con lo que se reproduce: se guardan
+  // junto a la posicion, y son lo que hace que la tarjeta de "Continuar
+  // viendo" tenga imagen en vez de un hueco gris con el titulo escrito.
+  const [playing, setPlaying] = useState<{
+    path: string; title: string; subtitle?: string;
+    poster?: string; backdrop?: string; tmdbId?: number; kind?: 'movie' | 'series';
+  } | null>(null);
   const [filter, setFilter] = useState<'all' | 'mine'>('all');
-  const [pick, setPick] = useState<{ title: string; versions: Ver[] } | null>(null);
+  const [pick, setPick] = useState<{
+    title: string; versions: Ver[];
+    /** La ficha del titulo, para que al elegir version viaje con la posicion. */
+    ficha?: { poster?: string; backdrop?: string; tmdbId?: number; kind?: 'movie' | 'series' };
+  } | null>(null);
 
   const say = (m: string) => { setNotice(m); setTimeout(() => setNotice(''), 4000); };
 
@@ -216,7 +226,9 @@ export default function Downloads() {
             <div className="space-y-2">
               {series.map(t => (
                 <SeriesPanel key={t.path} t={t} meta={metaFor(t)}
-                  onPlay={(e, title) => setPlaying({ path: e.path, title, subtitle: epLabel(e) || undefined })}
+                  onPlay={(e, title) => setPlaying({ path: e.path, title, subtitle: epLabel(e) || undefined,
+                                                     poster: metaFor(t)?.poster, backdrop: metaFor(t)?.backdrop,
+                                                     tmdbId: metaFor(t)?.tmdb_id, kind: 'series' })}
                   onDelete={(e, label) => del(e.path, label)} />
               ))}
             </div>
@@ -233,7 +245,10 @@ export default function Downloads() {
                 // Con varias calidades no se puede reproducir "la pelicula":
                 // hay que elegir cual, y borrar una no puede llevarse la otra.
                 const varias = t.versions.length > 1;
-                const abrir = () => varias ? setPick({ title: name, versions: t.versions }) : setPlaying({ path: t.path, title: name });
+                const ficha = { poster: m?.poster, backdrop: m?.backdrop, tmdbId: m?.tmdb_id, kind: 'movie' as const };
+                const abrir = () => varias
+                  ? setPick({ title: name, versions: t.versions, ficha })
+                  : setPlaying({ path: t.path, title: name, ...ficha });
                 return (
                   <Card key={t.path} title={name} poster={m?.poster} rating={m?.rating}
                     meta={`${t.size} · ${t.owner}`}
@@ -275,7 +290,7 @@ export default function Downloads() {
                   <p className="truncate text-xs text-nf-faint">{v.size} · {v.owner || '—'}</p>
                 </div>
                 <Button variant="light" size="sm" icon={<IconPlay />}
-                  onClick={() => { setPick(null); setPlaying({ path: v.path, title: pick.title }); }}>Ver</Button>
+                  onClick={() => { setPick(null); setPlaying({ path: v.path, title: pick.title, ...pick.ficha }); }}>Ver</Button>
                 {v.can_delete && (
                   <button onClick={() => { setPick(null); del(v.path, `${pick.title} · ${v.quality || v.name}`); }} title="Borrar del servidor"
                     className="grid h-8 w-8 place-items-center rounded text-nf-faint hover:bg-nf-red/25 hover:text-white">
@@ -287,7 +302,10 @@ export default function Downloads() {
           </div>
         </div>
       )}
-      {playing && <Player path={playing.path} title={playing.title} subtitle={playing.subtitle} onClose={() => setPlaying(null)} />}
+      {playing && <Player path={playing.path} title={playing.title} subtitle={playing.subtitle}
+        poster={playing.poster} backdrop={playing.backdrop}
+        tmdbId={playing.tmdbId} mediaType={playing.kind}
+        onClose={() => setPlaying(null)} />}
     </Shell>
   );
 }

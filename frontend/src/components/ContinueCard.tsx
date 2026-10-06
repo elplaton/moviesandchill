@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { fondoDeTitulo } from '../utils/text';
 import { IconClose, IconPlay } from './ui/Icon';
 import type { Watched } from '../utils/progress';
 
@@ -38,7 +39,8 @@ export default function ContinueCard({ item, onPlay, onRemove }: Props) {
         {img && !roto
           ? <img src={img} alt="" onError={() => setRoto(true)}
                  className="absolute inset-0 h-full w-full object-cover" />
-          : <span className="absolute inset-0 grid place-items-center px-3 text-center text-sm text-nf-faint">{item.title}</span>}
+          : <span className="absolute inset-0 flex items-end p-3 text-base font-semibold leading-tight text-white/90 line-clamp-3"
+                  style={{ background: fondoDeTitulo(item.title) }}>{item.title}</span>}
 
         <span className="absolute inset-0 bg-black/20 opacity-0 transition-opacity duration-200 group-hover:opacity-100" />
         <span className="absolute inset-0 grid place-items-center">
