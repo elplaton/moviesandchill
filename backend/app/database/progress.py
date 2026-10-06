@@ -119,15 +119,28 @@ async def list_progress(user_id: int, limit: int = MAX_FILAS) -> list[dict]:
         return [dict(r) for r in await conn.fetch(_HISTORIAL, user_id, limit)]
 
 
-async def delete_progress(user_id: int, path: str | None = None, grupo: str | None = None) -> int:
-    """Olvida un archivo, o un titulo entero (lo que hace "quitar de la fila":
-    si solo se borrara el episodio en curso, la tarjeta volveria con el
-    anterior)."""
+async def delete_progress(user_id: int, path: str | None = None, grupo: str | None = None,
+                          todo: bool = False) -> int:
+    """Olvida un archivo, un titulo entero (lo que hace "quitar de la fila": si
+    solo se borrara el episodio en curso, la tarjeta volveria con el anterior)
+    o **todo el historial de la cuenta**.
+
+    Lo de borrarlo todo existe por un accidente: hubo una version que subia a
+    la cuenta el historial que el navegador tenia guardado de cuando el
+    progreso vivia en localStorage, y ese historial es del **aparato**, asi que
+    en una tele o un movil compartidos le entraba a uno lo que habia visto
+    otro. Quitar aquello impide que entren mas, pero no borra las que entraron,
+    y hacerlo tarjeta a tarjeta es un castigo. No se pierde nada que no se
+    pueda reconstruir viendo: no toca el disco ni las descargas.
+    """
     pool = get_pool()
-    if not pool or (path is None and grupo is None):
+    if not pool or (path is None and grupo is None and not todo):
         return 0
     async with pool.acquire() as conn:
-        if grupo is not None:
+        if todo:
+            res = await conn.execute(
+                "DELETE FROM playback_progress WHERE user_id = $1", user_id)
+        elif grupo is not None:
             res = await conn.execute(
                 "DELETE FROM playback_progress WHERE user_id = $1 AND grupo = $2", user_id, grupo)
         else:

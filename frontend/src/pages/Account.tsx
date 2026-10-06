@@ -3,6 +3,7 @@ import Shell from '../components/Shell';
 import { apiFetch } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import { useFollows } from '../contexts/FollowsContext';
+import { clearAllWatched } from '../utils/progress';
 import { activarAvisos, desactivarAvisos, estadoAvisos, probarAvisos,
          type EstadoAvisos } from '../services/push';
 
@@ -61,6 +62,24 @@ export default function Account() {
             <div className={`h-full rounded-full ${pct >= 90 ? 'bg-nf-red' : 'bg-green-500'}`} style={{ width: `${quotaBytes ? pct : 5}%` }} />
           </div>
           <p className="text-nf-faint text-xs mt-3">Cuenta lo que has descargado y sigue en el servidor. Bórralo desde su ficha para liberar espacio.</p>
+        </div>
+
+        <div className="bg-white/5 border border-white/10 rounded-2xl p-6 mb-6 shadow-xl">
+          <h2 className="text-white font-semibold mb-3">Continuar viendo</h2>
+          <p className="text-nf-dim text-sm mb-4">
+            Tu fila es solo tuya: cada cuenta tiene la suya. Si te aparece algo que no has
+            visto tú, es de cuando el historial se guardaba en el aparato y se compartía sin
+            querer; vacíala y no volverá. No se borra nada del servidor, solo por dónde ibas.
+          </p>
+          <button onClick={async () => {
+            if (!confirm('¿Vaciar tu «Continuar viendo»?')) return;
+            setMsg(null);
+            try { await clearAllWatched(); setMsg({ ok: true, text: 'Historial vaciado' }); }
+            catch { setMsg({ ok: false, text: 'No se ha podido vaciar' }); }
+          }}
+            className="bg-white/10 hover:bg-white/20 text-white px-5 py-2.5 rounded-xl font-medium text-sm transition-all">
+            Vaciar mi «Continuar viendo»
+          </button>
         </div>
 
         <div className="bg-white/5 border border-white/10 rounded-2xl p-6 mb-6 shadow-xl">

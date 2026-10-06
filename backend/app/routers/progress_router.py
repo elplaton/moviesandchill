@@ -138,15 +138,17 @@ async def post_progress(req: ProgressRequest, user: Annotated[str, Depends(get_c
 
 @router.delete("/progress")
 async def delete_progress_entry(user: Annotated[str, Depends(get_current_user)],
-                                path: str = "", grupo: str = ""):
+                                path: str = "", grupo: str = "", todo: bool = False):
     """Quitar de la fila. Con `grupo` (la carpeta del titulo) se olvida el
     titulo entero: borrando solo el episodio en curso la tarjeta volveria a
-    salir con el anterior."""
+    salir con el anterior. Con `todo`, el historial completo de la cuenta."""
     from app.database.progress import delete_progress
 
     uid = await _user_id(user)
     if uid is None:
         return {"deleted": 0}
+    if todo:
+        return {"deleted": await delete_progress(uid, todo=True)}
     if grupo:
         return {"deleted": await delete_progress(uid, grupo=grupo)}
     rel = ruta_relativa(path)

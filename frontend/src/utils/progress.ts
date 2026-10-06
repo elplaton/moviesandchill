@@ -157,6 +157,22 @@ export function markWatched(e: Entrada) {
   enviar({ ...e, position: e.duration || e.position }, true);
 }
 
+/**
+ * Vacia el historial entero de la cuenta.
+ *
+ * Existe por un accidente: hubo una version que subia a la cuenta el historial
+ * que el navegador tenia guardado de cuando el progreso vivia en localStorage,
+ * y ese historial es del **aparato**, asi que en una tele o un movil
+ * compartidos le entraba a uno lo que habia visto otro. Quitar aquello impide
+ * que entren mas, pero no borra las que entraron, y hacerlo tarjeta a tarjeta
+ * es un castigo. No se pierde nada que no se reconstruya viendo: no toca el
+ * disco ni las descargas.
+ */
+export async function clearAllWatched() {
+  olvidarCache();
+  await apiFetch('/progress?todo=true', { method: 'DELETE' });
+}
+
 /** Olvida el titulo entero ("quitar de Continuar viendo"). */
 export async function clearWatched(path: string) {
   escribirCache(leerCache().filter((w) => w.path !== path));

@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { useFollows } from '../contexts/FollowsContext';
 import { apiFetch } from '../services/api';
+import { clearAllWatched } from '../utils/progress';
 import { activarAvisos, desactivarAvisos, estadoAvisos, probarAvisos,
          type EstadoAvisos } from '../services/push';
 import { IBell } from '../components/Icons';
@@ -104,6 +105,21 @@ export default function Profile() {
           <input className={input} type="password" placeholder="Nueva (mínimo 4 caracteres)" value={nxt} onChange={e => setNxt(e.target.value)} />
         </div>
         <button onClick={change} disabled={busy || !cur || nxt.length < 4} className="mt-3 w-full h-11 rounded-xl bg-white/10 disabled:opacity-40 text-[15px] font-medium">Guardar</button>
+      </section>
+      <section className="rounded-2xl bg-white/5 p-4 mb-4">
+        <p className="text-[13px] font-semibold text-nf-text2 mb-1">Continuar viendo</p>
+        <p className="text-[13px] text-nf-text2 leading-relaxed">
+          Tu fila es solo tuya: cada cuenta tiene la suya. Si te aparece algo que
+          no has visto tú, es de cuando el historial se guardaba en el aparato y
+          se compartía sin querer; vacíala y no volverá.
+        </p>
+        <button onClick={async () => {
+          if (!confirm('¿Vaciar tu «Continuar viendo»? No se borra nada del servidor, solo por dónde ibas.')) return;
+          try { await clearAllWatched(); toast('Historial vaciado', 'ok'); }
+          catch { toast('No se ha podido vaciar', 'error'); }
+        }} className="mt-3 w-full h-11 rounded-xl bg-white/10 text-[15px] font-medium text-nf-text2">
+          Vaciar mi «Continuar viendo»
+        </button>
       </section>
       <section className="rounded-2xl bg-white/5 p-4 mb-4 text-[13px] text-nf-text2 leading-relaxed">
         <p className="font-semibold text-white mb-1">Instalar como app</p>
