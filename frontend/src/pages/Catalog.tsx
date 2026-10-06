@@ -8,8 +8,7 @@ import Player from '../components/Player';
 import TitleSheet from '../components/TitleSheet';
 import Button from '../components/ui/Button';
 import { useCatalog } from '../hooks/useCatalog';
-import { cachedContinueWatching, clearWatched, continueWatching, importLocalProgress,
-         type Watched } from '../utils/progress';
+import { cachedContinueWatching, clearWatched, continueWatching, type Watched } from '../utils/progress';
 import { IconInfo, IconPlay } from '../components/ui/Icon';
 import type { BrowseItem } from '../types';
 
@@ -31,11 +30,7 @@ export default function Catalog({ filter, heading }: Props) {
 
   const refrescar = useCallback(() => {
     if (filter) return;
-    // Lo que este navegador tuviera guardado de antes se sube una sola vez,
-    // para que nadie pierda por dónde iba al actualizar.
-    importLocalProgress().finally(() => {
-      continueWatching().then(setResume).catch(() => {});
-    });
+    continueWatching().then(setResume).catch(() => {});
   }, [filter]);
 
   useEffect(() => { refrescar(); }, [refrescar]);

@@ -78,17 +78,32 @@ async def get_progress(user_id: int, path: str) -> dict | None:
 #
 # COALESCE y no EXCLUDED: lo que el cliente guardo manda (puede ser el
 # fotograma de un episodio concreto), y TMDB solo rellena lo que falte.
-_HISTORIAL = """
+_HISTORIAL = r"""
     SELECT p.user_id, p.path, p.grupo,
-           COALESCE(p.title, tc.title) AS title,
+           COALESCE(p.title, tc.title, por_carpeta.title) AS title,
            p.subtitle,
-           COALESCE(p.poster, tc.poster) AS poster,
-           COALESCE(p.backdrop, tc.backdrop, tc.poster) AS backdrop,
+           COALESCE(p.poster, tc.poster, por_carpeta.poster) AS poster,
+           COALESCE(p.backdrop, tc.backdrop, por_carpeta.backdrop,
+                    p.poster, tc.poster, por_carpeta.poster) AS backdrop,
            p.tmdb_id, p.tmdb_type, p.season, p.episode,
            p.position, p.duration, p.updated_at
     FROM playback_progress p
     LEFT JOIN tmdb_cache tc
            ON tc.tmdb_id = p.tmdb_id AND tc.media_type = p.tmdb_type
+    -- Sin `tmdb_id` no hay por donde juntar, pero si hay un nombre: la carpeta
+    -- del titulo la puso layout.py con el titulo de TMDB, asi que "Dune (2021)"
+    -- encuentra su ficha quitandole el año. Va en LATERAL con LIMIT 1 porque
+    -- el titulo no es unico (una pelicula y una serie pueden llamarse igual) y
+    -- un LEFT JOIN normal duplicaria la fila: dos tarjetas del mismo video.
+    LEFT JOIN LATERAL (
+        SELECT c.title, c.poster, c.backdrop
+        FROM tmdb_cache c
+        WHERE p.tmdb_id IS NULL
+          AND c.poster IS NOT NULL
+          AND c.title = regexp_replace(p.grupo, '\s*\((19|20)[0-9]{2}\)\s*$', '')
+        ORDER BY COALESCE(c.vote_count, 0) DESC
+        LIMIT 1
+    ) AS por_carpeta ON TRUE
     WHERE p.user_id = $1
     ORDER BY p.updated_at DESC
     LIMIT $2

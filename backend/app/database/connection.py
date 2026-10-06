@@ -262,6 +262,9 @@ async def _ensure_tables():
             # distinguir lo de este mes de lo de enero y salia siempre igual.
             await conn.execute("ALTER TABLE tmdb_cache ADD COLUMN IF NOT EXISTS release_date DATE")
             await conn.execute("CREATE INDEX IF NOT EXISTS idx_tmdb_estreno ON tmdb_cache (release_date DESC)")
+            # Para encontrar la ficha por el nombre de la carpeta cuando una
+            # fila de progreso no guardo el tmdb_id (ver database/progress.py).
+            await conn.execute("CREATE INDEX IF NOT EXISTS idx_tmdb_titulo ON tmdb_cache (title)")
             # Lo que llega en vivo se consulta por fecha para avisar de los
             # episodios nuevos: sin indice es un barrido de media_items entero.
             await conn.execute("CREATE INDEX IF NOT EXISTS idx_media_indexado ON media_items (indexed_at DESC)")

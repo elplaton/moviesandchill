@@ -36,8 +36,6 @@ export interface Watched {
 export type Entrada = Omit<Watched, 'next_episode' | 'grupo'>;
 
 const CACHE = 'mc.continuar';
-const LEGACY = 'mc.progress';      // lo que guardaban las versiones anteriores
-const MIGRADO = 'mc.continuar.migrado';
 
 function leerCache(): Watched[] {
   try {
@@ -50,6 +48,17 @@ function leerCache(): Watched[] {
 
 function escribirCache(lista: Watched[]) {
   try { localStorage.setItem(CACHE, JSON.stringify(lista.slice(0, 40))); } catch { /* sin espacio */ }
+}
+
+/**
+ * Olvida la cache. Se llama al entrar y al salir de una cuenta.
+ *
+ * Es necesario porque la cache es del **navegador** y la fila es de la
+ * **cuenta**: en un aparato compartido, al entrar con otro usuario se pintaba
+ * la fila del anterior (y ahi se quedaba si la red tardaba o fallaba).
+ */
+export function olvidarCache() {
+  try { localStorage.removeItem(CACHE); } catch { /* da igual */ }
 }
 
 /** La fila tal y como quedo la ultima vez. Sirve para pintar sin esperar a la
@@ -140,35 +149,4 @@ export async function clearWatched(path: string) {
   try {
     await apiFetch(`/progress?path=${encodeURIComponent(path)}`, { method: 'DELETE' });
   } catch { /* se reintenta la proxima vez */ }
-}
-
-/**
- * Sube una sola vez lo que este aparato tenia guardado de antes, para que al
- * actualizar nadie pierda por donde iba.
- */
-export async function importLocalProgress() {
-  let viejo: Watched[] = [];
-  try {
-    if (localStorage.getItem(MIGRADO)) return;
-    viejo = JSON.parse(localStorage.getItem(LEGACY) || '[]');
-  } catch { return; }
-  if (!viejo.length) {
-    try { localStorage.setItem(MIGRADO, '1'); } catch { /* da igual */ }
-    return;
-  }
-  try {
-    const res = await apiFetch('/progress/import', {
-      method: 'POST',
-      body: JSON.stringify({
-        items: viejo
-          .filter((w) => w.path && w.duration > 0)
-          .map((w) => ({ path: w.path, position: w.position, duration: w.duration,
-                         title: w.title, subtitle: w.subtitle,
-                         poster: w.poster, backdrop: w.backdrop })),
-      }),
-    });
-    if (!res.ok) return;          // se reintenta en el proximo arranque
-    localStorage.setItem(MIGRADO, '1');
-    localStorage.removeItem(LEGACY);
-  } catch { /* se reintenta en el proximo arranque */ }
 }

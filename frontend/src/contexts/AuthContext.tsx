@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useEffect, type ReactNode } from 'react';
 import { apiFetch, setTokens, clearTokens, getAccessToken } from '../services/api';
+import { olvidarCache } from '../utils/progress';
 import { connectProgressWs, disconnectProgressWs } from '../services/ws';
 
 interface AuthContextType {
@@ -91,6 +92,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const data = await res.json();
       if (!res.ok) return data.detail || 'Error de login';
       setTokens(data.access_token, data.refresh_token, remember);
+      // La fila "Continuar viendo" es de la cuenta, y su cache del navegador:
+      // en un aparato compartido, entrar con otro usuario pintaba la fila del
+      // anterior hasta que contestara el servidor (o para siempre sin red).
+      olvidarCache();
       setIsAuthenticated(true);
       setUsername(user);
       await refreshMe();
@@ -108,6 +113,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = () => {
     clearTokens();
+    olvidarCache();
     disconnectProgressWs();
     setIsAuthenticated(false);
     setUsername(null);

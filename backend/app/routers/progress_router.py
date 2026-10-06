@@ -28,10 +28,6 @@ class ProgressRequest(BaseModel):
     media_type: str | None = None
 
 
-class ImportRequest(BaseModel):
-    items: list[ProgressRequest] = []
-
-
 def _tipo_tmdb(media_type: str | None) -> str | None:
     """Los clientes hablan de 'series' y TMDB de 'tv'."""
     if media_type is None:
@@ -126,16 +122,6 @@ async def post_progress(req: ProgressRequest, user: Annotated[str, Depends(get_c
     if uid is None:
         return {"saved": False}
     return {"saved": await _guardar(uid, req)}
-
-
-@router.post("/progress/import")
-async def import_progress(req: ImportRequest, user: Annotated[str, Depends(get_current_user)]):
-    """Se traga de una vez lo que cada aparato tenia guardado en su
-    localStorage, para que nadie pierda por donde iba al actualizar."""
-    uid = await _user_id(user)
-    if uid is None:
-        return {"imported": 0}
-    return {"imported": sum([await _guardar(uid, item) for item in req.items])}
 
 
 @router.delete("/progress")

@@ -3,8 +3,8 @@ import { Link } from 'react-router-dom';
 import Poster from '../components/Poster';
 import Row from '../components/Row';
 import Player from '../components/Player';
-import { cachedContinueWatching, continueWatching, importLocalProgress, type Watched } from '../utils/progress';
-import { IPlay, IStar } from '../components/Icons';
+import { cachedContinueWatching, clearWatched, continueWatching, type Watched } from '../utils/progress';
+import { IClose, IPlay, IStar } from '../components/Icons';
 import { fondoDeTitulo } from '../utils/text';
 import { useCarriles } from '../hooks/useCarriles';
 
@@ -24,8 +24,7 @@ export default function Home() {
   // haya visto mientras tanto en otro aparato no llegaria solo.
   useEffect(() => {
     const refrescar = () => { continueWatching().then(setResume).catch(() => {}); };
-    // Lo que este aparato tuviera guardado de antes se sube una sola vez.
-    importLocalProgress().finally(refrescar);
+    refrescar();
     const alVolver = () => { if (!document.hidden) refrescar(); };
     document.addEventListener('visibilitychange', alVolver);
     window.addEventListener('focus', refrescar);
@@ -34,6 +33,11 @@ export default function Home() {
       window.removeEventListener('focus', refrescar);
     };
   }, []);
+
+  const quitar = (w: Watched) => {
+    setResume(prev => prev.filter(x => x.path !== w.path));
+    clearWatched(w.path).catch(() => {});
+  };
 
   const hero = rows.find(r => r.genre === 'Novedades')?.items[0] || rows[0]?.items[0];
   const link = (i: { tmdb_id: number; media_type: string }) => `/t/${i.media_type}/${i.tmdb_id}`;
@@ -60,7 +64,8 @@ export default function Home() {
       {resume.length > 0 && (
         <Row title="Continuar viendo">
           {resume.map(w => (
-            <button key={w.path} onClick={() => setPlaying(w)} className="shrink-0 w-[160px] text-left active:opacity-70">
+            <div key={w.path} className="shrink-0 w-[160px] relative">
+            <button onClick={() => setPlaying(w)} className="w-full text-left active:opacity-70">
               <div className="relative rounded-lg overflow-hidden bg-nf-card aspect-video">
                 {w.backdrop || w.poster
                   ? <img src={w.backdrop || w.poster} alt="" className="absolute inset-0 w-full h-full object-cover" />
@@ -76,6 +81,14 @@ export default function Home() {
                 {w.next_episode ? `Empezar ${w.subtitle || 'el siguiente'}` : w.subtitle || '\u00a0'}
               </p>
             </button>
+            {/* Quitar de la fila. En el movil no habia forma de hacerlo: una
+                tarjeta que no quieres (o que no es tuya, si el aparato se
+                comparte) se quedaba ahi para siempre. */}
+            <button onClick={() => quitar(w)} aria-label={`Quitar ${w.title} de Continuar viendo`}
+              className="absolute top-1.5 right-1.5 w-7 h-7 rounded-full bg-black/70 flex items-center justify-center active:bg-nf-red/70">
+              <span className="w-3.5 h-3.5"><IClose /></span>
+            </button>
+            </div>
           ))}
         </Row>
       )}

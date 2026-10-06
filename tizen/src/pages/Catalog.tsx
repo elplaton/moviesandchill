@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { apiFetch, streamUrl } from '../services/api';
 import { fetchMediaFiles } from '../services/media';
-import { cachedContinueWatching, continueWatching, importLocalProgress, type Watched } from '../tv/progress';
+import { cachedContinueWatching, continueWatching, type Watched } from '../tv/progress';
 import { toast } from '../tv/toast';
 import Screen from '../components/Screen';
 import Row from '../components/Row';
@@ -66,10 +66,7 @@ export default function Catalog({ filter, heading }: Props) {
 
   useEffect(() => {
     if (filter) return;
-    // Lo que esta tele tuviera guardado de antes se sube una sola vez.
-    importLocalProgress().finally(() => {
-      continueWatching().then(setResume).catch(() => {});
-    });
+    continueWatching().then(setResume).catch(() => {});
   }, [filter]);
 
   useEffect(() => {
