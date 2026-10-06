@@ -36,6 +36,49 @@ _NORMAL = {
 }
 
 
+# Hasta donde se baja buscando el video dentro de una carpeta. Con 2 se cubre
+# "Serie/Temporada 1/1x01.mkv"; mas profundo no hay nada en esta biblioteca y
+# no tiene sentido recorrer el disco entero por una tarjeta de la interfaz.
+HONDURA_MAXIMA = 2
+
+
+def video_en(ruta: str) -> str | None:
+    """El video que hay en `ruta`: ella misma si ya es un archivo, y si es una
+    carpeta, el primero por orden alfabetico que contenga.
+
+    Hace falta porque `downloads.folder_path` **no siempre es un archivo**. Lo
+    es en lo que se descarga ahora (cada calidad y cada episodio poseen el
+    suyo), pero no en lo anterior ni en lo que adopta `adopt_orphans()`, que
+    registra lo que encuentra en la raiz de la biblioteca y para una pelicula
+    eso es su **carpeta**. Esa ruta acababa tal cual en el `<video>` del
+    cliente, `/api/stream` contestaba 404 porque no es un archivo, y el
+    reproductor decia "no se ha podido abrir el video": justo lo que pasaba al
+    darle a una pelicula que habia bajado otro (o sea, antes).
+
+    Por orden alfabetico y no por tamaño a proposito: en una carpeta de
+    temporada da el 1x01, que es por donde se quiere empezar, y en una de
+    pelicula con dos calidades da una de las dos, que es la pelicula igual.
+    Coger el archivo mas grande acertaria la calidad y fallaria el episodio.
+    """
+    if not ruta:
+        return None
+    if os.path.isfile(ruta):
+        return ruta
+    if not os.path.isdir(ruta):
+        return None
+    for hondura in range(HONDURA_MAXIMA + 1):
+        encontrados = []
+        for raiz, _, ficheros in os.walk(ruta):
+            nivel = os.path.relpath(raiz, ruta).count(os.sep) + 1 if raiz != ruta else 0
+            if nivel != hondura:
+                continue
+            encontrados += [os.path.join(raiz, f) for f in ficheros
+                            if f.lower().endswith(VIDEO_EXTS) and not f.startswith('.')]
+        if encontrados:
+            return sorted(encontrados)[0]
+    return None
+
+
 def etiqueta_calidad(file_name: str) -> str:
     """"1080p", "2160p HDR"... o cadena vacia si el nombre no dice nada.
 

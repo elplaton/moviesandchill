@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 from app.auth.dependencies import get_current_user
+from app.services.layout import video_en
 from app.services.title_parser import parse_filename
 
 router = APIRouter(prefix="/api", tags=["search"])
@@ -28,7 +29,12 @@ def _row_to_result(r: dict, existing: set, done: dict | None = None, me: dict | 
     # Lo descargado se sabe por la tabla de descargas (ruta final, dueño), no
     # adivinando por el nombre del archivo.
     d = (done or {}).get((r["channel_id"], r["message_id"]))
-    local = d["folder_path"] if d and d["status"] == "done" and os.path.exists(d["folder_path"]) else None
+    # `folder_path` no siempre es un archivo: lo anterior a que cada calidad
+    # tuviera el suyo —y todo lo que adopta `adopt_orphans()`— posee la
+    # **carpeta** de la pelicula. Esa ruta acababa tal cual en el `<video>`,
+    # /api/stream contestaba 404 (no es un archivo) y el reproductor decia "no
+    # se ha podido abrir el video" en las peliculas que habia bajado otro.
+    local = video_en(d["folder_path"]) if d and d["status"] == "done" else None
     is_admin = bool(me and me.get("role") == "admin")
     return {
         "id": r["message_id"], "date": str(r.get("indexed_at", "")), "text": "",
