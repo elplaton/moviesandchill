@@ -5,6 +5,7 @@ import App from './App';
 import { AuthProvider } from './contexts/AuthContext';
 import { LibraryProvider } from './contexts/LibraryContext';
 import { FavoritesProvider } from './contexts/FavoritesContext';
+import { FollowsProvider } from './contexts/FollowsContext';
 import './index.css';
 
 // Actualizacion silenciosa: cada compilacion lleva un sw.js distinto; al
@@ -90,7 +91,9 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
       <AuthProvider>
         <LibraryProvider>
           <FavoritesProvider>
-            <App />
+            <FollowsProvider>
+              <App />
+            </FollowsProvider>
           </FavoritesProvider>
         </LibraryProvider>
       </AuthProvider>

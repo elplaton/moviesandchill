@@ -11,3 +11,5 @@ asyncpg>=0.29.0
 pyjwt>=2.8.0
 aiohttp>=3.9.0
 websockets>=12.0
+# Avisos al movil (Web Push): cifra y firma cada aviso.
+pywebpush>=2.0.0

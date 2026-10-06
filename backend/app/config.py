@@ -64,6 +64,13 @@ def load_config(force_reload: bool = False) -> dict:
         "state_dir": os.getenv("TMD_STATE_DIR", ""),
         "cors_origins": _env_list("TMD_CORS_ORIGINS", ["*"]),
         "log_unit": os.getenv("TMD_LOG_UNIT", "telegram-movie"),
+        # Cada cuantos minutos se mira si han llegado episodios de las series
+        # que alguien sigue (0 = no avisar).
+        "avisos_minutos": _env_int("TMD_AVISOS_MINUTOS", 10),
+        # Correo de contacto que va dentro de la firma de los avisos: lo exige
+        # el estandar de Web Push para que el servicio de push sepa a quien
+        # escribir si algo va mal. No se muestra en ningun sitio.
+        "push_contact": os.getenv("TMD_PUSH_CONTACT", ""),
     }
 
     log_level = os.getenv("LOG_LEVEL")

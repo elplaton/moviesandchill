@@ -167,6 +167,23 @@ async def startup():
         if hours > 0:
             spawn(periodic_rescan(downloader, config, hours, broadcast=_broadcast_index), "barrido_periodico")
 
+    # Lo que sigue no depende de que haya canales configurados.
+    from app.tasks import spawn as _spawn
+
+    # Avisos de episodios nuevos de las series que alguien sigue.
+    minutos = config.get("avisos_minutos") or 0
+    if minutos > 0:
+        from app.services.avisos import vigilante
+        _spawn(vigilante(minutos), "vigilante_episodios")
+        logger.info("Avisos de episodios nuevos cada %d min", minutos)
+
+    # La fecha de estreno de lo que ya estaba en cache, para que "Novedades"
+    # pueda mirar los meses y no solo el año.
+    api_key_tmdb = config.get("tmdb_api_key", "") if config.get("tmdb_enabled") else ""
+    if api_key_tmdb:
+        from app.services.estrenos import relleno_periodico
+        _spawn(relleno_periodico(api_key_tmdb), "relleno_fechas_estreno")
+
 
 @app.on_event("shutdown")
 async def shutdown():
@@ -201,6 +218,8 @@ from app.routers.novedades_router import router as novedades_router
 from app.routers.tracks_router import router as tracks_router
 from app.routers.favorites_router import router as favorites_router
 from app.routers.progress_router import router as progress_router
+from app.routers.follows_router import router as follows_router
+from app.routers.push_router import router as push_router
 
 app.include_router(search_router)
 app.include_router(download_router)
@@ -220,6 +239,8 @@ app.include_router(novedades_router)
 app.include_router(tracks_router)
 app.include_router(favorites_router)
 app.include_router(progress_router)
+app.include_router(follows_router)
+app.include_router(push_router)
 
 
 @app.get("/health")

@@ -148,7 +148,9 @@ export default function Catalog({ filter, heading }: Props) {
       {detail && <TitleDetail input={detail} onClose={() => setDetail(null)} />}
       {playing && (
         <Player src={streamUrl(playing.path)} path={playing.path} title={playing.title} subtitle={playing.subtitle}
-          poster={playing.poster} backdrop={playing.backdrop} onClose={onPlayerClose} />
+          poster={playing.poster} backdrop={playing.backdrop}
+          tmdbId={playing.tmdb_id ?? undefined} mediaType={playing.media_type}
+          onClose={onPlayerClose} />
       )}
     </Screen>
   );

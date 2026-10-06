@@ -23,4 +23,7 @@ export const IconShield = () => <svg {...s}><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4
 export const IconHeart = ({ filled }: { filled?: boolean } = {}) => (
   <svg {...s} fill={filled ? 'currentColor' : 'none'}><path d="M12 20s-7-4.4-7-9.3A4.2 4.2 0 0112 8a4.2 4.2 0 017 2.7c0 4.9-7 9.3-7 9.3z" /></svg>
 );
+export const IconBell = ({ filled }: { filled?: boolean } = {}) => (
+  <svg {...s} fill={filled ? 'currentColor' : 'none'}><path d="M18 16V11a6 6 0 10-12 0v5l-1.5 2.5h15L18 16z" /><path d="M10 19a2 2 0 004 0" /></svg>
+);
 export const IconLogout = () => <svg {...s}><path d="M10 4H5v16h5M14 8l4 4-4 4M8 12h10" /></svg>;

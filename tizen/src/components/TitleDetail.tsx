@@ -434,7 +434,9 @@ export default function TitleDetail({ input, onClose }: Props) {
 
       {playing && (
         <Player src={streamUrl(playing.path)} path={playing.path} title={playing.title} subtitle={playing.subtitle}
-          poster={meta.poster} backdrop={meta.backdrop} onClose={() => setPlaying(null)} />
+          poster={meta.poster} backdrop={meta.backdrop}
+          tmdbId={input.tmdbId} mediaType={kind}
+          onClose={() => setPlaying(null)} />
       )}
     </div>
     </Overlay>

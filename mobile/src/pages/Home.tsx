@@ -1,26 +1,23 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { apiFetch } from '../services/api';
 import Poster from '../components/Poster';
 import Row from '../components/Row';
 import Player from '../components/Player';
 import { cachedContinueWatching, continueWatching, importLocalProgress, type Watched } from '../utils/progress';
 import { IPlay, IStar } from '../components/Icons';
-import type { BrowseRow } from '../types';
+import { useCarriles } from '../hooks/useCarriles';
 
 /** Portada: un destacado grande, "Continuar viendo" y los carriles del servidor. */
 export default function Home() {
-  const [rows, setRows] = useState<BrowseRow[]>([]);
-  const [loading, setLoading] = useState(true);
+  // Los carriles viven en un modulo, no en el componente: al volver de una
+  // ficha estan las mismas filas, con las mismas caratulas ya cargadas y en
+  // la misma posicion. Pedirlos otra vez devolveria un orden distinto.
+  const { carriles: rows, loading, cargarMas, scrollXDe, recordarScrollX } = useCarriles();
   // De la cache primero, para que la fila este ahi al abrir la app, y acto
   // seguido lo que diga el servidor (que es quien manda y quien sabe lo visto
   // en la tele o en el escritorio).
   const [resume, setResume] = useState<Watched[]>(() => cachedContinueWatching());
   const [playing, setPlaying] = useState<Watched | null>(null);
-
-  useEffect(() => {
-    apiFetch('/browse/home').then(r => r.json()).then(d => setRows(d.rows || [])).catch(() => {}).finally(() => setLoading(false));
-  }, []);
 
   // Al volver a la pestaña se relee: el telefono suspende la app y lo que se
   // haya visto mientras tanto en otro aparato no llegaria solo.
@@ -77,15 +74,25 @@ export default function Home() {
         </Row>
       )}
 
+      {/* Las filas de genero se piden de veinte en veinte al acercarse al final
+          y sueltan las caratulas de la izquierda, asi que el carril no se
+          acaba nunca y el movil no acumula mil nodos. */}
       {rows.map(r => (
-        <Row key={r.genre} title={r.genre}>
+        <Row key={r.genre} title={r.genre}
+          onNearEnd={r.key ? () => cargarMas(r.genre, 1) : undefined}
+          onNearStart={r.key ? () => cargarMas(r.genre, -1) : undefined}
+          shift={r.shift}
+          scrollX={scrollXDe(r.genre)}
+          onScrollX={x => recordarScrollX(r.genre, x)}>
           {r.items.map(i => <Poster key={`${r.genre}-${i.id}`} to={link(i)} title={i.title} poster={i.poster} subtitle={i.media_type === 'series' && i.episode_count ? `${i.episode_count} ep.` : i.year ? String(i.year) : undefined} />)}
         </Row>
       ))}
       {loading && <p className="px-4 text-nf-text3 text-[14px]">Cargando…</p>}
       {!loading && rows.length === 0 && <p className="px-4 text-nf-text3 text-[14px]">Todavía no hay nada indexado.</p>}
 
-      {playing && <Player path={playing.path} title={playing.title} subtitle={playing.subtitle} poster={playing.poster} backdrop={playing.backdrop} onClose={() => { setPlaying(null); continueWatching().then(setResume).catch(() => {}); }} />}
+      {playing && <Player path={playing.path} title={playing.title} subtitle={playing.subtitle} poster={playing.poster} backdrop={playing.backdrop}
+        tmdbId={playing.tmdb_id ?? undefined} mediaType={playing.media_type}
+        onClose={() => { setPlaying(null); continueWatching().then(setResume).catch(() => {}); }} />}
     </div>
   );
 }

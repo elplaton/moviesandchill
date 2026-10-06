@@ -21,17 +21,22 @@ async def upsert_tmdb_cache(data: dict):
     async with pool.acquire() as conn:
         await conn.execute("""
             INSERT INTO tmdb_cache (tmdb_id, media_type, title, original_title, year,
-                rating, poster, backdrop, overview, genres, runtime, seasons_count, vote_count)
-            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+                rating, poster, backdrop, overview, genres, runtime, seasons_count, vote_count,
+                release_date)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
             ON CONFLICT (tmdb_id, media_type) DO UPDATE SET
                 title=EXCLUDED.title,
                 original_title=EXCLUDED.original_title, year=EXCLUDED.year, rating=EXCLUDED.rating,
                 poster=EXCLUDED.poster, backdrop=EXCLUDED.backdrop,
                 overview=EXCLUDED.overview, genres=EXCLUDED.genres,
                 runtime=EXCLUDED.runtime, seasons_count=EXCLUDED.seasons_count,
-                vote_count=EXCLUDED.vote_count, cached_at=NOW()
+                vote_count=EXCLUDED.vote_count,
+                -- Si esta vez no viene fecha, se conserva la que hubiera: una
+                -- consulta que la traiga vacia no debe borrar la buena.
+                release_date=COALESCE(EXCLUDED.release_date, tmdb_cache.release_date),
+                cached_at=NOW()
         """, data.get("tmdb_id"), data.get("media_type"), data.get("title"),
             data.get("original_title"), data.get("year"), data.get("rating"),
             data.get("poster"), data.get("backdrop"), data.get("overview"),
             data.get("genres"), data.get("runtime"), data.get("seasons_count"),
-            data.get("vote_count"))
+            data.get("vote_count"), data.get("release_date"))

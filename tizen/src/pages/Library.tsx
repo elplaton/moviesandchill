@@ -32,7 +32,8 @@ export default function Library() {
   const [metas, setMetas] = useState<Map<string, TMDBMetadata>>(new Map());
   const [loading, setLoading] = useState(true);
   const [focusRow, setFocusRow] = useState(0);
-  const [playing, setPlaying] = useState<{ path: string; title: string; subtitle?: string; poster?: string; backdrop?: string } | null>(null);
+  const [playing, setPlaying] = useState<{ path: string; title: string; subtitle?: string; poster?: string; backdrop?: string;
+                                           tmdb_id?: number | null; media_type?: 'movie' | 'series' } | null>(null);
   const [detail, setDetail] = useState<DetailInput | null>(null);
   const [batchDialog, setBatchDialog] = useState<Batch | null>(null);
   const [resume, setResume] = useState<Watched[]>(() => cachedContinueWatching());
@@ -159,7 +160,8 @@ export default function Library() {
               item={{ key: `cw-${w.path}`, kind: 'file', title: w.title, poster: w.poster, backdrop: w.backdrop,
                       subtitle: w.next_episode ? `Empezar ${w.subtitle || 'el siguiente'}` : w.subtitle,
                       progress: w.duration > 0 ? w.position / w.duration : 0 }}
-              onSelect={() => setPlaying({ path: w.path, title: w.title, subtitle: w.subtitle, poster: w.poster, backdrop: w.backdrop })} />
+              onSelect={() => setPlaying({ path: w.path, title: w.title, subtitle: w.subtitle, poster: w.poster, backdrop: w.backdrop,
+                                           tmdb_id: w.tmdb_id, media_type: w.media_type })} />
           ))}
         </Row>
       )}
@@ -215,6 +217,7 @@ export default function Library() {
       {playing && (
         <Player src={streamUrl(playing.path)} path={playing.path} title={playing.title} subtitle={playing.subtitle}
           poster={playing.poster} backdrop={playing.backdrop}
+          tmdbId={playing.tmdb_id ?? undefined} mediaType={playing.media_type}
           onClose={() => { setPlaying(null); continueWatching().then(setResume).catch(() => {}); }} />
       )}
     </Screen>

@@ -19,7 +19,7 @@ import { IconHeart, IconInfo } from '../components/ui/Icon';
  */
 export default function Favorites() {
   const { items, loading, recargar, alternar } = useFavorites();
-  const { sheet, setSheet, open } = useSheet();
+  const { sheet, open, cerrar } = useSheet();
 
   // Las claves se cargan al entrar en la app, pero las fichas solo aquí.
   useEffect(() => { recargar(); }, [recargar]);
@@ -84,7 +84,7 @@ export default function Favorites() {
       </div>
 
       <div className="h-16" />
-      {sheet && <TitleSheet input={sheet} onClose={() => setSheet(null)} />}
+      {sheet && <TitleSheet input={sheet} onClose={cerrar} />}
     </Shell>
   );
 }

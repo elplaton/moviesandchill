@@ -35,3 +35,42 @@ self.addEventListener('fetch', (event) => {
     })),
   );
 });
+
+/*
+ * Avisos de episodios nuevos (Web Push).
+ *
+ * Es el service worker quien recibe el aviso y lo enseña: por eso existen los
+ * avisos aunque la app este cerrada. En el iPhone esto solo llega si la PWA
+ * esta instalada en la pantalla de inicio (iOS 16.4+).
+ */
+self.addEventListener('push', (event) => {
+  let d = {};
+  try { d = event.data ? event.data.json() : {}; } catch (e) { d = {}; }
+  const titulo = d.title || 'Movies & Chill';
+  event.waitUntil(self.registration.showNotification(titulo, {
+    body: d.body || '',
+    icon: '/m/icons/icon-192.png',
+    badge: '/m/icons/icon-192.png',
+    // El tag agrupa: dos avisos de la misma serie se sustituyen en vez de
+    // apilarse en la pantalla de bloqueo.
+    tag: d.tag || 'movieschill',
+    data: d,
+  }));
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const d = event.notification.data || {};
+  const destino = d.tmdb_id ? `/m/t/${d.kind === 'series' ? 'series' : 'movie'}/${d.tmdb_id}` : '/m/';
+  event.waitUntil((async () => {
+    const abiertas = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    for (const cliente of abiertas) {
+      if (new URL(cliente.url).pathname.startsWith('/m/')) {
+        await cliente.focus();
+        if ('navigate' in cliente) { try { await cliente.navigate(destino); } catch (e) { /* da igual */ } }
+        return;
+      }
+    }
+    await self.clients.openWindow(destino);
+  })());
+});

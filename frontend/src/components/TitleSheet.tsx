@@ -3,11 +3,12 @@ import { apiFetch } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import { useLibrary, type LocalFile } from '../contexts/LibraryContext';
 import { useFavorites } from '../contexts/FavoritesContext';
+import { useFollows } from '../contexts/FollowsContext';
 import { useDownloads } from '../hooks/useDownloads';
 import { groupEpisodes, groupVersions, episodeLabel, seasonLabel, type Episode, type Version } from '../utils/versions';
 import Button from './ui/Button';
 import Player from './Player';
-import { IconCheck, IconClose, IconDownload, IconHeart, IconPlay, IconStar, IconTrash } from './ui/Icon';
+import { IconBell, IconCheck, IconClose, IconDownload, IconHeart, IconPlay, IconStar, IconTrash } from './ui/Icon';
 import type { SearchResult, TMDBMetadata } from '../types';
 
 export interface SheetInput {
@@ -36,6 +37,7 @@ export default function TitleSheet({ input, onClose }: Props) {
   const { refreshMe } = useAuth();
   const { localFor, remove, version } = useLibrary();
   const { esFavorito, alternar } = useFavorites();
+  const { sigue, alternar: alternarSeguimiento } = useFollows();
   const { downloadStates, download, cancelBatch } = useDownloads();
   const [season, setSeason] = useState<number | null | undefined>(undefined);
   const [names, setNames] = useState<Map<string, string>>(new Map());
@@ -116,6 +118,7 @@ export default function TitleSheet({ input, onClose }: Props) {
 
   const onDisk = versions.filter(v => stateOf(v).s === 'ready').length;
   const marcado = !!input.tmdbId && esFavorito(input.tmdbId, kind);
+  const seguida = !!input.tmdbId && isSeries && sigue(input.tmdbId);
   const bg = (meta.backdrop || meta.poster || '').replace('/w780/', '/w1280/');
   const facts = [
     meta.year ? String(meta.year) : '',
@@ -187,6 +190,15 @@ export default function TitleSheet({ input, onClose }: Props) {
                   className={marcado ? 'text-nf-red' : ''}
                   icon={<IconHeart filled={marcado} />}>
                   {marcado ? 'En favoritos' : 'Favorito'}
+                </Button>
+              ) : null}
+              {input.tmdbId && isSeries ? (
+                /* Seguir una serie es pedir que avisen cuando llegue un
+                   episodio nuevo. Solo en series: una película no estrena. */
+                <Button variant="ghost" onClick={() => alternarSeguimiento(input.tmdbId!)}
+                  className={seguida ? 'text-nf-ok' : ''}
+                  icon={<IconBell filled={seguida} />}>
+                  {seguida ? 'Siguiendo' : 'Seguir'}
                 </Button>
               ) : null}
               {onDisk > 0 && (

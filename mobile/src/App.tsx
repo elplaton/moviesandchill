@@ -1,4 +1,5 @@
-import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import { useEffect, useLayoutEffect, useRef, type ReactNode } from 'react';
+import { Routes, Route, Navigate, useLocation, useNavigationType } from 'react-router-dom';
 import { useAuth } from './contexts/AuthContext';
 import TabBar from './components/TabBar';
 import Toasts from './components/Toasts';
@@ -16,6 +17,57 @@ function Splash() {
   return <div className="min-h-screen flex items-center justify-center"><span className="text-nf-red font-bold text-3xl tracking-tighter">MOVIES&amp;CHILL</span></div>;
 }
 
+/** Donde se quedo cada pantalla. Vive fuera de React: si se guardara en el
+ *  componente se iria justo cuando hace falta, al cambiar de ruta. */
+const alturas = new Map<string, number>();
+
+/**
+ * El contenedor que se desplaza, con memoria.
+ *
+ * Antes llevaba `key={location.pathname}`, asi que **cada navegacion lo
+ * desmontaba**: entrar en una pelicula y volver atras dejaba la portada recien
+ * montada y arriba del todo, y habia que bajar otra vez hasta donde estabas.
+ * Ahora el armazon es el mismo siempre y el scroll lo decide el tipo de
+ * navegacion: hacia delante se empieza arriba, y al volver atras se recupera
+ * lo que tenia esa entrada del historial (`location.key` identifica la entrada,
+ * no la ruta: dos visitas a la portada son dos sitios distintos).
+ */
+function Desplazable({ children }: { children: ReactNode }) {
+  const ref = useRef<HTMLElement>(null);
+  const location = useLocation();
+  const tipo = useNavigationType();
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const clave = location.key;
+    const anotar = () => alturas.set(clave, el.scrollTop);
+    el.addEventListener('scroll', anotar, { passive: true });
+    // Tambien al salir: el ultimo scroll puede no haber disparado evento.
+    return () => { anotar(); el.removeEventListener('scroll', anotar); };
+  }, [location.key]);
+
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const y = tipo === 'POP' ? (alturas.get(location.key) ?? 0) : 0;
+    el.scrollTop = y;
+    if (y <= 0) return;
+    // Las filas de la portada salen de la cache y estan ya en el primer
+    // pintado, pero las caratulas colocan su alto un poco despues: se insiste
+    // un par de fotogramas para no quedarse corto.
+    let intentos = 0;
+    const insistir = () => {
+      if (!ref.current) return;
+      if (Math.abs(ref.current.scrollTop - y) > 2) ref.current.scrollTop = y;
+      if (++intentos < 3) requestAnimationFrame(insistir);
+    };
+    requestAnimationFrame(insistir);
+  }, [location.key, tipo]);
+
+  return <main className="app-main" ref={ref}>{children}</main>;
+}
+
 export default function App() {
   const { me, loading, hasPrefs } = useAuth();
   const location = useLocation();
@@ -31,7 +83,7 @@ export default function App() {
   // de Safari no se pliega ni mueve la barra de pestañas.
   return (
     <div className="app-shell">
-      <main className="app-main" key={location.pathname}>
+      <Desplazable>
       <Routes>
         <Route path="/" element={<Home />} />
         <Route path="/buscar" element={<Search />} />
@@ -44,7 +96,7 @@ export default function App() {
         <Route path="/admin/:tab" element={me.role === 'admin' ? <Admin /> : <Navigate to="/" replace />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
-      </main>
+      </Desplazable>
       {!fullscreen && <TabBar />}
       <Toasts />
     </div>

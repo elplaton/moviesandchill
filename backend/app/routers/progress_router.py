@@ -45,6 +45,30 @@ async def _user_id(username: str) -> int | None:
     return user["id"] if user else None
 
 
+async def _seguir_si_toca(uid: int, req: ProgressRequest, episodio: int | None) -> None:
+    """Ver un episodio es seguir la serie.
+
+    Es la mitad del seguimiento: lo otro es el boton de la ficha. Asi no hay
+    que acordarse de marcar nada para que avisen del capitulo siguiente. Solo
+    cuenta si de verdad se ha empezado a ver (treinta segundos) y nunca pisa lo
+    que la cuenta haya decidido: `auto_follow` respeta la fila que ya exista,
+    incluida la de una serie que se dejo de seguir a proposito.
+    """
+    from app.database.follows import auto_follow
+
+    if not req.tmdb_id or episodio is None:
+        return
+    if _tipo_tmdb(req.media_type) != "tv":
+        return
+    if req.position < MIN_SEGUNDOS:
+        return
+    try:
+        await auto_follow(uid, req.tmdb_id)
+    except Exception:
+        # Guardar el progreso es lo importante; el seguimiento es un extra.
+        pass
+
+
 async def _guardar(uid: int, req: ProgressRequest) -> bool:
     from app.database.progress import save_progress
 
@@ -58,6 +82,7 @@ async def _guardar(uid: int, req: ProgressRequest) -> bool:
         tmdb_id=req.tmdb_id, tmdb_type=_tipo_tmdb(req.media_type),
         season=temporada, episode=episodio,
     )
+    await _seguir_si_toca(uid, req, episodio)
     return True
 
 

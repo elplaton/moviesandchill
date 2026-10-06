@@ -178,6 +178,53 @@ async def _ensure_tables():
             CREATE INDEX IF NOT EXISTS idx_progress_reciente
             ON playback_progress (user_id, updated_at DESC)
         """)
+        # Series que sigue cada cuenta, para avisar de los episodios nuevos.
+        #
+        # Una fila desactivada (`active = false`) NO es lo mismo que no tener
+        # fila: es "ya le dije que no". Hace falta porque el seguimiento tambien
+        # se activa solo al ver un episodio, y sin esa marca la serie que
+        # alguien dejo de seguir volveria a seguirse en cuanto reprodujera algo.
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS series_follows (
+                user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                tmdb_id    INTEGER NOT NULL,
+                active     BOOLEAN DEFAULT TRUE,
+                auto       BOOLEAN DEFAULT FALSE,
+                created_at TIMESTAMP DEFAULT NOW(),
+                PRIMARY KEY (user_id, tmdb_id)
+            )
+        """)
+        # Donde mandar los avisos. Una cuenta tiene tantas como aparatos: el
+        # telefono, la PWA instalada y el navegador del escritorio son
+        # suscripciones distintas, y el `endpoint` es su identidad (por eso es
+        # unico: volver a suscribirse en el mismo aparato no crea otra fila).
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS push_subscriptions (
+                id         SERIAL PRIMARY KEY,
+                user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                endpoint   VARCHAR(500) NOT NULL UNIQUE,
+                p256dh     VARCHAR(200) NOT NULL,
+                auth       VARCHAR(100) NOT NULL,
+                app        VARCHAR(10) DEFAULT 'web',
+                created_at TIMESTAMP DEFAULT NOW(),
+                last_ok    TIMESTAMP,
+                failures   INTEGER DEFAULT 0
+            )
+        """)
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_push_user ON push_subscriptions (user_id)")
+        # De que episodios ya se ha avisado. Sin esto, cada pasada del vigilante
+        # volveria a anunciar lo mismo: lo que hace "nuevo" a un episodio no es
+        # su fecha, es que esta cuenta todavia no lo sabe.
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS series_avisos (
+                user_id  INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                tmdb_id  INTEGER NOT NULL,
+                season   INTEGER NOT NULL DEFAULT 0,
+                episode  INTEGER NOT NULL,
+                sent_at  TIMESTAMP DEFAULT NOW(),
+                PRIMARY KEY (user_id, tmdb_id, season, episode)
+            )
+        """)
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS downloads (
                 id          SERIAL PRIMARY KEY,
@@ -211,6 +258,13 @@ async def _ensure_tables():
             await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS quota_bytes BIGINT")
             await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS active BOOLEAN DEFAULT TRUE")
             await conn.execute("ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS liked_years INTEGER[] DEFAULT '{}'")
+            # Fecha de estreno completa. Con solo el año, "Novedades" no podia
+            # distinguir lo de este mes de lo de enero y salia siempre igual.
+            await conn.execute("ALTER TABLE tmdb_cache ADD COLUMN IF NOT EXISTS release_date DATE")
+            await conn.execute("CREATE INDEX IF NOT EXISTS idx_tmdb_estreno ON tmdb_cache (release_date DESC)")
+            # Lo que llega en vivo se consulta por fecha para avisar de los
+            # episodios nuevos: sin indice es un barrido de media_items entero.
+            await conn.execute("CREATE INDEX IF NOT EXISTS idx_media_indexado ON media_items (indexed_at DESC)")
         except Exception:
             pass
 
@@ -255,6 +309,10 @@ from app.database.media import (insert_media_item, insert_media_items, update_me
     fetch_all_media_for_reclassify, bulk_update_parsed, reset_tmdb_for_ids, get_missing_cache_pairs)
 from app.database.tmdb_cache import get_tmdb_cached, upsert_tmdb_cache
 from app.database.favorites import list_favorites, favorite_keys, add_favorite, remove_favorite
+from app.database.follows import (list_follows, follow_keys, set_follow, auto_follow,
+    followers_of, followed_series_ids)
+from app.database.push import (add_subscription, remove_subscription, subscriptions_for,
+    drop_subscription_by_id, mark_subscription_ok)
 from app.database.index_progress import get_index_progress, upsert_index_progress, bump_index_progress, get_index_stats, set_index_phase, reset_all_index_progress, get_index_status
 
 

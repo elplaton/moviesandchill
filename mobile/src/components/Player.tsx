@@ -4,7 +4,15 @@ import { useAirplay } from '../hooks/useAirplay';
 import { IAirplay } from './Icons';
 import { markWatched, resumePoint, setWatched } from '../utils/progress';
 
-interface Props { path: string; title: string; subtitle?: string; poster?: string; backdrop?: string; onClose: () => void }
+interface Props {
+  path: string; title: string; subtitle?: string; poster?: string; backdrop?: string;
+  /** De que titulo es el video. Va al guardar la posicion, y es lo que permite
+   *  que ver un episodio empiece a seguir la serie (avisos de episodio nuevo);
+   *  sin esto el servidor guarda la posicion pero no sabe de que serie es. */
+  tmdbId?: number;
+  mediaType?: 'movie' | 'series';
+  onClose: () => void;
+}
 
 /**
  * Reproductor: solo el <video> del sistema, sin barra ni botones propios.
@@ -20,7 +28,7 @@ interface Props { path: string; title: string; subtitle?: string; poster?: strin
  * reproductor en linea con sus propios controles durante un segundo y luego
  * saltaba encima el del sistema: parecian dos reproductores peleandose.
  */
-export default function Player({ path, title, subtitle, poster, backdrop, onClose }: Props) {
+export default function Player({ path, title, subtitle, poster, backdrop, tmdbId, mediaType, onClose }: Props) {
   const ref = useRef<HTMLVideoElement>(null);
   const [subs, setSubs] = useState<ExternalSubtitle[]>([]);
   const [preparando, setPreparando] = useState(true);
@@ -60,6 +68,7 @@ export default function Player({ path, title, subtitle, poster, backdrop, onClos
     const close = () => { if (closed) return; closed = true; onClose(); };
 
     const entrada = () => ({ path, title, subtitle, poster, backdrop,
+                             tmdb_id: tmdbId ?? null, media_type: mediaType,
                              position: v.currentTime, duration: v.duration });
     const onMeta = () => aplicarInicio();
     const onTime = () => {

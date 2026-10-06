@@ -5,11 +5,12 @@ import { fetchMediaFiles } from '../services/media';
 import { useLibrary, type LocalFile } from '../contexts/LibraryContext';
 import { useAuth } from '../contexts/AuthContext';
 import { useFavorites } from '../contexts/FavoritesContext';
+import { useFollows } from '../contexts/FollowsContext';
 import { toast } from '../utils/toast';
 import { cachedResumePoint } from '../utils/progress';
 import { groupEpisodes, groupVersions, seasonLabel, episodeLabel, type Version } from '../utils/versions';
 import Player from '../components/Player';
-import { IBack, IHeart, IPlay, IStar, ITrash } from '../components/Icons';
+import { IBack, IBell, IHeart, IPlay, IStar, ITrash } from '../components/Icons';
 import type { DownloadState, SearchResult, TMDBMetadata } from '../types';
 
 type RowState = { s: 'ready'; f: LocalFile } | { s: 'busy'; ds: DownloadState } | { s: 'idle' };
@@ -46,6 +47,7 @@ export default function Title() {
   const { localFor, states, version, download, cancel, pause, remove } = useLibrary();
   const { refresh } = useAuth();
   const { esFavorito, alternar } = useFavorites();
+  const { sigue, alternar: alternarSeguimiento } = useFollows();
   const tmdbId = parseInt(id) || 0;
   const isSeries = kind === 'series';
   const [meta, setMeta] = useState<(TMDBMetadata & { tmdb_id?: number }) | null>(null);
@@ -123,6 +125,7 @@ export default function Title() {
   }, [versions, localFor, meta]);
 
   const marcado = !!tmdbId && esFavorito(tmdbId, isSeries ? 'series' : 'movie');
+  const seguida = !!tmdbId && isSeries && sigue(tmdbId);
   const bg = meta?.backdrop || meta?.poster;
   const info = [meta?.year, meta?.genres?.slice(0, 2).join(', '), isSeries ? `${episodes.length} episodios` : `${versions.length} ${versions.length === 1 ? 'versión' : 'versiones'}`].filter(Boolean).join(' · ');
 
@@ -151,9 +154,20 @@ export default function Title() {
             <button onClick={() => alternar(tmdbId, isSeries ? 'series' : 'movie')}
               aria-label={marcado ? 'Quitar de favoritos' : 'Añadir a favoritos'}
               className={`h-12 rounded-xl text-[15px] font-semibold flex items-center justify-center gap-2 active:opacity-80 ${
-                playable ? 'w-14 bg-white/10' : 'flex-1 bg-white/10'} ${marcado ? 'text-nf-red' : 'text-white'}`}>
+                playable || isSeries ? 'w-14 bg-white/10' : 'flex-1 bg-white/10'} ${marcado ? 'text-nf-red' : 'text-white'}`}>
               <span className="w-5 h-5"><IHeart filled={marcado} /></span>
-              {!playable && (marcado ? 'En favoritos' : 'Favorito')}
+              {!playable && !isSeries && (marcado ? 'En favoritos' : 'Favorito')}
+            </button>
+          ) : null}
+          {tmdbId && isSeries ? (
+            /* Seguir es pedir que avisen del episodio nuevo. Solo en series:
+               una película no estrena capítulos. */
+            <button onClick={() => alternarSeguimiento(tmdbId)}
+              aria-label={seguida ? 'Dejar de seguir' : 'Seguir la serie'}
+              className={`h-12 rounded-xl text-[15px] font-semibold flex items-center justify-center gap-2 active:opacity-80 bg-white/10 ${
+                playable ? 'w-14' : 'flex-1'} ${seguida ? 'text-nf-ok' : 'text-white'}`}>
+              <span className="w-5 h-5"><IBell filled={seguida} /></span>
+              {!playable && (seguida ? 'Siguiendo' : 'Seguir')}
             </button>
           ) : null}
         </div>
@@ -229,7 +243,9 @@ export default function Title() {
           </div>
         </div>
       )}
-      {playing && <Player path={playing.path} title={meta?.title || ''} subtitle={playing.subtitle} poster={meta?.poster} backdrop={meta?.backdrop} onClose={() => setPlaying(null)} />}
+      {playing && <Player path={playing.path} title={meta?.title || ''} subtitle={playing.subtitle} poster={meta?.poster} backdrop={meta?.backdrop}
+        tmdbId={tmdbId || undefined} mediaType={isSeries ? 'series' : 'movie'}
+        onClose={() => setPlaying(null)} />}
     </div>
   );
 }

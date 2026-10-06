@@ -52,6 +52,7 @@ def _to_result(r: dict, media_type: str) -> dict | None:
         "title": title,
         "media_type": media_type,
         "year": _extract_year(r),
+        "release_date": _extract_date(r),
         "rating": r.get("vote_average"),
         "overview": r.get("overview", ""),
         "poster": f"{IMAGE_BASE}/w342{r['poster_path']}" if r.get("poster_path") else None,
@@ -181,6 +182,24 @@ def _extract_year(item: dict) -> int | None:
     return None
 
 
+def _extract_date(item: dict):
+    """El estreno como fecha, para la fila de novedades.
+
+    Va como `datetime.date` y no como cadena porque la columna es DATE y
+    asyncpg no convierte el texto por su cuenta. TMDB manda a veces el campo
+    vacio ("") en titulos sin estrenar: eso es "no se sabe", no una fecha.
+    """
+    from datetime import date as _date
+
+    date_str = (item.get("release_date") or item.get("first_air_date") or "").strip()
+    if len(date_str) < 10:
+        return None
+    try:
+        return _date.fromisoformat(date_str[:10])
+    except ValueError:
+        return None
+
+
 async def batch_search(api_key: str, names: list[str]) -> dict[str, dict]:
     import asyncio
 
@@ -216,6 +235,7 @@ async def get_details(api_key: str, tmdb_id: int, media_type: str) -> dict | Non
         "title": data.get("title") or data.get("name", ""),
         "original_title": data.get("original_title") or data.get("original_name", ""),
         "year": _extract_year(data),
+        "release_date": _extract_date(data),
         "rating": data.get("vote_average"),
         "vote_count": data.get("vote_count"),
         "poster": f"{IMAGE_BASE}/w342{data['poster_path']}" if data.get("poster_path") else None,

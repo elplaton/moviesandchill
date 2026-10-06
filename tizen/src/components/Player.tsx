@@ -16,6 +16,12 @@ interface Props {
   subtitle?: string;
   poster?: string;
   backdrop?: string;
+  /** De que titulo es el video. Va al guardar la posicion, y es lo que permite
+   *  que ver un episodio empiece a seguir la serie (avisos de episodio nuevo
+   *  en el movil); sin esto el servidor guarda la posicion pero no sabe de que
+   *  serie es. */
+  tmdbId?: number;
+  mediaType?: 'movie' | 'series';
   onClose: () => void;
 }
 
@@ -54,7 +60,7 @@ function fmt(s: number): string {
  * pausa, la barra de progreso se puede pulsar, y los saltos, el idioma y el
  * volver son botones en pantalla.
  */
-export default function Player({ src, path, title, subtitle, poster, backdrop, onClose }: Props) {
+export default function Player({ src, path, title, subtitle, poster, backdrop, tmdbId, mediaType, onClose }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [playing, setPlaying] = useState(true);
   const [osd, setOsd] = useState(true);
@@ -82,13 +88,14 @@ export default function Player({ src, path, title, subtitle, poster, backdrop, o
     if (!force && now - lastSave.current < SAVE_EVERY_MS) return;
     lastSave.current = now;
     const entrada = { path, title, subtitle, poster, backdrop,
+                      tmdb_id: tmdbId ?? null, media_type: mediaType,
                       position: v.currentTime, duration: v.duration };
     // Lo terminado se marca, no se borra: es lo que deja al servidor ofrecer
     // el episodio siguiente. `force` va tambien como keepalive, porque los
     // guardados forzados son los de cerrar y ahi la peticion normal se cancela.
     if (v.currentTime / v.duration >= 0.97) markWatched(entrada);
     else setWatched(entrada, force);
-  }, [path, title, subtitle, poster, backdrop]);
+  }, [path, title, subtitle, poster, backdrop, tmdbId, mediaType]);
 
   const close = useCallback(() => {
     save(true);
@@ -259,6 +266,7 @@ export default function Player({ src, path, title, subtitle, poster, backdrop, o
     const onTime = () => { setTime(v.currentTime); save(); };
     const onEnded = () => {
       markWatched({ path, title, subtitle, poster, backdrop,
+                    tmdb_id: tmdbId ?? null, media_type: mediaType,
                     position: v.duration || 0, duration: v.duration || 0 });
       onClose();
     };

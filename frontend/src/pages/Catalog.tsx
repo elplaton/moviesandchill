@@ -21,7 +21,8 @@ interface Props {
 
 /** Portada, Películas y Series: los tres son carriles sobre el mismo catálogo. */
 export default function Catalog({ filter, heading }: Props) {
-  const { rows, loading, sheet, setSheet, open } = useCatalog(filter);
+  const { rows, loading, cargarMas, scrollXDe, recordarScrollX,
+          sheet, open, cerrar } = useCatalog(filter);
   // "Continuar viendo" solo en la portada: en Películas y Series estorbaría.
   // De la caché primero para que esté ahí sin esperar a la red, y acto seguido
   // lo que diga el servidor, que es quien sabe lo visto en el móvil o la tele.
@@ -91,8 +92,16 @@ export default function Catalog({ filter, heading }: Props) {
         </Rail>
       )}
 
+      {/* Las filas de género se piden de veinte en veinte al acercarse al final
+          del carril, y sueltan las tarjetas de la izquierda para no acumular
+          mil nodos; `shift` es lo que deja el scroll donde estaba. */}
       {rows.map(row => (
-        <Rail key={row.genre} title={row.genre}>
+        <Rail key={row.genre} title={row.genre}
+          onNearEnd={row.key ? () => cargarMas(row.genre, 1) : undefined}
+          onNearStart={row.key ? () => cargarMas(row.genre, -1) : undefined}
+          shift={row.shift}
+          scrollX={scrollXDe(row.genre)}
+          onScrollX={x => recordarScrollX(row.genre, x)}>
           {row.items.map(item => card(item, row.genre))}
         </Rail>
       ))}
@@ -106,7 +115,7 @@ export default function Catalog({ filter, heading }: Props) {
       )}
 
       <div className="h-16" />
-      {sheet && <TitleSheet input={sheet} onClose={() => setSheet(null)} />}
+      {sheet && <TitleSheet input={sheet} onClose={cerrar} />}
       {playing && (
         <Player path={playing.path} title={playing.title} subtitle={playing.subtitle}
           poster={playing.poster} backdrop={playing.backdrop}

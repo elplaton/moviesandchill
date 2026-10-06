@@ -179,4 +179,8 @@ export interface BrowseItem {
 export interface BrowseRow {
   genre: string;
   items: BrowseItem[];
+  /** Cuantos titulos hay en total en esta fila (no cuantos han llegado). */
+  total?: number;
+  /** El genero con el que se piden mas paginas; null si la fila no se pagina. */
+  key?: string | null;
 }

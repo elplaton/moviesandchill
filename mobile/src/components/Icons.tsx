@@ -10,6 +10,7 @@ export const IBack = () => <svg {...b}><path d="M15 5l-7 7 7 7" /></svg>;
 export const ITrash = () => <svg {...b}><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3" /></svg>;
 export const IStar = () => <svg viewBox="0 0 20 20" className="w-full h-full" fill="currentColor"><path d="M9.05 2.93c.3-.92 1.6-.92 1.9 0l1.07 3.29a1 1 0 00.95.69h3.46c.97 0 1.37 1.24.59 1.81l-2.8 2.03a1 1 0 00-.37 1.12l1.07 3.29c.3.92-.75 1.69-1.54 1.12l-2.8-2.03a1 1 0 00-1.18 0l-2.8 2.03c-.78.57-1.83-.2-1.53-1.12l1.07-3.29a1 1 0 00-.37-1.12L2.98 8.72c-.78-.57-.38-1.81.59-1.81h3.46a1 1 0 00.95-.69l1.07-3.29z" /></svg>;
 export const IHeart = ({ filled }: { filled?: boolean } = {}) => <svg {...b} fill={filled ? 'currentColor' : 'none'}><path d="M12 20s-7-4.4-7-9.3A4.2 4.2 0 0112 8a4.2 4.2 0 017 2.7c0 4.9-7 9.3-7 9.3z" /></svg>;
+export const IBell = ({ filled }: { filled?: boolean } = {}) => <svg {...b} fill={filled ? 'currentColor' : 'none'}><path d="M18 16V11a6 6 0 10-12 0v5l-1.5 2.5h15L18 16z" /><path d="M10 19a2 2 0 004 0" /></svg>;
 export const IClose = () => <svg {...b}><path d="M6 6l12 12M18 6L6 18" /></svg>;
 export const IPause = () => <svg viewBox="0 0 24 24" className="w-full h-full" fill="currentColor"><rect x="6" y="4" width="4.5" height="16" rx="1" /><rect x="13.5" y="4" width="4.5" height="16" rx="1" /></svg>;
 export const ICheck = () => <svg {...b} strokeWidth={3}><path d="M5 12.5l4.5 4.5L19 7.5" /></svg>;
