@@ -1,9 +1,11 @@
 # Despliegue en Coolify.
 #
 # Diferencias con docker-compose.yml (el de casa):
-#  - No hay servicio `db`: se usa el PostgreSQL que ya vive en Coolify, via
-#    TMD_DATABASE_URL. Para que el backend resuelva su hostname interno hay que
-#    activar "Connect To Predefined Network" en los ajustes de la aplicacion.
+#  - No hay servicio `db` ni `cache`: se usan el PostgreSQL y el Redis que ya
+#    viven en Coolify como recursos aparte, via TMD_DATABASE_URL y
+#    TMD_REDIS_URL. Para que el backend resuelva sus hostnames internos hay
+#    que activar "Connect To Predefined Network" en los ajustes de la
+#    aplicacion.
 #  - No se publican puertos en el host: el 80 lo ocupa el proxy de Coolify y
 #    el bind fallaba, dejando el contenedor en bucle de reinicio.
 #  - Healthchecks propios: el de por defecto de Coolify usa curl y ni
@@ -28,6 +30,12 @@ services:
       TMD_ADMIN_PASSWORD: ${TMD_ADMIN_PASSWORD:-admin}
       # --- PostgreSQL externo ---
       TMD_DATABASE_URL: ${TMD_DATABASE_URL}
+      # --- Cache (Redis externo, otro recurso de Coolify) ---
+      # Vacio = sin cache: la aplicacion arranca igual y solo recalcula la
+      # portada y las fichas en cada visita. El hostname es el del recurso de
+      # Redis en Coolify, que resuelve gracias a "Connect To Predefined
+      # Network" (lo mismo que hace falta para el PostgreSQL).
+      TMD_REDIS_URL: ${TMD_REDIS_URL:-}
       # --- Rutas dentro del contenedor ---
       TMD_DOWNLOAD_PATH: /app/downloads
       TMD_EXTRACT_PATH: /app/movies

@@ -13,3 +13,6 @@ aiohttp>=3.9.0
 websockets>=12.0
 # Avisos al movil (Web Push): cifra y firma cada aviso.
 pywebpush>=2.0.0
+# Cache compartida (portada, fichas, pistas). Si no hay Redis configurado la
+# libreria no se usa y la aplicacion funciona igual, solo mas lenta.
+redis>=5.0.0

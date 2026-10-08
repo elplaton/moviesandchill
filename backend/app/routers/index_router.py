@@ -139,11 +139,16 @@ async def index_reclassify(user: Annotated[str, Depends(get_current_admin)]):
 
     async def _task():
         global _reclassify_running
+        from app.services import cache
         _reclassify_running = True
         try:
             await reclassify_all(api_key, broadcast=_broadcast_index)
         finally:
             _reclassify_running = False
+            # Reclasificar cambia el tipo y el emparejamiento de medio
+            # catalogo: lo que hubiera cacheado de la portada y de las fichas
+            # ya no vale.
+            cache.cambio_en_catalogo()
 
     spawn(_task(), "reclassify")
     return {"status": "started", "tmdb_enabled": bool(api_key)}

@@ -4,14 +4,44 @@ import { Embedded } from '../components/Shell';
 import { apiFetch } from '../services/api';
 import type { AppConfig } from '../types';
 
+interface CacheEstado {
+  activa: boolean;
+  url: string;
+  aciertos: number;
+  fallos: number;
+  errores: number;
+  tasa: number;
+  claves?: number;
+  memoria?: string;
+  error?: string;
+}
+
 export default function Settings({ embedded = false }: { embedded?: boolean } = {}) {
   const Wrap = embedded ? Embedded : Shell;
   const [config, setConfig] = useState<AppConfig | null>(null);
   const [toast, setToast] = useState('');
+  /**
+   * Estado de la cache. Existe porque una cache es invisible cuando va bien
+   * y tambien cuando no va: sin un sitio donde mirarlo, la unica forma de
+   * saber si Redis esta conectado era cronometrar la portada.
+   */
+  const [cache, setCache] = useState<CacheEstado | null>(null);
+
+  const leerCache = () => {
+    apiFetch('/admin/cache').then(r => r.json()).then(setCache).catch(() => setCache(null));
+  };
 
   useEffect(() => {
     apiFetch('/config').then(r => r.json()).then(d => setConfig(d.config));
+    leerCache();
   }, []);
+
+  const vaciarCache = async () => {
+    await apiFetch('/admin/cache', { method: 'DELETE' });
+    setToast('Caché vaciada');
+    setTimeout(() => setToast(''), 2000);
+    leerCache();
+  };
 
   const update = (key: string, value: any) => {
     setConfig(prev => prev ? { ...prev, [key]: value } : prev);
@@ -89,6 +119,52 @@ export default function Settings({ embedded = false }: { embedded?: boolean } = 
           {field('Descargas paralelas', 'download_parallel', 'number')}
           {toggle('Borrar archivos tras extraer', 'delete_archives_after_extract')}
           {toggle('Convertir DTS a AC3', 'convert_dts_to_ac3')}
+        </div>
+
+        <div className="bg-white/5 backdrop-blur-md border border-white/10 rounded-2xl p-6 mb-8 shadow-xl">
+          <h2 className="text-white font-semibold mb-1">Caché</h2>
+          <p className="text-nf-faint text-xs mb-4">
+            La portada, las fichas y las pistas de cada archivo se guardan en Redis.
+            Es lo que hace que aparezcan de golpe en vez de recalcularse en cada visita.
+          </p>
+          {!cache ? (
+            <p className="text-nf-dim text-sm py-2">Consultando…</p>
+          ) : !cache.activa ? (
+            <p className="text-nf-dim text-sm py-2">
+              Desactivada. Se enciende poniendo <code className="text-white">TMD_REDIS_URL</code>;
+              sin ella todo funciona igual, solo más lento.
+            </p>
+          ) : (
+            <>
+              <div className="grid grid-cols-2 gap-3 py-2">
+                {[['Acierto', `${cache.tasa} %`],
+                  ['Consultas', String(cache.aciertos + cache.fallos)],
+                  ['Entradas', cache.claves != null ? String(cache.claves) : '—'],
+                  ['Memoria', cache.memoria || '—']].map(([k, v]) => (
+                  <div key={k}>
+                    <p className="text-nf-faint text-micro uppercase tracking-wide">{k}</p>
+                    <p className="text-white text-md font-semibold tabular-nums">{v}</p>
+                  </div>
+                ))}
+              </div>
+              <p className="text-nf-faint text-xs mt-2">
+                {cache.url}
+                {cache.errores > 0 && ` · ${cache.errores} errores`}
+              </p>
+            </>
+          )}
+          <div className="flex gap-3 mt-4">
+            <button onClick={leerCache}
+              className="bg-white/10 hover:bg-white/20 text-white px-5 py-2.5 rounded-xl text-sm font-semibold transition-colors">
+              Actualizar
+            </button>
+            {cache?.activa && (
+              <button onClick={vaciarCache}
+                className="bg-white/10 hover:bg-white/20 text-white px-5 py-2.5 rounded-xl text-sm font-semibold transition-colors">
+                Vaciar caché
+              </button>
+            )}
+          </div>
         </div>
 
         <button onClick={save} className="bg-nf-red hover:bg-nf-red-dark text-white px-8 py-3.5 rounded-xl font-semibold transition-all hover:scale-105 shadow-lg shadow-nf-red/20">

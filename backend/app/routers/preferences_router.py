@@ -79,6 +79,11 @@ async def save_prefs(req: SavePreferencesRequest, user: Annotated[str, Depends(g
             )
 
     await db_save_prefs(db_user["id"], req.movies, req.series, dict(genre_counter), liked_years)
+    # Los gustos son la mitad de "Recomendado para ti", y la portada va
+    # cacheada: sin esto el onboarding acabaria y la portada seguiria siendo
+    # la de antes de elegir nada.
+    from app.services import cache
+    cache.cambio_de_cuenta(db_user["id"])
     return {"status": "saved", "genres": dict(genre_counter), "years": liked_years}
 
 

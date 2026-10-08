@@ -14,6 +14,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 from app.auth.dependencies import get_current_user
+from app.services import cache
 
 router = APIRouter(prefix="/api", tags=["watched"])
 
@@ -65,6 +66,8 @@ async def post_watched(req: WatchedRequest, user: Annotated[str, Depends(get_cur
         return {"error": "Usuario no encontrado"}
     await marcar_visto(uid, req.tmdb_id, _tipo_tmdb(req.media_type),
                        req.season or 0, req.episode or 0)
+    # Lo marcado mueve las recomendaciones, y la portada va cacheada.
+    cache.cambio_de_cuenta(uid)
     return {"watched": True}
 
 
@@ -77,4 +80,5 @@ async def delete_watched(req: WatchedRequest, user: Annotated[str, Depends(get_c
         return {"error": "Usuario no encontrado"}
     await desmarcar_visto(uid, req.tmdb_id, _tipo_tmdb(req.media_type),
                           req.season or 0, req.episode or 0)
+    cache.cambio_de_cuenta(uid)
     return {"watched": False}

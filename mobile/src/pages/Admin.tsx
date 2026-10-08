@@ -287,9 +287,58 @@ function Server() {
         <Toggle k="convert_dts_to_ac3" label="Convertir a MP4 al descargar" help="Necesario para iPhone y para las teles" />
         <Toggle k="delete_archives_after_extract" label="Borrar comprimidos tras extraer" />
       </section>
+      <Cache />
       <Pantalla />
       <p className="text-[12px] text-nf-text3">Las rutas y el resto de ajustes se editan desde la web de escritorio o en el archivo .env del servidor.</p>
     </div>
+  );
+}
+
+/**
+ * Estado de la cache (Redis).
+ *
+ * Existe por lo mismo que en la web: una cache es invisible cuando va bien y
+ * tambien cuando no va, asi que sin un sitio donde mirarlo la unica forma de
+ * saber si esta conectada era cronometrar la portada. Y el boton de vaciar es
+ * la salida de emergencia si algo se queda pegado.
+ */
+function Cache() {
+  const [c, setC] = useState<any>(null);
+  const leer = () => { apiFetch('/admin/cache').then(r => r.json()).then(setC).catch(() => setC(null)); };
+  useEffect(leer, []);
+  const vaciar = async () => { await apiFetch('/admin/cache', { method: 'DELETE' }); toast('Caché vaciada', 'ok'); leer(); };
+  return (
+    <section className="rounded-2xl bg-white/5 p-4 mb-4">
+      <p className="text-[13px] font-semibold text-nf-text2 mb-1">Caché</p>
+      {!c ? (
+        <p className="text-[14px] text-nf-text3">Consultando…</p>
+      ) : !c.activa ? (
+        <p className="text-[13px] text-nf-text3">
+          Desactivada. Se enciende con TMD_REDIS_URL; sin ella todo funciona igual, solo más lento.
+        </p>
+      ) : (
+        <>
+          {/* En rejilla de dos, como las cifras de Canales: en una sola fila
+              cada número se queda con ~70 px y no cabe. */}
+          <div className="grid grid-cols-2 gap-x-4 gap-y-2 mt-1">
+            {[['Acierto', `${c.tasa} %`], ['Consultas', String(c.aciertos + c.fallos)],
+              ['Entradas', c.claves != null ? String(c.claves) : '—'], ['Memoria', c.memoria || '—']].map(([k, v]) => (
+              <div key={k}>
+                <p className="text-[11px] uppercase tracking-wide text-nf-text3">{k}</p>
+                <p className="text-[17px] font-semibold tabular-nums">{v}</p>
+              </div>
+            ))}
+          </div>
+          <p className="text-[12px] text-nf-text3 mt-2">{c.url}</p>
+        </>
+      )}
+      <div className="flex gap-2 mt-3">
+        <button onClick={leer} className="h-10 px-4 rounded-xl bg-white/10 text-[14px] font-semibold active:bg-white/20">Actualizar</button>
+        {c?.activa && (
+          <button onClick={vaciar} className="h-10 px-4 rounded-xl bg-white/10 text-[14px] font-semibold active:bg-white/20">Vaciar</button>
+        )}
+      </div>
+    </section>
   );
 }
 

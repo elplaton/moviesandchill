@@ -1,4 +1,5 @@
 """Pistas de audio y subtitulos de un archivo ya descargado."""
+import asyncio
 import logging
 import os
 from typing import Annotated
@@ -28,16 +29,30 @@ def _ruta_segura(path: str) -> str:
 @router.get("/media/tracks")
 async def media_tracks(path: str, user: Annotated[str, Depends(get_current_user)]):
     """Que trae el archivo: video, pistas de audio con su idioma y subtitulos,
-    mas los .vtt que haya sueltos al lado."""
+    mas los .vtt que haya sueltos al lado.
+
+    Cacheado un dia, porque lo contesta `ffprobe`: un proceso nuevo cada vez
+    que alguien abre un reproductor, para decir algo que no cambia mientras el
+    archivo no cambie. La clave lleva el tamaño y la fecha de modificacion,
+    asi que si se reconvierte el archivo (la revision de biblioteca lo hace)
+    la entrada vieja ya no se encuentra y se vuelve a mirar.
+    """
+    from app.services import cache
     from app.services.tracks import leer_pistas, mejor_audio
     from app.services.subs import subtitulos_externos
 
     target = _ruta_segura(path)
-    datos = leer_pistas(target)
-    datos["path"] = path
-    datos["default_audio"] = mejor_audio(datos["audio"]) if datos["audio"] else None
-    datos["external_subtitles"] = subtitulos_externos(target, path)
-    return datos
+    st = os.stat(target)
+
+    async def calcular():
+        datos = await asyncio.to_thread(leer_pistas, target)
+        datos["path"] = path
+        datos["default_audio"] = mejor_audio(datos["audio"]) if datos["audio"] else None
+        datos["external_subtitles"] = subtitulos_externos(target, path)
+        return datos
+
+    # No es de nadie: son los datos del archivo, iguales para todas las cuentas.
+    return await cache.recordar("pistas", [path, st.st_size, int(st.st_mtime)], calcular)
 
 
 @router.get("/subtitle")

@@ -62,6 +62,9 @@ def load_config(force_reload: bool = False) -> dict:
         # (0 = nunca). Lo nuevo llega en tiempo real; esto cubre desconexiones.
         "rescan_hours": _env_int("TMD_RESCAN_HOURS", 6),
         "state_dir": os.getenv("TMD_STATE_DIR", ""),
+        # Cache compartida. Vacio = sin cache: la aplicacion funciona igual,
+        # solo recalcula la portada y las fichas en cada visita.
+        "redis_url": os.getenv("TMD_REDIS_URL", ""),
         "cors_origins": _env_list("TMD_CORS_ORIGINS", ["*"]),
         "log_unit": os.getenv("TMD_LOG_UNIT", "telegram-movie"),
         # Cada cuantos minutos se mira si han llegado episodios de las series

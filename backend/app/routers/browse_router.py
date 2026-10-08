@@ -19,10 +19,21 @@ Si una consulta falla (las de géneros y recomendados son las delicadas:
 ventanas, hash, `unnest`), la portada no se queda en blanco: esa fila se arma
 como antes, cortando una muestra en Python y sin paginar, y queda el aviso en
 los logs.
+
+Y va **cacheada en Redis** (ver `services/cache.py`), que es lo que hace que
+la portada aparezca de golpe en vez de tardar lo que tarde el `GROUP BY` sobre
+250.000 filas. Para que la cache sirva de algo hubo que cambiar una cosa: la
+semilla de quien no trae ninguna ya no es aleatoria, es **la ventana de media
+hora en la que estemos** (`VENTANA_SEMILLA_MIN`). Con una semilla por sesión
+la clave era distinta en cada visita de cada cuenta y no se acertaba nunca,
+que es justo la primera carga —la que se nota—. Sigue rotando sola, solo que
+cada media hora en vez de en cada recarga; y quien ya tiene semilla (está
+paginando) la manda y se le respeta.
 """
 import asyncio
 import logging
 import random
+import time
 from collections import defaultdict
 from datetime import date
 from typing import Annotated
@@ -90,8 +101,20 @@ def tipo_tmdb(media_type: str | None) -> str | None:
     return None
 
 
+# Cada cuanto cambia el orden de la portada para quien no trae semilla. Es el
+# precio de que la portada se pueda cachear: con una semilla aleatoria por
+# visita, cada carga era una clave nueva.
+VENTANA_SEMILLA_MIN = 30
+
+
 def _nueva_semilla() -> str:
-    return str(random.randint(1, 10**9))
+    """La semilla de esta ventana de tiempo.
+
+    No es aleatoria a proposito (ver la cabecera del archivo). Lleva delante
+    un numero fijo para que no se confunda con nada y para poder cambiar la
+    forma mas adelante sin heredar claves viejas.
+    """
+    return f"v{int(time.time() // (VENTANA_SEMILLA_MIN * 60))}"
 
 
 def _fila(genero: str, filas: list[dict], total: int | None = None,
@@ -183,12 +206,23 @@ def _recomendado_respaldo(pool: list[dict], gustos: dict, liked_years: list[int]
 @router.get("/browse/home")
 async def browse_home(user: Annotated[str, Depends(get_current_user)],
                       seed: str | None = None, media_type: str | None = None):
+    """La portada entera. Va por la cache: la misma semilla, la misma cuenta y
+    el mismo tipo dan la misma respuesta, y montarla cuesta cuatro consultas
+    pesadas."""
+    from app.services import cache
+
+    semilla = (seed or "")[:32] or _nueva_semilla()
+    return await cache.recordar(
+        "portada", [semilla, media_type or "todo"],
+        lambda: _portada(user, semilla, media_type), user_id=user)
+
+
+async def _portada(user: str, semilla: str, media_type: str | None):
     from app.database.browse import (get_browse_pool, get_estrenos, get_genre_rows,
                                      get_recently_added, get_recomendados)
     from app.database.preferences import get_preferences
     from app.database.users import get_user_by_username
 
-    semilla = (seed or "")[:32] or _nueva_semilla()
     tipo = tipo_tmdb(media_type)
 
     db_user = await get_user_by_username(user)
@@ -316,17 +350,30 @@ async def browse_row(user: Annotated[str, Depends(get_current_user)],
 
     La semilla es la que devolvió `/browse/home`: con ella el orden es el mismo
     que tenía la primera página, así que la 2 continúa donde acabó la 1 y nada
-    sale repetido.
+    sale repetido. Y por eso mismo se puede cachear: esa terna (fila, semilla,
+    página) siempre da lo mismo.
     """
+    from app.services import cache
+
     limit = max(1, min(limit, PAGE_MAX))
     offset = max(0, offset)
+    pagina = await cache.recordar(
+        "fila", [key, seed[:32], offset, limit, media_type or "todo"],
+        lambda: _fila_pagina(key, user, seed, offset, limit, media_type), user_id=user)
+    # Una fila que no se ha podido calcular devuelve None, y `recordar` no
+    # guarda los None: cachear el fallo lo dejaria pegado cinco minutos.
+    return pagina or {"key": key, "items": [], "total": 0, "offset": offset}
+
+
+async def _fila_pagina(key: str, user: str, seed: str, offset: int, limit: int,
+                       media_type: str | None) -> dict | None:
     try:
         filas, total = await _pagina_de(key, user, seed[:32], offset, limit,
                                         tipo_tmdb(media_type))
     except Exception as e:
         # Sin página, el carril se para donde esté: mejor que un hueco roto.
         logger.error("Pagina de la fila %s fallo: %s", key, e)
-        return {"key": key, "items": [], "total": 0, "offset": offset}
+        return None
     return {"key": key, "items": _dedupe([item_from_row(f) for f in filas]),
             "total": total, "offset": offset}
 

@@ -16,7 +16,33 @@ Ajustes de la aplicacion → **Connect To Predefined Network: ON**.
 
 Sin esto el contenedor vive en una red propia y el hostname interno del
 PostgreSQL (`s7ydgwa0uz7peksfcamaercm`) no resuelve: el backend reintenta diez
-veces, aborta el arranque y el contenedor se queda reiniciando.
+veces, aborta el arranque y el contenedor se queda reiniciando. Lo mismo vale
+para el Redis de la cache: es otro recurso de Coolify y se alcanza por su
+hostname interno.
+
+## 2b. Redis (la cache)
+
+Nuevo recurso → **Database → Redis**, en el mismo proyecto y entorno que el
+PostgreSQL. Con eso Coolify le da un hostname interno (un identificador de 24
+letras, igual que el de la base de datos) y una contraseña.
+
+La URL va en `TMD_REDIS_URL`:
+
+    redis://default:<contraseña>@<hostname-interno>:6379/0
+
+Tres cosas que conviene saber:
+
+- **No es obligatorio.** Sin `TMD_REDIS_URL` la aplicacion arranca y funciona
+  igual, solo recalcula la portada y las fichas en cada visita. Si Redis se
+  cae, tampoco pasa nada: la cache se desactiva sola y queda un `WARNING` en
+  los logs. Que este activa o no se ve en **Admin → Ajustes → Caché**, con la
+  tasa de acierto y un boton para vaciarla.
+- **No hace falta volumen ni persistencia.** Todo lo que guarda se puede
+  recalcular, asi que escribirlo a disco solo seria escritura inutil. Si
+  Coolify ofrece desactivar la persistencia (AOF/RDB), mejor.
+- **Conviene ponerle tope de memoria** (`maxmemory 256mb` y politica
+  `allkeys-lru`): asi tira lo que lleva mas tiempo sin usarse en vez de
+  crecer sin freno. Es lo que lleva el `docker-compose.yml` de casa.
 
 ## 3. Variables de entorno
 
@@ -28,6 +54,7 @@ veces, aborta el arranque y el contenedor se queda reiniciando.
 | `TMD_JWT_SECRET` | 48+ caracteres aleatorios (`python -c "import secrets; print(secrets.token_urlsafe(48))"`) |
 | `TMD_ADMIN_PASSWORD` | la que quieras para el usuario `admin` |
 | `TMD_DATABASE_URL` | `postgres://postgres:...@s7ydgwa0uz7peksfcamaercm:5432/postgres` |
+| `TMD_REDIS_URL` | `redis://default:...@<hostname del recurso Redis>:6379/0` (opcional) |
 | `TMD_TMBD_API_KEY` | clave de TMDB (ojo: `TMBD`, la errata es intencionada) |
 | `TMD_TMDB_ENABLED` | `true` |
 | `TMD_CHANNELS` | JSON con los canales, p.ej. `[{"id": 2229558644, "name": "Las Cositas 3"}]` |

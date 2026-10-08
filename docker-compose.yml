@@ -14,10 +14,15 @@ services:
       - ./state:/app/state
     environment:
       TMD_STATE_DIR: /app/state
+      # La cache. En casa el Redis es este de aqui al lado; en Coolify es un
+      # recurso aparte y la URL se pone en las variables de la aplicacion.
+      TMD_REDIS_URL: ${TMD_REDIS_URL:-redis://cache:6379/0}
     env_file:
       - .env
     depends_on:
       db:
+        condition: service_healthy
+      cache:
         condition: service_healthy
 
   frontend:
@@ -43,6 +48,28 @@ services:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U movieapp -d moviesandchill"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # Cache de la portada, las fichas y las pistas de cada archivo. Si se para,
+  # la aplicacion sigue funcionando: solo vuelve a recalcularlo todo en cada
+  # visita, que es como estaba antes de que esto existiera.
+  cache:
+    image: redis:7-alpine
+    container_name: moviesandchill-cache
+    restart: unless-stopped
+    # Sin persistencia a proposito: todo lo de dentro se puede recalcular, asi
+    # que guardarlo en disco solo seria escritura inutil. Y con tope de
+    # memoria: antes de crecer sin freno, tira lo que lleva mas tiempo sin
+    # usarse (que es exactamente lo que se quiere de una cache).
+    command: >
+      redis-server --save ""
+      --appendonly no
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       timeout: 3s
       retries: 10

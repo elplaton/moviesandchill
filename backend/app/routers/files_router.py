@@ -40,7 +40,19 @@ async def list_files(subpath: str = "", user: Annotated[str, Depends(get_current
     Estructura nueva:  Serie/Temporada N/<N>x<EE>.mp4  y  Titulo (Año)/Titulo (Año).mp4
     Estructura vieja:  "Serie S1/<episodios>" (varias carpetas por temporada) y
     "Pelicula/<video>". Las dos se entienden.
+
+    Va por la cache: recorre carpeta a carpeta y pide el tamaño de cada
+    archivo, y es la pantalla de Descargas de los cuatro clientes. La entrada
+    es por cuenta porque dice quien puede borrar cada cosa, y se invalida al
+    cambiar el disco.
     """
+    from app.services import cache
+
+    return await cache.recordar("disco", [subpath or "/"],
+                                lambda: _listado(subpath, user), user_id=user)
+
+
+async def _listado(subpath: str, user: str | None):
     from app.routers.download import config
     from app.services.tmdb import clean_title
     from app.services.layout import WORK_PREFIX, etiqueta_calidad
@@ -230,6 +242,10 @@ async def delete_file(req: DeleteRequest, user: Annotated[str, Depends(get_curre
                 await set_download_status(row["folder_path"], row["status"], dir_size(row["folder_path"]))
             else:
                 await delete_download(row["folder_path"])
+        # El listado, las fichas y "esto ya esta descargado" van cacheados: lo
+        # borrado tiene que desaparecer ahora, no en diez minutos.
+        from app.services import cache
+        cache.cambio_en_disco()
         logger.info("Borrado desde la app por %s: %s", user, os.path.relpath(target, base_dir))
         return {"deleted": req.path}
     except OSError as e:

@@ -97,12 +97,23 @@ async def _enrich_live(results: list[dict], api_key: str):
 
 @router.post("/search")
 async def search(req: SearchRequest, user: Annotated[str, Depends(get_current_user)]):
-    from app.routers.download import config, downloader
+    """El buscador. Cacheado un minuto: se dispara una busqueda por tecla, asi
+    que borrar una letra o repetir el titulo de ayer no deberia costar otra
+    consulta sobre 250.000 filas (ni otra busqueda en vivo en Telegram)."""
+    from app.services import cache
 
     if not req.query.strip():
         return {"results": [], "count": 0, "has_more": False, "last_message_id": 0}
+    return await cache.recordar(
+        "busqueda", [req.query.strip().lower(), req.page_size, req.offset, req.offset_id,
+                     int(req.sort_asc), ",".join(map(str, req.channel_ids or []))],
+        lambda: _buscar(req, user), user_id=user)
 
-    existing = _find_downloaded_files(config.get("extract_path", "."))
+
+async def _buscar(req: SearchRequest, user: str):
+    from app.routers.download import config, downloader
+
+    existing = await _descargados(config.get("extract_path", "."))
     results = []
 
     from app.database.connection import search_media, get_pool
@@ -146,17 +157,30 @@ async def media_files(tmdb_id: int, user: Annotated[str, Depends(get_current_use
     """Todos los archivos indexados de un titulo TMDB (episodios o versiones
     de una pelicula). Es lo que abren los modales de detalle. media_type es
     "movie" o "tv" (tambien acepta "series"): los ids de TMDB se repiten entre
-    peliculas y series."""
-    from app.routers.download import config
-    from app.database.connection import get_media_by_tmdb, get_tmdb_cached
+    peliculas y series.
+
+    Va por la cache: es lo que se pide al tocar cualquier caratula, y lleva
+    dentro un recorrido del disco y tres consultas. La entrada es por cuenta
+    porque la respuesta dice quien puede borrar cada archivo.
+    """
+    from app.services import cache
 
     if media_type == "series":
         media_type = "tv"
     if media_type not in ("movie", "tv"):
         media_type = None
+    return await cache.recordar(
+        "ficha", [tmdb_id, media_type or "todo"],
+        lambda: _ficha(tmdb_id, user, media_type), user_id=user)
+
+
+async def _ficha(tmdb_id: int, user: str, media_type: str | None):
+    from app.routers.download import config
+    from app.database.connection import get_media_by_tmdb, get_tmdb_cached
     from app.database.downloads import downloads_by_message
     from app.database.users import get_user_by_username
-    existing = _find_downloaded_files(config.get("extract_path", "."))
+
+    existing = await _descargados(config.get("extract_path", "."))
     rows, tmdb, done, me = await asyncio.gather(get_media_by_tmdb(tmdb_id, media_type), get_tmdb_cached(tmdb_id, media_type),
                                                downloads_by_message(), get_user_by_username(user))
     results = [_row_to_result(r, existing, done, me) for r in rows]
@@ -169,6 +193,24 @@ async def media_files(tmdb_id: int, user: Annotated[str, Depends(get_current_use
             "genres": tmdb["genres"] or [], "seasons_count": tmdb.get("seasons_count"),
         }
     return {"tmdb": meta, "results": results, "count": len(results)}
+
+
+async def _descargados(base_dir) -> set:
+    """Los nombres que ya hay en la biblioteca, cacheados.
+
+    Es un `os.walk` de la biblioteca **completa** —miles de ficheros— y lo
+    pedian los dos sitios que mas se abren: la ficha de cada caratula y cada
+    tecla del buscador. No es de nadie en concreto (es un hecho del disco),
+    asi que la entrada se comparte entre cuentas y se invalida cuando el disco
+    cambia (`cache.cambio_en_disco()`).
+    """
+    from app.services import cache
+
+    async def calcular():
+        return sorted(await asyncio.to_thread(_find_downloaded_files, base_dir))
+
+    nombres = await cache.recordar("nombres", ["biblioteca"], calcular)
+    return set(nombres or ())
 
 
 def _find_downloaded_files(base_dir):

@@ -5,6 +5,7 @@ from pydantic import BaseModel
 
 from app.auth.dependencies import get_current_user
 from app.routers.browse_router import item_from_row
+from app.services import cache
 
 router = APIRouter(prefix="/api", tags=["favorites"])
 
@@ -56,6 +57,9 @@ async def post_favorite(req: FavoriteRequest, user: Annotated[str, Depends(get_c
     if uid is None:
         return {"error": "Usuario no encontrado"}
     await add_favorite(uid, req.tmdb_id, _tipo_tmdb(req.media_type))
+    # La fila "Mis favoritos" la monta el servidor dentro de /browse/home, y
+    # esa va cacheada: sin esto el corazon tardaria cinco minutos en verse.
+    cache.cambio_de_cuenta(uid)
     return {"favorite": True}
 
 
@@ -67,4 +71,5 @@ async def delete_favorite(req: FavoriteRequest, user: Annotated[str, Depends(get
     if uid is None:
         return {"error": "Usuario no encontrado"}
     await remove_favorite(uid, req.tmdb_id, _tipo_tmdb(req.media_type))
+    cache.cambio_de_cuenta(uid)
     return {"favorite": False}

@@ -143,3 +143,27 @@ async def convert_library(admin: Annotated[str, Depends(get_current_admin)]):
 async def convert_library_status(admin: Annotated[str, Depends(get_current_admin)]):
     from app.services.compat import library_conversion_status
     return library_conversion_status()
+
+
+@router.get("/cache")
+async def cache_estado(admin: Annotated[str, Depends(get_current_admin)]):
+    """Si la cache esta funcionando y si sirve de algo.
+
+    Existe porque una cache es invisible cuando va bien y tambien cuando no
+    va: sin un sitio donde mirar, la unica forma de saber si Redis esta
+    conectado es cronometrar la portada. La tasa de acierto es el numero que
+    importa; por debajo del 50 % algo esta invalidando mas de lo que debe.
+    """
+    from app.services import cache
+    return await cache.info()
+
+
+@router.delete("/cache")
+async def cache_vaciar(admin: Annotated[str, Depends(get_current_admin)]):
+    """Tira todo lo cacheado. Es la salida de emergencia: si algo se queda
+    pegado (una ficha que no refleja un borrado hecho a mano en el disco),
+    esto lo arregla sin reiniciar nada."""
+    from app.services import cache
+    borradas = await cache.vaciar()
+    logger.info("Cache vaciada a mano por %s: %d claves", admin, borradas)
+    return {"cleared": borradas}

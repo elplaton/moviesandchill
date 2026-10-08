@@ -244,5 +244,10 @@ async def convert_library_job(extract_path: str):
     finally:
         _conv_state["running"] = False
         _conv_state["current"] = ""
+        # La revision reempaqueta archivos: cambian de nombre, de tamaño y de
+        # pistas, asi que lo que la cache sepa de ellos ya no vale.
+        from app.services import cache
+        cache.olvidar("pistas")
+        cache.cambio_en_disco()
     logger.info("Conversion de biblioteca terminada: %d/%d convertidos (%.0fs)",
                 _conv_state["converted"], _conv_state["total"], time.time() - _conv_state["started"])

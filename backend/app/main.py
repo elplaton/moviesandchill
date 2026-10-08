@@ -67,6 +67,12 @@ async def startup():
     from app.config import apply_saved_settings
     await apply_saved_settings(config)
 
+    # Cache compartida. Si no hay Redis (o no contesta) la aplicacion arranca
+    # igual y solo va mas lenta: lo caro de la portada y de las fichas se
+    # recalcula en cada visita, que es como estaba antes de que esto existiera.
+    from app.services import cache
+    await cache.iniciar(config.get("redis_url", ""))
+
     from app.auth.service import hash_password
     admin_password = os.getenv("TMD_ADMIN_PASSWORD", "admin")
     try:
@@ -189,6 +195,11 @@ async def startup():
 async def shutdown():
     if downloader:
         await downloader.stop()
+    try:
+        from app.services import cache
+        await cache.cerrar()
+    except Exception:
+        pass
     try:
         from app.database.connection import close_pool
         await close_pool()
