@@ -52,6 +52,34 @@ html.instalada .app-shell {
   height: auto;
 }
 
+/*
+ * El reproductor: el mismo armazon que la app, pero por encima de todo.
+ *
+ * Va montado por portal en el <body> y no dentro de <main>, y eso no es un
+ * detalle de estilo. `.app-main` lleva `-webkit-overflow-scrolling: touch`,
+ * que en iOS crea su propio contexto de apilado: dentro de el un
+ * `position: fixed` deja de colocarse respecto a la ventana y el `z-index`
+ * solo compite con sus hermanos, asi que la barra de pestañas (z-40, hermana
+ * del <main>) se pintaba **encima del video** por mucho z-index que llevara
+ * el reproductor. Es el mismo motivo por el que la app de la tele monta sus
+ * paneles en `#overlays`.
+ *
+ * El alto es el medido (--app-h), no 100%: asi los controles nativos del
+ * video, que se pintan al borde de abajo del elemento, no quedan debajo de la
+ * barra de direcciones de Safari.
+ */
+.player-shell {
+  position: fixed;
+  top: var(--app-top, 0px);
+  left: 0;
+  right: 0;
+  height: 100dvh;
+  height: var(--app-h, 100dvh);
+  z-index: 70;
+  background: #000;
+}
+html.instalada .player-shell { top: 0; bottom: 0; height: auto; }
+
 /* Lo unico que se desplaza. Con overscroll contain el rebote no arrastra la pagina. */
 .app-main { flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
 ::-webkit-scrollbar { display: none; }

@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { fetchSubtitles, streamTicket, subtitleUrl, type ExternalSubtitle } from '../services/tracks';
 import { useAirplay } from '../hooks/useAirplay';
 import { IAirplay, IClose } from './Icons';
@@ -67,9 +68,29 @@ export default function Player(props: Props) {
   const { path, title, subtitle, poster, backdrop, tmdbId, mediaType } = actual;
 
   const ref = useRef<HTMLVideoElement>(null);
+
   const [subs, setSubs] = useState<ExternalSubtitle[]>([]);
   const [preparando, setPreparando] = useState(true);
   const airplay = useAirplay(ref);
+
+  /**
+   * Si se ve la barra de arriba (cerrar + titulo).
+   *
+   * Se esconde sola, igual que los controles del video: antes se quedaba
+   * puesta toda la pelicula, tapando una esquina de la imagen. No hay forma de
+   * preguntarle a iOS si sus controles estan visibles, asi que se hace lo
+   * mismo que hacen ellos —asomar al tocar la pantalla y retirarse a los
+   * cuatro segundos—, que es lo que deja las dos cosas mas o menos a la vez.
+   * Con la barra escondida, un toque la devuelve, que es por donde se cierra.
+   */
+  const [barra, setBarra] = useState(true);
+  const relojBarra = useRef(0);
+  const asomar = useCallback(() => {
+    setBarra(true);
+    window.clearTimeout(relojBarra.current);
+    relojBarra.current = window.setTimeout(() => setBarra(false), 4000);
+  }, []);
+  useEffect(() => () => window.clearTimeout(relojBarra.current), []);
 
   /**
    * Hemos salido de la pantalla completa nosotros, para enseñar la tarjeta.
@@ -248,10 +269,14 @@ export default function Player(props: Props) {
     };
   }, [path]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Mientras se prepara el video la espera lo tapa todo; en cuanto se retira
+  // la barra asoma una vez y se va sola, para que se vea que esta ahi.
+  useEffect(() => { if (!preparando) asomar(); }, [preparando, asomar]);
+
   const cerrar = () => { history.state?.player ? history.back() : onClose(); };
 
-  return (
-    <div className="fixed inset-0 z-[70] bg-black">
+  return createPortal(
+    <div className="player-shell" onTouchStart={asomar}>
       {/* preload="auto" es lo unico que se le puede pedir a iOS sobre cuanto
           adelanta: cuanto buffer guarda lo decide el reproductor del sistema
           segun la velocidad que mida, y no hay forma de exigirle "carga dos
@@ -269,10 +294,12 @@ export default function Player(props: Props) {
       {/* El boton de cerrar lo ponemos nosotros: el "Hecho" que habia antes era
           del reproductor del sistema, y ya no se entra en el. */}
       {!preparando && (
-        <div className="absolute top-0 inset-x-0 flex items-start gap-3 p-4 pt-[max(1rem,env(safe-area-inset-top))]
-                        pointer-events-none bg-gradient-to-b from-black/70 to-transparent">
+        <div className={`absolute top-0 inset-x-0 flex items-start gap-3 p-4 pt-[max(1rem,env(safe-area-inset-top))]
+                        pointer-events-none bg-gradient-to-b from-black/70 to-transparent
+                        transition-opacity duration-200 ${barra ? 'opacity-100' : 'opacity-0'}`}>
           <button onClick={cerrar} aria-label="Cerrar"
-            className="pointer-events-auto grid h-10 w-10 shrink-0 place-items-center rounded-full bg-black/50 active:bg-white/20">
+            className={`grid h-10 w-10 shrink-0 place-items-center rounded-full bg-black/50 active:bg-white/20
+                        ${barra ? 'pointer-events-auto' : ''}`}>
             <span className="w-5 h-5"><IClose /></span>
           </button>
           <div className="min-w-0 pt-1">
@@ -318,6 +345,7 @@ export default function Player(props: Props) {
         </div>
       )}
 
-    </div>
+    </div>,
+    document.body,
   );
 }
