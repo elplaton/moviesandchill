@@ -28,9 +28,12 @@ self.addEventListener('notificationclick', (event) => {
   event.notification.close();
   const d = event.notification.data || {};
   // La ficha vive en la URL, asi que el aviso puede abrir el titulo directo.
+  // Y un aviso de descarga terminada sin ficha (un titulo que TMDB no conoce)
+  // lleva a Descargas, que es donde esta lo que acaba de bajar: la portada no
+  // ayudaria a encontrarlo.
   const destino = d.tmdb_id
     ? `/?ficha=${d.kind === 'series' ? 's' : 'm'}${d.tmdb_id}`
-    : '/';
+    : d.reason === 'descarga' ? '/descargas' : '/';
   event.waitUntil((async () => {
     const abiertas = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
     for (const cliente of abiertas) {

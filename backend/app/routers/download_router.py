@@ -48,26 +48,38 @@ class PauseRequest(BaseModel):
 
 @router.post("/download")
 async def download(req: DownloadRequest, background_tasks: BackgroundTasks, account: Annotated[dict, Depends(get_current_account)]):
+    return await iniciar_descarga(req.message_id, req.channel_id, account)
+
+
+async def iniciar_descarga(message_id: int, channel_id: int | None, account: dict) -> dict:
+    """Arranca la descarga de un mensaje. Es el cuerpo de `POST /download`.
+
+    Vive aparte del endpoint porque hay otro sitio que descarga sin que nadie
+    pulse nada: la pregunta de «¿bajo los dos siguientes?» al acabar un
+    episodio (`routers/siguiente_router.py`). Las dos cosas tienen que pasar
+    por las mismas comprobaciones —cuota, duplicados, lo que ya esta en
+    disco—, asi que son la misma funcion y no dos caminos parecidos.
+    """
     from app.database.downloads import find_existing, usage_by_user, create_download
     dl = downloader
     for batch_id, batch in list(dl.active_batches.items()):
         if batch["status"] in ("downloading", "extracting"):
             for part in batch["parts"]:
-                if part["message_id"] == req.message_id:
+                if part["message_id"] == message_id:
                     return {"error": f"Ese archivo ya lo está descargando {batch.get('owner', 'otra cuenta')}",
                             "batch_id": batch_id, "folder_name": batch["folder_name"], "already": True}
 
-    base_name, folder_name, parts = await dl.find_related_parts(req.message_id, req.channel_id)
+    base_name, folder_name, parts = await dl.find_related_parts(message_id, channel_id)
     if not parts:
         return {"error": "No se encontro el mensaje o no tiene archivo adjunto"}
 
     # El message_id solo es unico dentro de un canal: sin el prefijo, dos canales
     # distintos con el mismo id pisarian el batch del otro.
-    batch_id = f"{req.channel_id or 0}_{req.message_id}"
+    batch_id = f"{channel_id or 0}_{message_id}"
 
     # Carpeta segun el catalogo: Serie/Temporada N/ para episodios, Titulo (Año)/ para peliculas.
     from app.database.media import get_media_item
-    catalog = await get_media_item(req.channel_id, req.message_id)
+    catalog = await get_media_item(channel_id, message_id)
     layout = plan_layout(config["extract_path"], parts[0]["file_name"], catalog, batch_id)
     folder_path = layout["work_dir"]
     folder_name = layout["folder_name"]
@@ -78,7 +90,7 @@ async def download(req: DownloadRequest, background_tasks: BackgroundTasks, acco
     # es **el mismo archivo**, no la misma pelicula: antes se comparaba tambien
     # la carpeta de destino, asi que al tener el 1080p ya no se dejaba bajar el
     # 4K ("Ya esta descargado"). Cada version es una descarga distinta.
-    existing = await find_existing(req.message_id, req.channel_id)
+    existing = await find_existing(message_id, channel_id)
     if existing and existing["status"] == "done" and os.path.exists(existing["folder_path"]):
         return {"error": f"Ya está descargado por {existing.get('owner') or 'admin'}", "already": True,
                 "owner": existing.get("owner"), "folder_name": existing["folder_name"], "local_path": existing["folder_path"]}
@@ -94,14 +106,23 @@ async def download(req: DownloadRequest, background_tasks: BackgroundTasks, acco
                     "used_bytes": used, "quota_bytes": quota}
 
     await create_download(account["id"], folder_name, folder_path, base_name or folder_name or "",
-                          req.message_id, req.channel_id, total_size, "downloading")
+                          message_id, channel_id, total_size, "downloading")
 
     dl.active_batches[batch_id] = {
         "batch_id": batch_id, "base_name": base_name or folder_name or "",
         "owner": account["username"], "owner_id": account["id"],
+        # La ficha del catalogo se guarda ahora y no al final: el aviso de
+        # "descarga completada" dice "Suits 3x08" y no el nombre del fichero,
+        # y buscarla otra vez al terminar seria una consulta de mas.
+        "tmdb_id": (catalog or {}).get("tmdb_id"),
+        "tmdb_type": (catalog or {}).get("tmdb_type"),
+        "tmdb_title": (catalog or {}).get("tmdb_title"),
+        "tmdb_poster": (catalog or {}).get("tmdb_poster"),
+        "season": layout.get("season") or (catalog or {}).get("season"),
+        "episode": layout.get("episode") or (catalog or {}).get("episode"),
         "kind": layout["kind"], "final_dir": layout["final_dir"], "final_stem": layout.get("final_stem"),
         "folder_name": folder_name, "folder_path": folder_path,
-        "parts": [{"message_id": p["message_id"], "channel_id": p.get("channel_id", req.channel_id), "file_name": p["file_name"], "part_num": p.get("part_num", 0), "size": p.get("size", 0), "size_str": format_size(p.get("size", 0)), "downloaded": 0, "progress": 0, "status": "pending"} for p in parts],
+        "parts": [{"message_id": p["message_id"], "channel_id": p.get("channel_id", channel_id), "file_name": p["file_name"], "part_num": p.get("part_num", 0), "size": p.get("size", 0), "size_str": format_size(p.get("size", 0)), "downloaded": 0, "progress": 0, "status": "pending"} for p in parts],
         "total_parts": len(parts), "downloaded_parts": 0, "total_size": total_size, "total_size_str": format_size(total_size),
         "downloaded_size": 0, "progress": 0, "status": "downloading", "extracted_files": [], "error": None,
     }
@@ -380,7 +401,15 @@ async def _download_batch(batch_id):
         batch["status"] = "done"
         batch["extracted_files"] = all_extracted
         logger.info("Batch complete | %s | %d files", batch.get("folder_name", ""), len(all_extracted))
+        # Hay un archivo nuevo en la biblioteca: el listado, las fichas y "ya
+        # esta descargado" estan cacheados y tienen que enterarse ahora.
+        from app.services import cache
+        cache.cambio_en_disco()
         await broadcast_progress({"type": "batch_status", "batch_id": batch_id, "status": "done", "folder_name": batch["folder_name"], "folder_path": batch["folder_path"], "extracted_files": [os.path.basename(f) for f in all_extracted]})
+        # Y se avisa a quien la pidio. Va al final, cuando el archivo ya esta
+        # en su sitio: un aviso que llega antes de que se pueda reproducir es
+        # peor que no avisar.
+        await _avisar_completada(batch, all_extracted)
 
     except asyncio.CancelledError:
         batch.pop("_last_broadcast", None); batch.pop("_cancelled", None)
@@ -400,6 +429,8 @@ async def _download_batch(batch_id):
             _prune_work_dir(batch)
             from app.database.downloads import delete_download
             await delete_download(batch.get("folder_path", ""))
+            from app.services import cache
+            cache.cambio_en_disco()
             await broadcast_progress({"type": "batch_status", "batch_id": batch_id, "status": "cancelled", "folder_name": batch.get("folder_name", "")})
     except Exception as e:
         batch["status"] = "error"; batch["error"] = str(e)
@@ -411,6 +442,28 @@ async def _download_batch(batch_id):
 
     await asyncio.sleep(10)
     downloader.active_batches.pop(batch_id, None)
+
+
+async def _avisar_completada(batch: dict, archivos: list[str]) -> None:
+    """Aviso al movil (o al escritorio) de que la descarga ha terminado.
+
+    Lo pidio la cuenta que la lanzo y es a ella a quien se avisa; el resto ve
+    el archivo aparecer en la biblioteca, que es lo suyo. Nada de lo que pase
+    aqui puede marcar la descarga como fallida: ya ha terminado bien.
+    """
+    from app.services.aviso_descarga import avisar, titulo_de
+
+    try:
+        tamano = format_size(sum(os.path.getsize(f) for f in archivos if os.path.isfile(f)))
+    except OSError:
+        tamano = batch.get("total_size_str", "")
+    await avisar(
+        batch.get("owner_id"),
+        titulo=titulo_de(batch, {"tmdb_title": batch.get("tmdb_title")}, archivos),
+        tmdb_id=batch.get("tmdb_id"), tmdb_type=batch.get("tmdb_type"),
+        season=batch.get("season"), episode=batch.get("episode"),
+        tamano=tamano, poster=batch.get("tmdb_poster"), batch_id=batch.get("batch_id", ""),
+    )
 
 
 def _prune_work_dir(batch):
