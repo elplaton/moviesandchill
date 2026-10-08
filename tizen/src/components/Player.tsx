@@ -8,6 +8,8 @@ import { soloPuntero } from '../tv/platform';
 import { markWatched, resumePoint, setWatched } from '../tv/progress';
 import { toast } from '../tv/toast';
 import { IconPause, IconPlay } from './Icons';
+import SiguienteEp, { opcionesSiguiente } from './SiguienteEp';
+import { useSiguiente } from '../hooks/useSiguiente';
 
 interface Props {
   src: string;
@@ -60,7 +62,25 @@ function fmt(s: number): string {
  * pausa, la barra de progreso se puede pulsar, y los saltos, el idioma y el
  * volver son botones en pantalla.
  */
-export default function Player({ src, path, title, subtitle, poster, backdrop, tmdbId, mediaType, onClose }: Props) {
+export default function Player(props: Props) {
+  const { src, onClose } = props;
+  // Que se esta reproduciendo ahora, que no siempre es lo que dijo el padre:
+  // al acabar un capitulo el reproductor pasa al siguiente por su cuenta (ver
+  // `useSiguiente`). Los nombres de dentro son los de siempre, asi que todo
+  // lo que ya habia sigue leyendo lo que toca.
+  const [actual, setActual] = useState(() => ({
+    path: props.path, title: props.title, subtitle: props.subtitle,
+    poster: props.poster, backdrop: props.backdrop,
+    tmdbId: props.tmdbId, mediaType: props.mediaType,
+  }));
+  useEffect(() => {
+    setActual({ path: props.path, title: props.title, subtitle: props.subtitle,
+                poster: props.poster, backdrop: props.backdrop,
+                tmdbId: props.tmdbId, mediaType: props.mediaType });
+  }, [props.path, props.title, props.subtitle, props.poster, props.backdrop,
+      props.tmdbId, props.mediaType]);
+  const { path, title, subtitle, poster, backdrop, tmdbId, mediaType } = actual;
+
   const videoRef = useRef<HTMLVideoElement>(null);
   const [playing, setPlaying] = useState(true);
   const [osd, setOsd] = useState(true);
@@ -102,11 +122,48 @@ export default function Player({ src, path, title, subtitle, poster, backdrop, t
     onClose();
   }, [save, onClose]);
 
+  // La tarjeta del final del capitulo, con su cursor: el reproductor se queda
+  // con todas las teclas mientras hay video, asi que el foco de la tarjeta es
+  // un indice y una clase, como el del panel de idioma.
+  const [cursorSig, setCursorSig] = useState(0);
+  /**
+   * Si el mando esta dentro de la tarjeta.
+   *
+   * Mientras el capitulo sigue corriendo **no** puede estarlo: las flechas
+   * son el salto de 10 s y OK es la pausa, y quedarse con ellas durante los
+   * ultimos tres minutos de cada episodio seria quitarle el mando a quien
+   * solo queria rebobinar. Se entra a proposito con ▼, y en cuanto el video
+   * termina el mando es de la tarjeta sin pedir permiso (`sig.alFinal`).
+   */
+  const [enTarjeta, setEnTarjeta] = useState(false);
+  const sig = useSiguiente({
+    path, tmdbId,
+    onVer: (siguiente) => {
+      const v = videoRef.current;
+      // El que se deja se marca visto **antes** de cambiar: la cuenta atras
+      // salta sobre los creditos, asi que el `ended` no va a llegar y sin
+      // esto el episodio se quedaria a medias en "Continuar viendo".
+      if (v?.duration) {
+        markWatched({ path, title, subtitle, poster, backdrop,
+                      tmdb_id: tmdbId ?? null, media_type: mediaType,
+                      position: v.duration, duration: v.duration });
+      }
+      setCursorSig(0);
+      setEnTarjeta(false);
+      setActual((a) => ({ ...a, path: siguiente.path, subtitle: siguiente.label }));
+    },
+    onCerrar: close,
+    pausar: () => videoRef.current?.pause(),
+  });
+  const opcionesSig = opcionesSiguiente(sig);
+  /** El mando esta en la tarjeta: porque se entro, o porque ya no hay video. */
+  const mandoEnTarjeta = opcionesSig.length > 0 && (sig.alFinal || enTarjeta);
+
   // Lo ultimo que se sabe de las funciones que usa el efecto de abajo, para
   // que ese efecto pueda depender solo de `path` sin quedarse con versiones
   // viejas. Se actualiza en cada render, que es justo lo que hace falta.
-  const ultimas = useRef({ save, onClose, showOsd });
-  ultimas.current = { save, onClose, showOsd };
+  const ultimas = useRef({ save, onClose, showOsd, sig });
+  ultimas.current = { save, onClose, showOsd, sig };
 
   const togglePlay = useCallback(() => {
     const v = videoRef.current;
@@ -171,6 +228,9 @@ export default function Player({ src, path, title, subtitle, poster, backdrop, t
   const [fuente, setFuente] = useState(src);
   useEffect(() => {
     let vivo = true;
+    // Al cambiar de episodio la URL se pone ya, sin esperar a la entrada: si
+    // no, el <video> seguiria un instante con el archivo anterior.
+    setFuente(streamUrl(path));
     streamTicket(path).then(t => { if (vivo) setFuente(streamUrl(path, t)); });
     return () => { vivo = false; };
   }, [path]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -220,11 +280,35 @@ export default function Player({ src, path, title, subtitle, poster, backdrop, t
 
   useBackHandler(() => {
     if (panel) { setPanel(false); return true; }
+    // Con la tarjeta arriba, Atras la descarta. Si el video ya habia
+    // terminado, `descartar()` cierra el reproductor por su cuenta.
+    if (enTarjeta && !sig.alFinal) { setEnTarjeta(false); return true; }
+    if (sig.decision.tipo !== 'nada') { sig.descartar(); return true; }
     close();
     return true;
   }, true);
 
   useEffect(() => pushRawHandler((key) => {
+    // La tarjeta del siguiente episodio va primero: mientras esta arriba, el
+    // mando es suyo. Lo primero que hace cualquier tecla es parar la cuenta
+    // atras: si alguien esta ahi tocando botones, no se le cambia de capitulo
+    // en medio.
+    if (mandoEnTarjeta) {
+      // Lo primero que hace cualquier tecla es parar la cuenta atras: si
+      // alguien esta ahi eligiendo, no se le cambia de capitulo en medio.
+      sig.parar();
+      if (key === 'left') { setCursorSig(c => Math.max(0, c - 1)); return true; }
+      if (key === 'right') { setCursorSig(c => Math.min(opcionesSig.length - 1, c + 1)); return true; }
+      if (key === 'enter') { opcionesSig[Math.min(cursorSig, opcionesSig.length - 1)].onSelect(); return true; }
+      // Con el capitulo todavia corriendo, ▲ devuelve el mando al video; ya
+      // terminado no hay video al que volver, asi que descarta.
+      if (key === 'up') { if (sig.alFinal) sig.descartar(); else setEnTarjeta(false); return true; }
+      return true;
+    }
+    if (opcionesSig.length && key === 'down') {
+      setEnTarjeta(true); setCursorSig(0); sig.parar(); showOsd();
+      return true;
+    }
     if (panel) {
       if (key === 'up') { setCursor(c => Math.max(0, c - 1)); return true; }
       if (key === 'down') { setCursor(c => Math.min(opciones.length - 1, c + 1)); return true; }
@@ -238,7 +322,7 @@ export default function Player({ src, path, title, subtitle, poster, backdrop, t
     if (key === 'up' && opciones.length) { setCursor(0); setPanel(true); showOsd(); return true; }
     showOsd();
     return true;
-  }), [togglePlay, seek, showOsd, panel, opciones, cursor, aplicar]);
+  }), [togglePlay, seek, showOsd, panel, opciones, cursor, aplicar, opcionesSig, cursorSig, sig, mandoEnTarjeta]);
 
   useEffect(() => pushMediaHandler((key) => {
     const v = videoRef.current;
@@ -286,11 +370,18 @@ export default function Player({ src, path, title, subtitle, poster, backdrop, t
       setDuration(v.duration || 0);
       aplicarInicio();
     };
-    const onTime = () => { setTime(v.currentTime); ultimas.current.save(); };
+    const onTime = () => {
+      setTime(v.currentTime);
+      ultimas.current.sig.mirar(v.currentTime, v.duration);
+      ultimas.current.save();
+    };
     const onEnded = () => {
       markWatched({ path, title, subtitle, poster, backdrop,
                     tmdb_id: tmdbId ?? null, media_type: mediaType,
                     position: v.duration || 0, duration: v.duration || 0 });
+      // Si queda algo que preguntar (el siguiente episodio, o si se baja) el
+      // reproductor no se cierra: la pregunta se contesta aqui.
+      if (ultimas.current.sig.alTerminar()) return;
       ultimas.current.onClose();
     };
     // Salir de la app o apagar la tele no desmonta nada: sin esto se perdia
@@ -462,6 +553,10 @@ export default function Player({ src, path, title, subtitle, poster, backdrop, t
           </p>
         )}
       </div>
+
+      <SiguienteEp sig={sig} enfocada={mandoEnTarjeta}
+        cursor={Math.min(cursorSig, Math.max(0, opcionesSig.length - 1))}
+        opciones={opcionesSig} />
 
       {aviso && (
         <div className="absolute inset-0 flex items-center justify-center px-[96px]"

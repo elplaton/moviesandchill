@@ -3,6 +3,8 @@ import { fetchSubtitles, streamTicket, subtitleUrl, type ExternalSubtitle } from
 import { useAirplay } from '../hooks/useAirplay';
 import { IAirplay } from './Icons';
 import { markWatched, resumePoint, setWatched } from '../utils/progress';
+import { useSiguiente } from '../hooks/useSiguiente';
+import SiguienteEp from './SiguienteEp';
 
 interface Props {
   path: string; title: string; subtitle?: string; poster?: string; backdrop?: string;
@@ -27,13 +29,80 @@ interface Props {
  * Mientras carga se tapa con una pantalla de espera. Si no, se veia el
  * reproductor en linea con sus propios controles durante un segundo y luego
  * saltaba encima el del sistema: parecian dos reproductores peleandose.
+ *
+ * Al acabar un capitulo de una serie aparece la tarjeta del siguiente (ver
+ * `SiguienteEp`), y **antes hay que salirse de la pantalla completa**: el
+ * reproductor del sistema se pinta fuera de la pagina y encima de el no se
+ * puede dibujar nada, asi que una tarjeta en el DOM no se veria. Por eso aqui
+ * la pregunta llega al terminar y no a mitad de los creditos como en la web:
+ * salir de la pantalla completa a mitad de capitulo para preguntar algo seria
+ * peor que no preguntarlo.
  */
-export default function Player({ path, title, subtitle, poster, backdrop, tmdbId, mediaType, onClose }: Props) {
+export default function Player(props: Props) {
+  const { onClose } = props;
+  // Que se esta reproduciendo ahora, que no siempre es lo que dijo el padre:
+  // al acabar un capitulo el reproductor pasa al siguiente por su cuenta. Los
+  // nombres de dentro son los de siempre, asi que el resto no se entera.
+  const [actual, setActual] = useState(() => ({
+    path: props.path, title: props.title, subtitle: props.subtitle,
+    poster: props.poster, backdrop: props.backdrop,
+    tmdbId: props.tmdbId, mediaType: props.mediaType,
+  }));
+  useEffect(() => {
+    setActual({ path: props.path, title: props.title, subtitle: props.subtitle,
+                poster: props.poster, backdrop: props.backdrop,
+                tmdbId: props.tmdbId, mediaType: props.mediaType });
+  }, [props.path, props.title, props.subtitle, props.poster, props.backdrop,
+      props.tmdbId, props.mediaType]);
+  const { path, title, subtitle, poster, backdrop, tmdbId, mediaType } = actual;
+
   const ref = useRef<HTMLVideoElement>(null);
   const [subs, setSubs] = useState<ExternalSubtitle[]>([]);
   const [preparando, setPreparando] = useState(true);
   const [fallo, setFallo] = useState('');
   const airplay = useAirplay(ref);
+
+  /**
+   * Nos hemos salido de la pantalla completa a proposito, para enseñar la
+   * tarjeta del siguiente episodio.
+   *
+   * Hace falta porque salir de la pantalla completa es justo la señal con la
+   * que este reproductor se cierra (el boton "Hecho" del sistema, el gesto de
+   * atras). Sin esta marca, enseñar la tarjeta cerraria el reproductor y la
+   * tarjeta con el.
+   */
+  const porLaTarjeta = useRef(false);
+  const salirDePantallaCompleta = () => {
+    const v = ref.current as unknown as { webkitExitFullscreen?: () => void } | null;
+    porLaTarjeta.current = true;
+    try {
+      if (typeof v?.webkitExitFullscreen === 'function') v.webkitExitFullscreen();
+      else if (document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
+    } catch { /* ya estaba fuera */ }
+  };
+
+  const sig = useSiguiente({
+    path, tmdbId,
+    // En el telefono la tarjeta solo sale al final: encima del reproductor
+    // del sistema no se puede dibujar.
+    soloAlFinal: true,
+    onVer: (siguiente) => {
+      const v = ref.current;
+      // El que se deja se marca visto antes de cambiar: si no, se quedaria a
+      // medias en "Continuar viendo".
+      if (v?.duration) {
+        markWatched({ path, title, subtitle, poster, backdrop,
+                      tmdb_id: tmdbId ?? null, media_type: mediaType,
+                      position: v.duration, duration: v.duration });
+      }
+      porLaTarjeta.current = false;
+      setPreparando(true);
+      setActual((a) => ({ ...a, path: siguiente.path, subtitle: siguiente.label }));
+    },
+    onCerrar: onClose,
+    pausar: () => ref.current?.pause(),
+  });
+
   // El `src` espera a la entrada de reproducción: el token de acceso caduca a
   // la hora y cortaba las películas largas por la mitad. Con AirPlay es
   // imprescindible, porque quien pide los trozos es el Apple TV.
@@ -72,6 +141,10 @@ export default function Player({ path, title, subtitle, poster, backdrop, tmdbId
                              position: v.currentTime, duration: v.duration });
     const onMeta = () => aplicarInicio();
     const onTime = () => {
+      // Se pregunta que viene despues con tres minutos de margen, aunque la
+      // tarjeta no se enseñe hasta el final: asi al acabar ya esta la
+      // respuesta y no hay un hueco esperando a la red.
+      sig.mirar(v.currentTime, v.duration);
       const now = Date.now(); if (now - last < 5000 || !v.duration) return; last = now;
       // Lo terminado se marca, no se borra: es lo que deja al servidor ofrecer
       // el episodio siguiente.
@@ -80,6 +153,9 @@ export default function Player({ path, title, subtitle, poster, backdrop, tmdbId
     };
     const onEnded = () => {
       markWatched({ ...entrada(), position: v.duration || 0, duration: v.duration || 0 });
+      // Si hay algo que preguntar, se sale de la pantalla completa (la unica
+      // forma de que se vea la tarjeta) y el reproductor se queda abierto.
+      if (sig.alTerminar()) { salirDePantallaCompleta(); return; }
       history.state?.player ? history.back() : close();
     };
     // El telefono no desmonta nada al bloquear la pantalla o cambiar de app:
@@ -115,8 +191,12 @@ export default function Player({ path, title, subtitle, poster, backdrop, tmdbId
     // controles que quedarse en una espera eterna.
     const rendicion = setTimeout(() => setPreparando(false), 20000);
 
-    // Salir de la pantalla completa (boton Hecho, atras) cierra el reproductor.
-    const onExitIos = () => { history.state?.player ? history.back() : close(); };
+    // Salir de la pantalla completa (boton Hecho, atras) cierra el reproductor,
+    // salvo que hayamos salido nosotros para enseñar la tarjeta del siguiente.
+    const onExitIos = () => {
+      if (porLaTarjeta.current) { porLaTarjeta.current = false; return; }
+      history.state?.player ? history.back() : close();
+    };
     const onFsChange = () => { if (entered && !document.fullscreenElement) onExitIos(); };
     const onPop = () => close();
 
@@ -167,6 +247,8 @@ export default function Player({ path, title, subtitle, poster, backdrop, tmdbId
             srcLang={sub.language} label={sub.label} />
         ))}
       </video>
+
+      {!preparando && <SiguienteEp sig={sig} />}
 
       {airplay.activo && !preparando && (
         <div className="absolute inset-0 flex flex-col items-center justify-center px-8 text-center">

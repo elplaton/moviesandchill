@@ -101,7 +101,7 @@ def temporada_y_episodio(rel: str) -> tuple[int | None, int | None]:
             int(episodio) if episodio is not None else None)
 
 
-def _episodios_en_disco(grupo: str) -> list[tuple[int, int, str]]:
+def episodios_en_disco(grupo: str) -> list[tuple[int, int, str]]:
     """(temporada, episodio, ruta relativa) de todo lo que hay en la carpeta de
     la serie, ordenado. Se recorre el disco y no la tabla media_items porque lo
     que importa es lo que se puede reproducir ahora mismo, no lo indexado."""
@@ -136,7 +136,7 @@ def siguiente_episodio(rel: str, terminados: set[str] | None = None,
         return None
     terminados = terminados or set()
     marcados = marcados or set()
-    for ts, es, ruta in _episodios_en_disco(grupo_de(rel)):
+    for ts, es, ruta in episodios_en_disco(grupo_de(rel)):
         if (ts, es) > (t, e) and ruta not in terminados and (ts, es) not in marcados:
             return {"path": ruta, "season": ts, "episode": es}
     return None

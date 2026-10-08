@@ -4,6 +4,8 @@ import { audioLabel, fetchTracks, puedeCambiarAudio, streamTicket, subtitleUrl,
 import { useAirplay } from '../hooks/useAirplay';
 import { IconAirplay, IconClose, IconExpand, IconMute, IconPause, IconPlay, IconSubtitles, IconVolume } from './ui/Icon';
 import { markWatched, resumePoint, setWatched } from '../utils/progress';
+import { useSiguiente } from '../hooks/useSiguiente';
+import NextUp from './NextUp';
 
 interface Props {
   path: string;
@@ -34,7 +36,31 @@ function fmt(s: number): string {
  * que espera cualquiera, y los controles nativos del navegador no dan ni el
  * título ni un salto de 10 s. La barra se esconde sola mientras se reproduce.
  */
-export default function Player({ path, title, subtitle, poster, backdrop, tmdbId, mediaType, onClose }: Props) {
+export default function Player(props: Props) {
+  const { onClose } = props;
+  /**
+   * Que se esta reproduciendo **ahora**, que no siempre es lo que dijo el
+   * padre: al acabar un capitulo el reproductor pasa al siguiente por su
+   * cuenta (ver `useSiguiente`). Vive aqui y no en cada pantalla que monta un
+   * reproductor —la ficha, la portada, Descargas— porque si no habria que
+   * enseñarle a las tres a cambiar de episodio para lo mismo.
+   *
+   * Los nombres de dentro son los de siempre (`path`, `title`...), asi que
+   * todo lo que ya habia sigue leyendo lo que toca sin enterarse.
+   */
+  const [actual, setActual] = useState(() => ({
+    path: props.path, title: props.title, subtitle: props.subtitle,
+    poster: props.poster, backdrop: props.backdrop,
+    tmdbId: props.tmdbId, mediaType: props.mediaType,
+  }));
+  useEffect(() => {
+    setActual({ path: props.path, title: props.title, subtitle: props.subtitle,
+                poster: props.poster, backdrop: props.backdrop,
+                tmdbId: props.tmdbId, mediaType: props.mediaType });
+  }, [props.path, props.title, props.subtitle, props.poster, props.backdrop,
+      props.tmdbId, props.mediaType]);
+  const { path, title, subtitle, poster, backdrop, tmdbId, mediaType } = actual;
+
   const ref = useRef<HTMLVideoElement>(null);
   const boxRef = useRef<HTMLDivElement>(null);
   const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -51,6 +77,25 @@ export default function Player({ path, title, subtitle, poster, backdrop, tmdbId
   const [subActiva, setSubActiva] = useState(-1);   // -1 = sin subtítulos
   const [audioActivo, setAudioActivo] = useState(0);
   const airplay = useAirplay(ref);
+
+  // La tarjeta del final del capitulo: ver el siguiente (con la barra que
+  // avanza sola) o dejar bajando los que vienen.
+  const sig = useSiguiente({
+    path, tmdbId,
+    onVer: (siguiente) => {
+      const v = ref.current;
+      // El que se deja se marca visto **antes** de cambiar: la cuenta atras
+      // salta sobre los creditos, asi que el `ended` no va a llegar nunca y
+      // sin esto el episodio se quedaria a medias en "Continuar viendo".
+      if (v?.duration) {
+        markWatched({ path, title, subtitle, poster, backdrop,
+                      tmdb_id: tmdbId, media_type: mediaType,
+                      position: v.duration, duration: v.duration });
+      }
+      setActual((a) => ({ ...a, path: siguiente.path, subtitle: siguiente.label }));
+    },
+    onCerrar: onClose,
+  });
 
   // El `src` espera a la entrada de reproducción: el token de acceso caduca a
   // la hora y cortaba las películas largas por la mitad.
@@ -136,6 +181,7 @@ export default function Player({ path, title, subtitle, poster, backdrop, tmdbId
     const onMeta = () => { setDuration(v.duration || 0); aplicarInicio(); };
     const onTime = () => {
       setTime(v.currentTime);
+      sig.mirar(v.currentTime, v.duration);
       const now = Date.now();
       if (now - lastSave > 5000 && v.duration) {
         lastSave = now;
@@ -150,6 +196,9 @@ export default function Player({ path, title, subtitle, poster, backdrop, tmdbId
     const onWaiting = () => setBuffering(true);
     const onEnded = () => {
       markWatched({ ...entrada(), position: v.duration || 0, duration: v.duration || 0 });
+      // Si queda algo que preguntar (el siguiente episodio, o si se baja) el
+      // reproductor no se cierra: la pregunta se contesta aqui.
+      if (sig.alTerminar()) return;
       onClose();
     };
     // Cerrar la pestaña o el navegador no desmonta el componente: sin esto se
@@ -231,6 +280,8 @@ export default function Player({ path, title, subtitle, poster, backdrop, tmdbId
           <p className="text-base text-nf-dim">La imagen va al otro dispositivo.</p>
         </div>
       )}
+
+      <NextUp sig={sig} />
 
       {buffering && (
         <div className="pointer-events-none absolute inset-0 grid place-items-center">
