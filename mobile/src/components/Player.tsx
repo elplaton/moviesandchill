@@ -43,8 +43,10 @@ interface Props {
  * historial para que "atras" signifique "cerrar el video" y no "volver a la
  * pantalla anterior".
  *
- * Mientras carga se tapa con una pantalla de espera: sin ella se ve un
- * instante el poster con los controles encima antes de que arranque la imagen.
+ * Mientras carga se tapa con una pantalla de espera —carátula, título y un
+ * indicador girando— y nada mas: sin ella se ve un instante el poster con los
+ * controles encima antes de que arranque la imagen. **No hay pantalla de
+ * error**, a proposito: ver `onError`.
  */
 export default function Player(props: Props) {
   const { onClose } = props;
@@ -67,7 +69,6 @@ export default function Player(props: Props) {
   const ref = useRef<HTMLVideoElement>(null);
   const [subs, setSubs] = useState<ExternalSubtitle[]>([]);
   const [preparando, setPreparando] = useState(true);
-  const [fallo, setFallo] = useState('');
   const airplay = useAirplay(ref);
 
   /**
@@ -129,6 +130,12 @@ export default function Player(props: Props) {
   // hay que colgarle las pistas que haya.
   useEffect(() => {
     let vivo = true;
+    // La entrada del episodio anterior **no vale para este archivo**
+    // (`create_stream_token()` la limita a una ruta), asi que al cambiar de
+    // episodio se olvida en vez de reaprovecharla: con la vieja el servidor
+    // contesta 401 y el <video> suelta un error que no significa nada.
+    setTicket(null);
+    setSubs([]);
     streamTicket(path).then(t => { if (vivo) setTicket(t); });
     fetchSubtitles(path).then(s => { if (vivo) setSubs(s); });
     return () => { vivo = false; };
@@ -180,10 +187,25 @@ export default function Player(props: Props) {
     // abra el reproductor del sistema: el video se ve aqui mismo.
     const onPlaying = () => setPreparando(false);
 
-    const onError = () => {
-      setPreparando(false);
-      setFallo('No se ha podido abrir el vídeo. Puede que el archivo no esté listo todavía.');
-    };
+    /**
+     * Un `error` del <video> **no es prueba de que el video no se pueda ver**,
+     * y por eso aqui ya no se pinta ningun aviso.
+     *
+     * El elemento se inserta en la pagina antes de tener `src`, porque la
+     * entrada de reproduccion es un viaje al servidor; y un <video> sin fuente
+     * dispara un `error` el solo en cuanto entra en el documento (el algoritmo
+     * de seleccion de recurso no encuentra candidato y pone
+     * MEDIA_ERR_SRC_NOT_SUPPORTED). Con eso se pintaba «No se ha podido abrir
+     * el video» **encima de una pelicula que se estaba reproduciendo
+     * perfectamente**: no se notaba mientras el reproductor del sistema tapaba
+     * la pagina entera, y al pasar a reproducir dentro de ella quedo a la
+     * vista y sin forma de quitarlo. De ahi la guarda del `src`.
+     *
+     * Lo unico que se hace es retirar la espera. Si el archivo de verdad no se
+     * abre, lo dice el reproductor del sistema con su propio icono, que es la
+     * unica señal que no puede equivocarse.
+     */
+    const onError = () => { if (v.getAttribute('src')) setPreparando(false); };
     // Red de seguridad: si el vídeo no arranca (archivo a medio convertir, un
     // codec que el telefono no abre) mas vale ver el reproductor y sus
     // controles que quedarse en una espera eterna.
@@ -203,6 +225,7 @@ export default function Player(props: Props) {
     v.addEventListener('timeupdate', onTime);
     v.addEventListener('ended', onEnded);
     v.addEventListener('playing', onPlaying);
+    v.addEventListener('canplay', onPlaying);
     v.addEventListener('error', onError);
     v.addEventListener('webkitendfullscreen', onExitIos);
 
@@ -214,6 +237,7 @@ export default function Player(props: Props) {
       v.removeEventListener('timeupdate', onTime);
       v.removeEventListener('ended', onEnded);
       v.removeEventListener('playing', onPlaying);
+      v.removeEventListener('canplay', onPlaying);
       v.removeEventListener('error', onError);
       clearTimeout(rendicion);
       v.removeEventListener('webkitendfullscreen', onExitIos);
@@ -244,7 +268,7 @@ export default function Player(props: Props) {
 
       {/* El boton de cerrar lo ponemos nosotros: el "Hecho" que habia antes era
           del reproductor del sistema, y ya no se entra en el. */}
-      {!preparando && !fallo && (
+      {!preparando && (
         <div className="absolute top-0 inset-x-0 flex items-start gap-3 p-4 pt-[max(1rem,env(safe-area-inset-top))]
                         pointer-events-none bg-gradient-to-b from-black/70 to-transparent">
           <button onClick={cerrar} aria-label="Cerrar"
@@ -272,38 +296,28 @@ export default function Player(props: Props) {
         </div>
       )}
 
-      {(preparando || fallo) && (
+      {preparando && (
         <div className="absolute inset-0 flex flex-col items-center justify-center px-8 text-center">
           {backdrop && (
             <img src={backdrop} alt="" className="absolute inset-0 w-full h-full object-cover opacity-25" />
           )}
           <div className="absolute inset-0 bg-gradient-to-t from-black via-black/80 to-black/60" />
           <div className="relative">
-            {fallo ? (
-              <>
-                <p className="text-[16px] font-semibold">{fallo}</p>
-                <button onClick={onClose} className="mt-5 h-11 px-6 rounded-xl bg-white/15 text-[15px] font-semibold">
-                  Cerrar
-                </button>
-              </>
-            ) : (
-              <>
-                <span className="block w-10 h-10 mx-auto rounded-full border-[3px] border-white/20 border-t-white animate-spin" />
-                <p className="mt-5 text-[17px] font-semibold leading-tight">{title}</p>
-                {subtitle && <p className="mt-1 text-[14px] text-nf-text2">{subtitle}</p>}
-                <p className="mt-3 text-[13px] text-nf-text3">Preparando el vídeo…</p>
-                {airplay.disponible && (
-                  <button onClick={airplay.elegir}
-                    className="mt-6 inline-flex items-center gap-2 h-11 px-5 rounded-xl bg-white/15 text-[15px] font-semibold active:bg-white/25">
-                    <span className="w-5 h-5"><IAirplay /></span>
-                    Ver en otra pantalla
-                  </button>
-                )}
-              </>
+            <span className="block w-10 h-10 mx-auto rounded-full border-[3px] border-white/20 border-t-white animate-spin" />
+            <p className="mt-5 text-[17px] font-semibold leading-tight">{title}</p>
+            {subtitle && <p className="mt-1 text-[14px] text-nf-text2">{subtitle}</p>}
+            <p className="mt-3 text-[13px] text-nf-text3">Preparando el vídeo…</p>
+            {airplay.disponible && (
+              <button onClick={airplay.elegir}
+                className="mt-6 inline-flex items-center gap-2 h-11 px-5 rounded-xl bg-white/15 text-[15px] font-semibold active:bg-white/25">
+                <span className="w-5 h-5"><IAirplay /></span>
+                Ver en otra pantalla
+              </button>
             )}
           </div>
         </div>
       )}
+
     </div>
   );
 }

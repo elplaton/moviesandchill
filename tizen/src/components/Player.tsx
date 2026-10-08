@@ -397,7 +397,16 @@ export default function Player(props: Props) {
     const onPlay = () => setPlaying(true);
     const onPause = () => setPlaying(false);
     const onPlaying = () => { setBuffering(false); setPlaying(true); };
-    const onError = () => { toast('No se ha podido reproducir el archivo', 'error', 5000); };
+    // Se mira `v.error` antes de decir nada: un <video> suelta eventos `error`
+    // que no significan que el archivo no se vea (una carga cancelada, una
+    // fuente que aun no esta puesta), y avisar de un fallo que no existe
+    // mientras la pelicula se reproduce es peor que no avisar. En el movil
+    // esto llego a pintar una pantalla entera encima del video (ver su
+    // `Player`); aqui es un aviso de cinco segundos, pero miente igual.
+    const onError = () => {
+      if (!v.error) return;
+      toast('No se ha podido reproducir el archivo', 'error', 5000);
+    };
     v.addEventListener('loadedmetadata', onMeta);
     v.addEventListener('timeupdate', onTime);
     v.addEventListener('ended', onEnded);
