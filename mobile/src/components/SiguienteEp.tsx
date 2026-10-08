@@ -5,86 +5,88 @@ import type { EstadoSiguiente } from '../hooks/useSiguiente';
 /**
  * La tarjeta del final de un capítulo, en el teléfono.
  *
- * Ocupa la pantalla entera y no una esquina, al contrario que en la web, y es
- * por una razón concreta: aquí el vídeo se reproduce con el reproductor del
- * sistema, así que cuando esta tarjeta aparece **ya se ha salido de la
- * pantalla completa** y detrás no hay nada que tapar. Lo que se ve es el
- * último fotograma congelado, que no es una imagen que merezca respetarse.
+ * Va **encima del vídeo**, abajo, sin tapar la imagen entera: los créditos se
+ * siguen viendo detrás, igual que en la web y en la tele. Eso solo es posible
+ * desde que el reproductor dejó de entrar en la pantalla completa del sistema
+ * (ver `Player`), porque ahí no se puede dibujar nada encima.
  *
- * Dos formas:
+ * **Un solo botón**, y la barra de arriba es ese botón pulsándose solo. Por
+ * eso el texto dice lo que va a pasar («Ver 3x08 y descargar 3x09») en vez de
+ * un «Siguiente» genérico. La tarjeta de descargar a secas no lleva barra: lo
+ * que puede pasar sin que nadie toque nada es seguir viendo, no gastar disco.
  *
- *   «A continuación»  el siguiente episodio está en disco: botón grande y la
- *                     barra que avanza sola, que al llenarse lo pone.
- *   «Descargar»       no queda nada descargado por delante. Sin barra: lo que
- *                     avanza solo puede ser ver algo, nunca gastar disco.
- *
- * Los botones son altos (52 px) porque esto se pulsa con el pulgar y a
- * oscuras, que es la situación real: capítulo terminado, de noche, en la cama.
+ * El botón es alto (52 px) porque esto se pulsa con el pulgar y a oscuras, que
+ * es la situación real: capítulo terminado, de noche, en la cama. Y se deja
+ * sitio abajo (`pb-24`) para no caer justo encima de la barra de controles del
+ * vídeo, que es lo que se pulsaría sin querer.
  */
 export default function SiguienteEp({ sig }: { sig: EstadoSiguiente }) {
   const d = sig.decision;
-  if (d.tipo === 'nada') return null;
+  if (d.tipo === 'nada' && !sig.mensaje) return null;
+
+  // Cuando ya no queda nada que ofrecer pero sí algo que contar («Descargando
+  // 3x09 y 3x10»), queda solo el mensaje.
+  if (d.tipo === 'nada' || (d.tipo === 'bajar' && !d.bajar.length)) {
+    return (
+      <div className="absolute inset-x-0 bottom-0 z-10 px-4 pb-24 pointer-events-none">
+        <div className="rounded-2xl bg-black/85 px-4 py-3">
+          <p className="text-[14px] text-nf-ok">{sig.mensaje}</p>
+        </div>
+      </div>
+    );
+  }
 
   const pct = Math.round(sig.progreso * 100);
 
   return (
-    <div className="absolute inset-0 z-10 flex flex-col justify-end bg-black/80" onTouchStart={sig.parar}>
-      {sig.backdrop && (
-        <img src={sig.backdrop} alt="" className="absolute inset-0 w-full h-full object-cover opacity-20" />
-      )}
-      <div className="absolute inset-0 bg-gradient-to-t from-black via-black/85 to-black/40" />
-
-      <div className="relative px-6 pb-[max(2rem,env(safe-area-inset-bottom))] pt-8">
-        <p className="text-[12px] font-semibold uppercase tracking-wide text-nf-text3">
-          {d.tipo === 'ver' ? 'A continuación' : 'Se acaba lo descargado'}
-        </p>
-        <p className="mt-1 text-[22px] font-bold leading-tight">
-          {d.tipo === 'ver' ? d.siguiente.label : listar(d.bajar)}
-        </p>
-        {sig.titulo && <p className="mt-0.5 text-[15px] text-nf-text2">{sig.titulo}</p>}
-
+    <div className="absolute inset-x-0 bottom-0 z-10 px-4 pb-24" onTouchStart={sig.parar}>
+      <div className="overflow-hidden rounded-2xl bg-black/85 backdrop-blur">
         {d.tipo === 'ver' && (
-          <div className="mt-5 h-1 w-full overflow-hidden rounded-full bg-white/20">
-            <div className="h-full rounded-full bg-nf-red"
+          <div className="h-1 w-full bg-white/20">
+            <div className="h-full bg-nf-red"
               style={{ width: `${pct}%`, transition: sig.corriendo ? 'width 120ms linear' : 'none' }} />
           </div>
         )}
 
-        {sig.mensaje && <p className="mt-4 text-[14px] text-nf-ok">{sig.mensaje}</p>}
+        <div className="flex items-center gap-3 px-4 pt-3">
+          {sig.poster && (
+            <img src={sig.poster} alt="" className="h-16 w-11 shrink-0 rounded object-cover" />
+          )}
+          <div className="min-w-0 flex-1">
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-nf-text3">
+              {d.tipo === 'ver' ? 'A continuación' : 'Se acaba lo descargado'}
+            </p>
+            <p className="truncate text-[17px] font-bold leading-tight">
+              {d.tipo === 'ver' ? d.siguiente.label : listar(d.bajar)}
+            </p>
+            {sig.titulo && <p className="truncate text-[13px] text-nf-text2">{sig.titulo}</p>}
+          </div>
+        </div>
+
+        {sig.mensaje && <p className="px-4 pt-2 text-[13px] text-nf-ok">{sig.mensaje}</p>}
 
         {d.tipo === 'bajar' && (
-          <p className="mt-3 text-[13px] text-nf-text3">
+          <p className="px-4 pt-2 text-[12px] text-nf-text3">
             {d.bajar.map((e) => `${e.label} · ${e.size_str}`).join('   ·   ')}
           </p>
         )}
 
-        <div className="mt-6 space-y-3">
-          {d.tipo === 'ver' ? (
-            <>
-              <button onClick={sig.ver}
-                className="flex h-[52px] w-full items-center justify-center gap-2 rounded-xl bg-white text-[16px] font-semibold text-black active:bg-white/85">
-                <span className="w-5 h-5"><IPlay /></span>
-                {sig.corriendo ? `Ver ahora · ${sig.restante}` : 'Ver ahora'}
-              </button>
-              {d.bajar.length > 0 && (
-                <button onClick={sig.descargar} disabled={sig.bajando}
-                  className="flex h-[52px] w-full items-center justify-center gap-2 rounded-xl bg-white/15 text-[16px] font-semibold active:bg-white/25 disabled:opacity-40">
-                  <span className="w-5 h-5"><IDown /></span>
-                  {sig.bajando ? 'Pidiendo…' : `Descargar ${listar(d.bajar)}`}
-                </button>
-              )}
-            </>
-          ) : (
-            <button onClick={sig.descargar} disabled={sig.bajando}
-              className="flex h-[52px] w-full items-center justify-center gap-2 rounded-xl bg-nf-red text-[16px] font-semibold active:bg-nf-reddeep disabled:opacity-40">
-              <span className="w-5 h-5"><IDown /></span>
-              {sig.bajando ? 'Pidiendo…'
-                : `Descargar ${d.bajar.length > 1 ? 'los dos siguientes' : 'el siguiente'}`}
-            </button>
-          )}
+        <div className="flex items-center gap-2 p-4">
+          <button onClick={sig.confirmar} disabled={sig.bajando}
+            className={`flex h-[52px] min-w-0 flex-1 items-center justify-center gap-2 rounded-xl
+              text-[15px] font-semibold disabled:opacity-40
+              ${d.tipo === 'ver' ? 'bg-white text-black active:bg-white/85'
+                                 : 'bg-nf-red active:bg-nf-reddeep'}`}>
+            <span className="w-5 h-5 shrink-0">{d.tipo === 'ver' ? <IPlay /> : <IDown />}</span>
+            <span className="truncate">
+              {sig.bajando && d.tipo === 'bajar' ? 'Pidiendo…'
+                : sig.corriendo ? `${sig.texto} · ${sig.restante}`
+                : sig.texto}
+            </span>
+          </button>
           <button onClick={sig.descartar}
-            className="h-[52px] w-full rounded-xl text-[16px] font-semibold text-nf-text2 active:bg-white/10">
-            {d.tipo === 'ver' ? 'Salir' : 'Ahora no'}
+            className="h-[52px] shrink-0 rounded-xl px-4 text-[15px] font-semibold text-nf-text2 active:bg-white/10">
+            {d.tipo === 'ver' ? 'No' : 'Ahora no'}
           </button>
         </div>
       </div>

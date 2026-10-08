@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { fetchSubtitles, streamTicket, subtitleUrl, type ExternalSubtitle } from '../services/tracks';
 import { useAirplay } from '../hooks/useAirplay';
-import { IAirplay } from './Icons';
+import { IAirplay, IClose } from './Icons';
 import { markWatched, resumePoint, setWatched } from '../utils/progress';
 import { useSiguiente } from '../hooks/useSiguiente';
 import SiguienteEp from './SiguienteEp';
@@ -17,26 +17,34 @@ interface Props {
 }
 
 /**
- * Reproductor: solo el <video> del sistema, sin barra ni botones propios.
+ * Reproductor del telefono: el `<video>` del sistema con sus propios
+ * controles, **en la pagina** y a pantalla llena, no en la pantalla completa
+ * nativa.
  *
- * En cuanto arranca entra en pantalla completa nativa, que en el telefono ya
- * trae todo (girar, barra de tiempo, volumen, AirPlay, subtitulos, PiP y el
- * boton de salir). Se cierra al salir de esa pantalla completa, al terminar
- * el video o con el gesto de atras del telefono: al abrirse se apila una
- * entrada en el historial para que "atras" signifique "cerrar el video" y no
- * "volver a la pantalla anterior".
+ * Esa es la decision que manda aqui y costo cambiarla. Antes, en cuanto
+ * arrancaba, se llamaba a `webkitEnterFullscreen()` y se le pasaba el video al
+ * reproductor del sistema, que trae mas cosas hechas (girar a apaisado solo,
+ * su propio boton de salir). El problema es que ese reproductor **se pinta
+ * fuera de la pagina**: encima de el no se puede dibujar absolutamente nada,
+ * asi que la tarjeta del siguiente episodio obligaba a salirse de la pantalla
+ * completa para poder verse. Se pidio que apareciera dentro del reproductor,
+ * sin tener que salir, igual que en la web y en la tele, y la unica forma es
+ * no entrar en esa pantalla completa.
  *
- * Mientras carga se tapa con una pantalla de espera. Si no, se veia el
- * reproductor en linea con sus propios controles durante un segundo y luego
- * saltaba encima el del sistema: parecian dos reproductores peleandose.
+ * Lo que se gana: la tarjeta del siguiente episodio, el boton de cerrar y
+ * cualquier cosa que haga falta pintar encima del video funcionan igual que en
+ * los otros clientes. Lo que se pierde: el giro automatico a apaisado, que es
+ * cosa del reproductor del sistema. Si alguien lo quiere, el boton de pantalla
+ * completa sigue estando en la barra de controles nativa; ahi la tarjeta
+ * vuelve a no poder dibujarse, y por eso al aparecer se sale (`porLaTarjeta`).
  *
- * Al acabar un capitulo de una serie aparece la tarjeta del siguiente (ver
- * `SiguienteEp`), y **antes hay que salirse de la pantalla completa**: el
- * reproductor del sistema se pinta fuera de la pagina y encima de el no se
- * puede dibujar nada, asi que una tarjeta en el DOM no se veria. Por eso aqui
- * la pregunta llega al terminar y no a mitad de los creditos como en la web:
- * salir de la pantalla completa a mitad de capitulo para preguntar algo seria
- * peor que no preguntarlo.
+ * Se cierra con el boton de arriba a la izquierda, al terminar el video o con
+ * el gesto de atras del telefono: al abrirse se apila una entrada en el
+ * historial para que "atras" signifique "cerrar el video" y no "volver a la
+ * pantalla anterior".
+ *
+ * Mientras carga se tapa con una pantalla de espera: sin ella se ve un
+ * instante el poster con los controles encima antes de que arranque la imagen.
  */
 export default function Player(props: Props) {
   const { onClose } = props;
@@ -63,17 +71,20 @@ export default function Player(props: Props) {
   const airplay = useAirplay(ref);
 
   /**
-   * Nos hemos salido de la pantalla completa a proposito, para enseñar la
-   * tarjeta del siguiente episodio.
+   * Hemos salido de la pantalla completa nosotros, para enseñar la tarjeta.
    *
-   * Hace falta porque salir de la pantalla completa es justo la señal con la
-   * que este reproductor se cierra (el boton "Hecho" del sistema, el gesto de
-   * atras). Sin esta marca, enseñar la tarjeta cerraria el reproductor y la
-   * tarjeta con el.
+   * Solo pasa si alguien ha entrado a mano en la pantalla completa del sistema
+   * con el boton de la barra de controles: ahi no se puede dibujar encima, asi
+   * que al aparecer la tarjeta se sale. La marca existe porque salir de la
+   * pantalla completa tambien es la señal del boton "Hecho", y sin ella
+   * enseñar la tarjeta parecería que alguien ha pulsado "Hecho".
    */
   const porLaTarjeta = useRef(false);
   const salirDePantallaCompleta = () => {
     const v = ref.current as unknown as { webkitExitFullscreen?: () => void } | null;
+    const enNativa = (ref.current as unknown as { webkitDisplayingFullscreen?: boolean })
+      ?.webkitDisplayingFullscreen;
+    if (!enNativa && !document.fullscreenElement) return;   // ya estamos en la pagina
     porLaTarjeta.current = true;
     try {
       if (typeof v?.webkitExitFullscreen === 'function') v.webkitExitFullscreen();
@@ -83,9 +94,6 @@ export default function Player(props: Props) {
 
   const sig = useSiguiente({
     path, tmdbId,
-    // En el telefono la tarjeta solo sale al final: encima del reproductor
-    // del sistema no se puede dibujar.
-    soloAlFinal: true,
     onVer: (siguiente) => {
       const v = ref.current;
       // El que se deja se marca visto antes de cambiar: si no, se quedaria a
@@ -95,13 +103,19 @@ export default function Player(props: Props) {
                       tmdb_id: tmdbId ?? null, media_type: mediaType,
                       position: v.duration, duration: v.duration });
       }
-      porLaTarjeta.current = false;
       setPreparando(true);
       setActual((a) => ({ ...a, path: siguiente.path, subtitle: siguiente.label }));
     },
     onCerrar: onClose,
     pausar: () => ref.current?.pause(),
   });
+
+  // Si la tarjeta aparece con alguien dentro de la pantalla completa nativa,
+  // hay que salir: es el unico sitio donde no se puede dibujar encima.
+  const hayTarjeta = sig.decision.tipo !== 'nada';
+  useEffect(() => {
+    if (hayTarjeta) salirDePantallaCompleta();
+  }, [hayTarjeta]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // El `src` espera a la entrada de reproducción: el token de acceso caduca a
   // la hora y cortaba las películas largas por la mitad. Con AirPlay es
@@ -141,9 +155,8 @@ export default function Player(props: Props) {
                              position: v.currentTime, duration: v.duration });
     const onMeta = () => aplicarInicio();
     const onTime = () => {
-      // Se pregunta que viene despues con tres minutos de margen, aunque la
-      // tarjeta no se enseñe hasta el final: asi al acabar ya esta la
-      // respuesta y no hay un hueco esperando a la red.
+      // Se pregunta que viene despues con tres minutos de margen, para que la
+      // tarjeta aparezca sin un hueco esperando a la red.
       sig.mirar(v.currentTime, v.duration);
       const now = Date.now(); if (now - last < 5000 || !v.duration) return; last = now;
       // Lo terminado se marca, no se borra: es lo que deja al servidor ofrecer
@@ -153,9 +166,9 @@ export default function Player(props: Props) {
     };
     const onEnded = () => {
       markWatched({ ...entrada(), position: v.duration || 0, duration: v.duration || 0 });
-      // Si hay algo que preguntar, se sale de la pantalla completa (la unica
-      // forma de que se vea la tarjeta) y el reproductor se queda abierto.
-      if (sig.alTerminar()) { salirDePantallaCompleta(); return; }
+      // Si hay algo que preguntar, el reproductor se queda abierto con la
+      // tarjeta encima del ultimo fotograma.
+      if (sig.alTerminar()) return;
       history.state?.player ? history.back() : close();
     };
     // El telefono no desmonta nada al bloquear la pantalla o cambiar de app:
@@ -163,24 +176,9 @@ export default function Player(props: Props) {
     const onSalir = () => { if (v.duration && v.currentTime > 0) setWatched(entrada(), true); };
     const onOculta = () => { if (document.hidden) onSalir(); };
 
-    let entered = false;
-    const goFull = () => {
-      if (entered) return; entered = true;
-      // Si ya va por AirPlay no se entra en pantalla completa: la imagen esta
-      // en la tele y lo unico que se veria aqui es el cartel de AirPlay.
-      const anyAir = v as unknown as { webkitCurrentPlaybackTargetIsWireless?: boolean };
-      if (anyAir.webkitCurrentPlaybackTargetIsWireless) { setPreparando(false); return; }
-      // Ya hay imagen y el reproductor del sistema esta a punto de abrirse:
-      // se retira la espera un instante despues para no dejar un parpadeo
-      // del reproductor en linea entre medias.
-      setTimeout(() => setPreparando(false), 120);
-      const anyV = v as any;
-      // iPhone: el reproductor del sistema. El resto: pantalla completa del
-      // documento, con giro a apaisado donde se pueda bloquear.
-      if (typeof anyV.webkitEnterFullscreen === 'function') { try { anyV.webkitEnterFullscreen(); } catch { /* hace falta un gesto */ } return; }
-      const req = v.requestFullscreen?.bind(v) || anyV.webkitRequestFullscreen?.bind(v);
-      if (req) req().then(() => (screen.orientation as any)?.lock?.('landscape').catch(() => {})).catch(() => {});
-    };
+    // La espera se retira en cuanto hay imagen. Ya no hay que esperar a que se
+    // abra el reproductor del sistema: el video se ve aqui mismo.
+    const onPlaying = () => setPreparando(false);
 
     const onError = () => {
       setPreparando(false);
@@ -191,13 +189,10 @@ export default function Player(props: Props) {
     // controles que quedarse en una espera eterna.
     const rendicion = setTimeout(() => setPreparando(false), 20000);
 
-    // Salir de la pantalla completa (boton Hecho, atras) cierra el reproductor,
-    // salvo que hayamos salido nosotros para enseñar la tarjeta del siguiente.
-    const onExitIos = () => {
-      if (porLaTarjeta.current) { porLaTarjeta.current = false; return; }
-      history.state?.player ? history.back() : close();
-    };
-    const onFsChange = () => { if (entered && !document.fullscreenElement) onExitIos(); };
+    // Salir de la pantalla completa nativa NO cierra el reproductor: se vuelve
+    // a la pagina, que es donde vive. Solo hace falta consumir la marca si
+    // hemos salido nosotros para enseñar la tarjeta.
+    const onExitIos = () => { porLaTarjeta.current = false; };
     const onPop = () => close();
 
     history.pushState({ player: true }, '');
@@ -207,10 +202,9 @@ export default function Player(props: Props) {
     v.addEventListener('loadedmetadata', onMeta);
     v.addEventListener('timeupdate', onTime);
     v.addEventListener('ended', onEnded);
-    v.addEventListener('playing', goFull, { once: true });
+    v.addEventListener('playing', onPlaying);
     v.addEventListener('error', onError);
     v.addEventListener('webkitendfullscreen', onExitIos);
-    document.addEventListener('fullscreenchange', onFsChange);
 
     return () => {
       window.removeEventListener('popstate', onPop);
@@ -219,18 +213,18 @@ export default function Player(props: Props) {
       v.removeEventListener('loadedmetadata', onMeta);
       v.removeEventListener('timeupdate', onTime);
       v.removeEventListener('ended', onEnded);
-      v.removeEventListener('playing', goFull);
+      v.removeEventListener('playing', onPlaying);
       v.removeEventListener('error', onError);
       clearTimeout(rendicion);
       v.removeEventListener('webkitendfullscreen', onExitIos);
-      document.removeEventListener('fullscreenchange', onFsChange);
       if (document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
-      (screen.orientation as any)?.unlock?.();
       // Si se cerro sin pasar por el historial (fin del video), se retira la entrada.
       if (history.state?.player) history.back();
       if (v.duration && v.currentTime > 0) setWatched(entrada(), true);
     };
   }, [path]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const cerrar = () => { history.state?.player ? history.back() : onClose(); };
 
   return (
     <div className="fixed inset-0 z-[70] bg-black">
@@ -247,6 +241,22 @@ export default function Player(props: Props) {
             srcLang={sub.language} label={sub.label} />
         ))}
       </video>
+
+      {/* El boton de cerrar lo ponemos nosotros: el "Hecho" que habia antes era
+          del reproductor del sistema, y ya no se entra en el. */}
+      {!preparando && !fallo && (
+        <div className="absolute top-0 inset-x-0 flex items-start gap-3 p-4 pt-[max(1rem,env(safe-area-inset-top))]
+                        pointer-events-none bg-gradient-to-b from-black/70 to-transparent">
+          <button onClick={cerrar} aria-label="Cerrar"
+            className="pointer-events-auto grid h-10 w-10 shrink-0 place-items-center rounded-full bg-black/50 active:bg-white/20">
+            <span className="w-5 h-5"><IClose /></span>
+          </button>
+          <div className="min-w-0 pt-1">
+            <p className="truncate text-[15px] font-semibold leading-tight">{title}</p>
+            {subtitle && <p className="truncate text-[13px] text-nf-text2">{subtitle}</p>}
+          </div>
+        </div>
+      )}
 
       {!preparando && <SiguienteEp sig={sig} />}
 

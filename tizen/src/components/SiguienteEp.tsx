@@ -6,7 +6,7 @@ import { IconPlay } from './Icons';
 const PUNTERO = soloPuntero();
 
 export interface OpcionSig {
-  clave: 'ver' | 'bajar' | 'cerrar';
+  clave: 'hacer' | 'cerrar';
   texto: string;
   principal?: boolean;
   onSelect: () => void;
@@ -15,29 +15,21 @@ export interface OpcionSig {
 /**
  * Los botones de la tarjeta, en el orden en que los recorre el mando.
  *
- * Vive aquí y no dentro del componente porque el reproductor necesita la
- * **misma** lista para dos cosas: dibujarla y saber qué hacer cuando se pulsa
- * OK. Con la lista en dos sitios, mover un botón cambiaba lo que hacía otro.
+ * Son dos: **la acción** y cerrar. Ver el siguiente y dejar bajando el de
+ * después eran dos botones y ahora son uno solo, porque en ese momento nadie
+ * está eligiendo entre dos cosas: está diciendo «sigue».
+ *
+ * La lista vive aquí y no dentro del componente porque el reproductor necesita
+ * la **misma** para dos cosas: dibujarla y saber qué hacer cuando se pulsa OK.
+ * Con la lista en dos sitios, mover un botón cambiaba lo que hacía otro.
  */
 export function opcionesSiguiente(sig: EstadoSiguiente): OpcionSig[] {
   const d = sig.decision;
-  if (d.tipo === 'nada') return [];
-  const fuera: OpcionSig[] = [];
-  if (d.tipo === 'ver') {
-    fuera.push({ clave: 'ver', texto: 'Ver ahora', principal: true, onSelect: sig.ver });
-    if (d.bajar.length) {
-      fuera.push({ clave: 'bajar', texto: `Descargar ${listar(d.bajar)}`, onSelect: sig.descargar });
-    }
-    fuera.push({ clave: 'cerrar', texto: 'Salir', onSelect: sig.descartar });
-  } else {
-    fuera.push({
-      clave: 'bajar', principal: true,
-      texto: `Descargar ${d.bajar.length > 1 ? 'los dos siguientes' : 'el siguiente'}`,
-      onSelect: sig.descargar,
-    });
-    fuera.push({ clave: 'cerrar', texto: 'Ahora no', onSelect: sig.descartar });
-  }
-  return fuera;
+  if (d.tipo === 'nada' || (d.tipo === 'bajar' && !d.bajar.length)) return [];
+  return [
+    { clave: 'hacer', texto: sig.texto, principal: true, onSelect: sig.confirmar },
+    { clave: 'cerrar', texto: d.tipo === 'ver' ? 'No' : 'Ahora no', onSelect: sig.descartar },
+  ];
 }
 
 interface Props {
@@ -68,14 +60,26 @@ interface Props {
  */
 export default function SiguienteEp({ sig, cursor, enfocada, opciones }: Props) {
   const d = sig.decision;
-  if (d.tipo === 'nada') return null;
+
+  // Cuando ya no queda nada que ofrecer pero sí algo que contar («Descargando
+  // 3x09 y 3x10»), queda solo el mensaje. Los dos casos van por separado y no
+  // en un `if` combinado para que TypeScript pueda descartar el 'nada' de ahí
+  // en adelante.
+  const soloMensaje = (
+    <div className="absolute right-[96px] bottom-[300px] w-[760px] rounded-2xl bg-[#1A1A1A]/95 border border-white/15 px-10 py-7">
+      <p className="text-lead text-tv-ok">{sig.mensaje}</p>
+    </div>
+  );
+  if (d.tipo === 'nada') return sig.mensaje ? soloMensaje : null;
+  if (!opciones.length) return soloMensaje;
 
   const pct = Math.round(sig.progreso * 100);
 
   return (
     <div className="absolute right-[96px] bottom-[300px] w-[760px] rounded-2xl bg-[#1A1A1A]/95 border border-white/15 overflow-hidden">
       {/* La barra de la cuenta atrás, al ancho completo y arriba: es la señal
-          que se entiende desde el sofá sin leer nada. */}
+          que se entiende desde el sofá sin leer nada, y es este mismo botón
+          pulsándose solo. */}
       {d.tipo === 'ver' && (
         <div className="h-[8px] w-full bg-white/20">
           <div className="h-full bg-tv-red"
@@ -110,16 +114,16 @@ export default function SiguienteEp({ sig, cursor, enfocada, opciones }: Props) 
             <button key={op.clave}
               onMouseEnter={PUNTERO ? sig.parar : undefined}
               onClick={PUNTERO ? op.onSelect : undefined}
-              disabled={op.clave === 'bajar' && sig.bajando}
+              disabled={op.clave === 'hacer' && sig.bajando}
               className={`inline-flex items-center justify-center space-x-3 rounded-lg px-8 h-[64px]
                 text-body font-semibold whitespace-nowrap
                 ${enfocada && i === cursor ? 'bg-white text-black'
                                : op.principal ? 'bg-tv-red text-white' : 'bg-white/15 text-white'}
                 ${PUNTERO ? ' cursor-pointer' : ''}`}>
-              {op.clave === 'ver' && <span className="w-7 h-7"><IconPlay /></span>}
+              {op.clave === 'hacer' && d.tipo === 'ver' && <span className="w-7 h-7"><IconPlay /></span>}
               <span>
-                {op.clave === 'bajar' && sig.bajando ? 'Pidiendo…'
-                  : op.clave === 'ver' && sig.corriendo ? `${op.texto} · ${sig.restante}`
+                {op.clave === 'hacer' && sig.bajando && d.tipo === 'bajar' ? 'Pidiendo…'
+                  : op.clave === 'hacer' && sig.corriendo ? `${op.texto} · ${sig.restante}`
                   : op.texto}
               </span>
             </button>
