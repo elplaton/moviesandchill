@@ -74,6 +74,11 @@ def load_config(force_reload: bool = False) -> dict:
         # el estandar de Web Push para que el servicio de push sepa a quien
         # escribir si algo va mal. No se muestra en ningun sitio.
         "push_contact": os.getenv("TMD_PUSH_CONTACT", ""),
+        # La direccion por la que se entra desde el movil (con https y sin
+        # barra final). Es a donde lleva el QR con el que se entra en la tele:
+        # la tele usa la IP de casa, pero la sesion del movil esta en el
+        # dominio. Vacio = la direccion por la que llegue la peticion.
+        "public_url": os.getenv("TMD_PUBLIC_URL", ""),
     }
 
     log_level = os.getenv("LOG_LEVEL")

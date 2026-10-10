@@ -98,6 +98,13 @@ export default function Profile() {
           </ul>
         )}
       </section>
+      <Link to="/vincular" className="flex items-center rounded-2xl bg-white/5 p-4 mb-4 active:bg-white/10">
+        <span className="flex-1">
+          <span className="block text-[15px] font-semibold">Vincular una tele</span>
+          <span className="block text-[13px] text-nf-text2 mt-0.5">Entra en la tele sin teclear: escribe el código que sale en su pantalla.</span>
+        </span>
+        <span className="text-nf-text3 text-[22px] ml-3">›</span>
+      </Link>
       <section className="rounded-2xl bg-white/5 p-4 mb-4">
         <p className="text-[13px] font-semibold text-nf-text2 mb-3">Cambiar contraseña</p>
         <div className="space-y-2">

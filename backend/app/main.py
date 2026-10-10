@@ -208,8 +208,10 @@ async def shutdown():
 
 
 from app.auth.router import router as auth_router
+from app.routers.vincular_router import router as vincular_router
 
 app.include_router(auth_router)
+app.include_router(vincular_router)
 
 from app.routers.search_router import router as search_router
 from app.routers.download_router import router as download_router

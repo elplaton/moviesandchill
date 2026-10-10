@@ -46,6 +46,9 @@ services:
       TMD_CHANNELS: ${TMD_CHANNELS:-[]}
       # --- Resto ---
       TMD_CORS_ORIGINS: ${TMD_CORS_ORIGINS:-*}
+      # A donde lleva el QR con el que se entra en la tele: la direccion en la
+      # que el movil tiene la sesion, que es el dominio y no la IP de casa.
+      TMD_PUBLIC_URL: ${TMD_PUBLIC_URL:-https://moviesandchill.juanitoshomelab.com}
       TMD_TMBD_API_KEY: ${TMD_TMBD_API_KEY:-}
       TMD_TMDB_ENABLED: ${TMD_TMDB_ENABLED:-false}
       TMD_RESCAN_HOURS: ${TMD_RESCAN_HOURS:-6}

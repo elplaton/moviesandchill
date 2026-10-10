@@ -1,10 +1,12 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 
 export default function Login() {
   const { login } = useAuth();
   const navigate = useNavigate();
+  // A donde se iba antes de pedir la sesion (p. ej. el QR de una tele).
+  const despues = (useLocation().state as { despues?: string } | null)?.despues || '/';
   // El nombre no se recuerda en el aparato: era el de quien entró la última
   // vez, que en un teléfono compartido es otra persona.
   const [u, setU] = useState('');
@@ -15,7 +17,7 @@ export default function Login() {
     e.preventDefault(); setErr(''); setBusy(true);
     const r = await login(u.trim(), p); setBusy(false);
     if (r) { setErr(r); return; }
-    navigate('/', { replace: true });
+    navigate(despues, { replace: true });
   };
   const input = 'w-full h-12 rounded-xl bg-white/10 border border-white/10 px-4 text-[16px] outline-none focus:border-white/40';
   return (
