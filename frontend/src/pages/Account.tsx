@@ -98,8 +98,9 @@ export default function Account() {
               </button>
               {avisos?.suscrito && (
                 <button onClick={async () => {
-                  const n = await probarAvisos();
-                  setAvisoMsg(n ? 'Aviso de prueba enviado.' : 'No se ha podido enviar el aviso.');
+                  const r = await probarAvisos('web');
+                  setAvisoMsg(r.enviados ? 'Aviso de prueba enviado.'
+                    : `No se ha podido enviar el aviso${r.error ? `: ${r.error}` : '.'}`);
                 }}
                   className="text-nf-dim hover:text-white px-3 py-2.5 text-sm transition-all">
                   Enviar uno de prueba

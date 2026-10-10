@@ -3,6 +3,7 @@ import { apiFetch, setTokens, clearTokens, getAccessToken } from '../services/ap
 import { olvidarCache } from '../utils/progress';
 import { olvidarEstado } from '../services/estado';
 import { connectProgressWs, disconnectProgressWs } from '../services/ws';
+import { reafirmarAvisos } from '../services/push';
 
 interface AuthContextType {
   isAuthenticated: boolean;
@@ -82,6 +83,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setIsLoading(false);
     }
   }, []);
+
+  // Este navegador, a nombre de la cuenta que acaba de entrar (ver reafirmarAvisos).
+  useEffect(() => { if (username) reafirmarAvisos('web'); }, [username]);
 
   const login = async (user: string, password: string, remember = true): Promise<string | null> => {
     try {

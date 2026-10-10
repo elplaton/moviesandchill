@@ -74,6 +74,33 @@ async function suscripcionActual(): Promise<PushSubscription | null> {
   }
 }
 
+/** Manda al servidor la suscripción que ya tiene el navegador. */
+async function registrar(sub: PushSubscription, origen: Origen): Promise<boolean> {
+  const datos = sub.toJSON() as { endpoint?: string; keys?: { p256dh: string; auth: string } };
+  if (!datos.endpoint || !datos.keys) return false;
+  const res = await apiFetch('/push/subscribe', {
+    method: 'POST',
+    body: JSON.stringify({ endpoint: datos.endpoint, keys: datos.keys, app: origen }),
+  });
+  return res.ok;
+}
+
+/**
+ * Vuelve a dar de alta en el servidor la suscripción que ya tiene el aparato.
+ *
+ * «Activado» lo dice el navegador, no el servidor, y los dos pueden no estar
+ * de acuerdo: el servidor borra la suscripción si el servicio de push la
+ * rechaza varias veces, y la fila es de la cuenta que la creó (en un teléfono
+ * donde se entra con otra, los avisos se iban a la primera). El interruptor
+ * seguía encendido y no llegaba nada. El alta es idempotente, así que basta
+ * con repetirla al entrar.
+ */
+export async function reafirmarAvisos(origen: Origen): Promise<void> {
+  if (porQueNo() || Notification.permission !== 'granted') return;
+  const sub = await suscripcionActual();
+  if (sub) await registrar(sub, origen).catch(() => false);
+}
+
 export async function estadoAvisos(): Promise<EstadoAvisos> {
   const motivo = porQueNo();
   if (motivo) {
@@ -123,13 +150,8 @@ export async function activarAvisos(origen: Origen): Promise<string | null> {
       userVisibleOnly: true,
       applicationServerKey: aBytes(clave),
     });
-    const datos = sub.toJSON() as { endpoint?: string; keys?: { p256dh: string; auth: string } };
-    if (!datos.endpoint || !datos.keys) return 'El navegador no ha dado una suscripción válida.';
-    const res = await apiFetch('/push/subscribe', {
-      method: 'POST',
-      body: JSON.stringify({ endpoint: datos.endpoint, keys: datos.keys, app: origen }),
-    });
-    if (!res.ok) return 'El servidor no ha aceptado la suscripción.';
+    if (!sub.toJSON().keys) return 'El navegador no ha dado una suscripción válida.';
+    if (!(await registrar(sub, origen))) return 'El servidor no ha aceptado la suscripción.';
     return null;
   } catch (e) {
     return `No se ha podido suscribir: ${(e as Error).message || 'error del navegador'}`;
@@ -147,12 +169,16 @@ export async function desactivarAvisos(): Promise<void> {
   }).catch(() => {});
 }
 
-/** Un aviso de prueba, que lo manda el servidor. */
-export async function probarAvisos(): Promise<number> {
+/** Un aviso de prueba, que lo manda el servidor. Si no llega, `error` dice
+ *  por qué (lo que contestó Apple o Google, o que no hay aparato dado de alta). */
+export async function probarAvisos(origen: Origen): Promise<{ enviados: number; error?: string }> {
   try {
+    // Primero se asegura el alta: si el servidor había olvidado este aparato,
+    // la prueba diría «no se ha podido» sin que nada estuviera roto aquí.
+    await reafirmarAvisos(origen);
     const d = await (await apiFetch('/push/test', { method: 'POST' })).json();
-    return d.sent || 0;
+    return { enviados: d.sent || 0, error: d.error || undefined };
   } catch {
-    return 0;
+    return { enviados: 0, error: 'No se ha podido hablar con el servidor.' };
   }
 }

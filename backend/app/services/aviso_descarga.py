@@ -64,10 +64,10 @@ async def avisar(owner_id: int | None, *, titulo: str, tmdb_id: int | None = Non
     if not owner_id:
         return 0
     try:
-        from app.services.push import enviar
+        from app.services.push import enviar_con_motivo
 
         cabecera, cuerpo = texto(titulo, season, episode, tamano)
-        return await enviar(owner_id, {
+        llegados, motivo = await enviar_con_motivo(owner_id, {
             "title": cabecera,
             "body": cuerpo,
             "tmdb_id": tmdb_id,
@@ -78,6 +78,13 @@ async def avisar(owner_id: int | None, *, titulo: str, tmdb_id: int | None = Non
             "tag": f"descarga-{batch_id}" if batch_id else "descarga",
             "reason": "descarga",
         })
+        # Que quede escrito tanto si llega como si no: «no me avisa» es una
+        # queja que solo se puede responder mirando aqui.
+        if llegados:
+            logger.info("Aviso de descarga enviado | %s | %d aparato(s)", cabecera, llegados)
+        else:
+            logger.info("Aviso de descarga sin enviar | %s | cuenta %s | %s", cabecera, owner_id, motivo)
+        return llegados
     except Exception as e:
         logger.warning("No se pudo avisar de la descarga terminada (%s): %s", titulo, e)
         return 0

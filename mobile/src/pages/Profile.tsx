@@ -73,8 +73,10 @@ export default function Profile() {
             </button>
             {avisos?.suscrito && (
               <button onClick={async () => {
-                const n = await probarAvisos();
-                toast(n ? 'Aviso de prueba enviado' : 'No se ha podido enviar el aviso', n ? 'ok' : 'error');
+                const r = await probarAvisos('m');
+                toast(r.enviados ? 'Aviso de prueba enviado'
+                  : `No se ha podido enviar el aviso${r.error ? `: ${r.error}` : ''}`,
+                  r.enviados ? 'ok' : 'error', r.enviados ? undefined : 8000);
               }} className="mt-2 w-full h-11 rounded-xl bg-white/5 text-[14px] text-nf-text2">
                 Enviar uno de prueba
               </button>

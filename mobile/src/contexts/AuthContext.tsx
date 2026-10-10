@@ -3,6 +3,7 @@ import { apiFetch, setTokens, clearTokens, getAccessToken } from '../services/ap
 import { olvidarCache } from '../utils/progress';
 import { olvidarEstado } from '../services/estado';
 import { connectProgressWs, disconnectProgressWs } from '../services/ws';
+import { reafirmarAvisos } from '../services/push';
 
 export interface Me { id: number; username: string; role: 'admin' | 'user'; quota_bytes: number | null; used_bytes: number }
 
@@ -50,6 +51,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!getAccessToken()) { setLoading(false); return; }
     refresh().then(() => { connectProgressWs(); return refreshPrefs(); }).finally(() => setLoading(false));
   }, []);
+
+  // Este teléfono, a nombre de la cuenta que acaba de entrar (ver reafirmarAvisos).
+  useEffect(() => { if (me?.id) reafirmarAvisos('m'); }, [me?.id]);
 
   const login = async (u: string, p: string) => {
     try {

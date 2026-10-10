@@ -84,13 +84,43 @@ async def clave_publica() -> str:
 
 
 def _contacto() -> str:
+    """El `sub` de la firma VAPID: a quien escribir si los avisos dan guerra.
+
+    **Apple lo valida** y rechaza el aviso entero (403 `BadJwtToken`) si no le
+    parece una direccion de verdad. El valor de reserva era
+    `mailto:admin@moviesandchill.local`, y con el los avisos funcionaban en
+    Chrome y no llegaban **nunca** al iPhone. Sin `TMD_PUSH_CONTACT` se usa la
+    direccion publica (`TMD_PUBLIC_URL`), que es una URL https real y Apple la
+    acepta igual que un correo.
+    """
     from app.config import load_config
-    valor = load_config().get("push_contact") or "admin@moviesandchill.local"
-    return valor if valor.startswith("mailto:") else f"mailto:{valor}"
+    config = load_config()
+    valor = (config.get("push_contact") or "").strip()
+    if valor:
+        return valor if valor.startswith(("mailto:", "https:")) else f"mailto:{valor}"
+    publica = (config.get("public_url") or "").strip().rstrip("/")
+    if publica.startswith("https://"):
+        return publica
+    return "mailto:admin@moviesandchill.local"
 
 
-def _enviar_uno(sub: dict, cuerpo: str, privada: str, contacto: str) -> int:
-    """Un envio, en un hilo. Devuelve el codigo HTTP (o 0 si ni se intento)."""
+def _motivo(e) -> str:
+    """Lo que dice el servicio de push al rechazar, que es lo unico que explica
+    el fallo: Apple contesta `{"reason": "BadJwtToken"}` y sin leerlo un 403 no
+    dice nada."""
+    res = getattr(e, "response", None)
+    texto = ""
+    try:
+        texto = (res.text or "").strip() if res is not None else ""
+        texto = json.loads(texto).get("reason") or texto
+    except Exception:
+        pass
+    return (texto or str(e))[:160]
+
+
+def _enviar_uno(sub: dict, cuerpo: str, privada: str, contacto: str) -> tuple[int, str]:
+    """Un envio, en un hilo. Devuelve el codigo HTTP (0 si ni se intento) y,
+    si no ha ido bien, el motivo."""
     from pywebpush import WebPushException, webpush
 
     info = {"endpoint": sub["endpoint"],
@@ -102,22 +132,41 @@ def _enviar_uno(sub: dict, cuerpo: str, privada: str, contacto: str) -> int:
                       # pasa, y reutilizarlo firmaria el segundo aviso con el
                       # destinatario del primero.
                       vapid_claims={"sub": contacto}, ttl=TTL, timeout=10)
-        return getattr(res, "status_code", 201)
+        return getattr(res, "status_code", 201), ""
     except WebPushException as e:
         codigo = getattr(e.response, "status_code", 0)
+        motivo = _motivo(e)
         if codigo not in (404, 410):
-            logger.warning("Aviso rechazado (%s): %s", codigo or "sin respuesta", str(e)[:160])
-        return codigo
+            logger.warning("Aviso rechazado por %s (%s): %s", _servicio(sub["endpoint"]),
+                           codigo or "sin respuesta", motivo)
+        return codigo, motivo
     except Exception as e:
-        logger.warning("Aviso fallido: %s", str(e)[:160])
-        return 0
+        logger.warning("Aviso fallido (%s): %s", _servicio(sub["endpoint"]), str(e)[:160])
+        return 0, str(e)[:160]
+
+
+def _servicio(endpoint: str) -> str:
+    """'web.push.apple.com', 'fcm.googleapis.com'...: en un registro, de quien
+    es el aparato dice mas que el endpoint entero."""
+    from urllib.parse import urlparse
+    return urlparse(endpoint).hostname or "?"
 
 
 async def enviar(user_id: int, payload: dict) -> int:
-    """Manda un aviso a todos los aparatos de una cuenta.
+    """Manda un aviso a todos los aparatos de una cuenta. Devuelve a cuantos llego."""
+    llegados, _ = await enviar_con_motivo(user_id, payload)
+    return llegados
 
-    Devuelve a cuantos llego. Las suscripciones que el servicio de push da por
-    muertas (404/410) se borran aqui: son aparatos donde se desinstalo la app.
+
+async def enviar_con_motivo(user_id: int, payload: dict) -> tuple[int, str]:
+    """Como `enviar()`, pero diciendo por que no ha llegado si no ha llegado.
+
+    Las suscripciones que el servicio de push da por muertas (404/410) se
+    borran aqui: son aparatos donde se desinstalo la app. Un 401/403, en
+    cambio, **no es culpa del aparato** sino de nuestra firma, y no cuenta
+    como fallo: antes sumaba, a los cinco avisos rechazados se borraba la
+    suscripcion y el telefono seguia diciendo «Avisos activados» sin que el
+    servidor supiera ya de el.
     """
     global _avisado_sin_libreria
     from app.database.push import (drop_subscription_by_id, mark_subscription_fail,
@@ -125,7 +174,7 @@ async def enviar(user_id: int, payload: dict) -> int:
 
     subs = await subscriptions_for(user_id)
     if not subs:
-        return 0
+        return 0, "El servidor no tiene ningún aparato tuyo dado de alta."
 
     try:
         import pywebpush  # noqa: F401
@@ -133,31 +182,39 @@ async def enviar(user_id: int, payload: dict) -> int:
         if not _avisado_sin_libreria:
             logger.error("Los avisos necesitan pywebpush (pip install -r requirements.txt)")
             _avisado_sin_libreria = True
-        return 0
+        return 0, "Al servidor le falta pywebpush."
 
     try:
         _, privada = await claves()
     except Exception as e:
         logger.error("Sin claves de aviso: %s", e)
-        return 0
+        return 0, "El servidor no tiene claves de aviso."
 
     cuerpo = json.dumps(payload, ensure_ascii=False)
     contacto = _contacto()
-    codigos = await asyncio.gather(
+    resultados = await asyncio.gather(
         *[asyncio.to_thread(_enviar_uno, s, cuerpo, privada, contacto) for s in subs],
         return_exceptions=True)
 
-    llegados = 0
-    for sub, codigo in zip(subs, codigos):
-        if isinstance(codigo, Exception):
+    llegados, motivos = 0, []
+    for sub, resultado in zip(subs, resultados):
+        if isinstance(resultado, Exception):
             await mark_subscription_fail(sub["id"])
+            motivos.append(str(resultado)[:160])
             continue
+        codigo, motivo = resultado
         if codigo in (404, 410):
             await drop_subscription_by_id(sub["id"])
             logger.info("Suscripcion de aviso caducada, borrada (%s)", sub["app"])
+            motivos.append("La suscripción había caducado: vuelve a activar los avisos.")
         elif 200 <= codigo < 300:
             await mark_subscription_ok(sub["id"])
             llegados += 1
+        elif codigo in (401, 403):
+            logger.error("%s rechaza la firma de los avisos (%s, contacto %s): %s",
+                         _servicio(sub["endpoint"]), codigo, contacto, motivo)
+            motivos.append(f"{_servicio(sub['endpoint'])} rechaza el aviso: {motivo}")
         else:
             await mark_subscription_fail(sub["id"])
-    return llegados
+            motivos.append(f"{_servicio(sub['endpoint'])} ({codigo or 'sin respuesta'}): {motivo}")
+    return llegados, "" if llegados else "; ".join(dict.fromkeys(motivos))

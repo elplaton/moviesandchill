@@ -82,14 +82,16 @@ async def post_test(user: Annotated[str, Depends(get_current_user)]):
     """Un aviso de prueba. Existe porque el camino tiene seis piezas (permiso,
     service worker, suscripcion, claves, cifrado, servicio de push) y sin esto
     la unica forma de saber si funciona es esperar a que estrene una serie."""
-    from app.services.push import enviar
+    from app.services.push import enviar_con_motivo
 
     uid = await _user_id(user)
     if uid is None:
         return {"error": "Usuario no encontrado"}
-    llegados = await enviar(uid, {
+    llegados, motivo = await enviar_con_motivo(uid, {
         "title": "Movies & Chill",
         "body": "Los avisos funcionan. Te diremos cuándo llegue un episodio nuevo.",
         "tag": "prueba",
     })
-    return {"sent": llegados}
+    # El motivo viaja hasta el telefono: «no se ha podido enviar» a secas no
+    # deja arreglar nada, y quien pulsa el boton no va a leer los registros.
+    return {"sent": llegados, "error": motivo or None}
