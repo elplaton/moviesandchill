@@ -67,20 +67,28 @@ public class MainActivity extends Activity {
      * ya esta la ultima version. Solo hay que volver a instalar el APK si
      * cambia esta parte nativa, que casi nunca cambia.
      *
-     * Si el servidor no contesta en un segundo y medio se carga la copia que
-     * viene dentro del APK: puede estar vieja, pero una interfaz vieja que
-     * funciona es mejor que una pantalla en negro.
+     * Si no contesta ninguno se carga la copia que viene dentro del APK: puede
+     * estar vieja, pero una interfaz vieja que funciona es mejor que una
+     * pantalla en negro.
      *
      * De paso se arregla algo que venia de regalo: cargada del servidor, la
      * interfaz y la API comparten origen, asi que las llamadas dejan de ser
      * cross-origin y de depender de que TMD_CORS_ORIGINS sea "*".
      *
-     * La direccion tiene que coincidir con la de tizen/.env.firetv (es el
-     * mismo servidor). Si cambia la IP de casa, se cambia en los dos sitios.
+     * Se prueban dos direcciones por orden: la IP de casa (las peliculas no
+     * salen a internet para volver a entrar) y, si no contesta, el dominio
+     * publico. El DHCP de casa ya ha movido la IP del servidor alguna vez, y
+     * sin el respaldo la app se quedaba sin servidor hasta reinstalar el APK.
+     *
+     * Las direcciones tienen que coincidir con las de tizen/.env.firetv (es el
+     * mismo servidor). Si cambian, se cambian en los dos sitios.
      */
-    private static final String SERVIDOR = "http://192.168.1.44";
-    private static final String URL_SERVIDOR = SERVIDOR + "/tv/";
-    private static final int ESPERA_SERVIDOR_MS = 1500;
+    private static final String[] SERVIDORES = {
+            "http://192.168.1.44",
+            "https://moviesandchill.juanitoshomelab.com",
+    };
+    /** La IP de casa tiene segundo y medio; el dominio va por internet, tres. */
+    private static final int[] ESPERA_SERVIDOR_MS = { 1500, 3000 };
 
     private WebView web;
 
@@ -145,13 +153,18 @@ public class MainActivity extends Activity {
     private void cargarInterfaz() {
         new Thread(new Runnable() {
             @Override public void run() {
-                final boolean hayServidor = servidorDisponible();
+                String encontrado = null;
+                for (int i = 0; i < SERVIDORES.length && encontrado == null; i++) {
+                    String url = SERVIDORES[i] + "/tv/";
+                    if (sirveLaInterfaz(url, ESPERA_SERVIDOR_MS[i])) encontrado = url;
+                }
+                final String urlServidor = encontrado;
                 runOnUiThread(new Runnable() {
                     @Override public void run() {
                         if (web == null) return;   // la app se cerro mientras se comprobaba
-                        if (hayServidor) {
-                            Log.i(TAG, "interfaz desde el servidor: " + URL_SERVIDOR);
-                            web.loadUrl(URL_SERVIDOR);
+                        if (urlServidor != null) {
+                            Log.i(TAG, "interfaz desde el servidor: " + urlServidor);
+                            web.loadUrl(urlServidor);
                         } else {
                             Log.i(TAG, "servidor no disponible, interfaz del APK");
                             web.loadUrl(URL_EMPAQUETADA);
@@ -164,13 +177,13 @@ public class MainActivity extends Activity {
 
     /** Un GET corto a /tv/index.html. No vale con que algo conteste 200: un
      *  portal cautivo tambien lo hace, asi que se busca la marca de la app. */
-    private boolean servidorDisponible() {
+    private boolean sirveLaInterfaz(String urlServidor, int esperaMs) {
         HttpURLConnection conexion = null;
         try {
-            URL url = new URL(URL_SERVIDOR + "index.html?v=" + System.currentTimeMillis());
+            URL url = new URL(urlServidor + "index.html?v=" + System.currentTimeMillis());
             conexion = (HttpURLConnection) url.openConnection();
-            conexion.setConnectTimeout(ESPERA_SERVIDOR_MS);
-            conexion.setReadTimeout(ESPERA_SERVIDOR_MS);
+            conexion.setConnectTimeout(esperaMs);
+            conexion.setReadTimeout(esperaMs);
             conexion.setRequestProperty("Cache-Control", "no-cache");
             if (conexion.getResponseCode() != 200) return false;
             byte[] trozo = new byte[2048];
@@ -179,7 +192,7 @@ public class MainActivity extends Activity {
             entrada.close();
             return leidos > 0 && new String(trozo, 0, leidos, "utf-8").contains("<div id=\"app\"");
         } catch (Exception e) {
-            Log.i(TAG, "servidor no alcanzable (" + e.getClass().getSimpleName() + ")");
+            Log.i(TAG, urlServidor + " no alcanzable (" + e.getClass().getSimpleName() + ")");
             return false;
         } finally {
             if (conexion != null) conexion.disconnect();

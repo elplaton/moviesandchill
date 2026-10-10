@@ -3,7 +3,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { FocusScope } from '../focus/react';
 import { exitApp } from '../focus/keys';
 import { puedeCerrarse } from '../tv/platform';
-import { apiFetch, getApiBase } from '../services/api';
+import { apiFetch, getApiOrigin } from '../services/api';
 import { useDownloadsCtx } from '../contexts/DownloadsContext';
 import Screen from '../components/Screen';
 import TvButton from '../components/TvButton';
@@ -26,7 +26,7 @@ export default function Settings() {
 
   const rows: [string, string][] = [
     ['Usuario', `${username || ''}${isAdmin ? ' · administrador' : ''}`],
-    ['Servidor', getApiBase().replace(/\/api$/, '') || 'este equipo'],
+    ['Servidor', (getApiOrigin() || window.location.origin).replace(/^https?:\/\//, '')],
     ['Espacio libre en el servidor', disk || '—'],
     ['Archivos en la biblioteca', String(total)],
     ['Descargas activas', String(batches.filter((b) => b.status === 'downloading').length)],

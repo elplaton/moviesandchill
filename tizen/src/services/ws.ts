@@ -1,4 +1,4 @@
-import { getAccessToken } from './api';
+import { getAccessToken, getApiOrigin } from './api';
 
 let ws: WebSocket | null = null;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -8,7 +8,7 @@ const handlers: Set<MessageHandler> = new Set();
 function wsUrl(): string {
   // En el .wgt window.location.origin vale "file://" o "null", asi que el
   // respaldo solo sirve cuando se ejecuta servido por HTTP en desarrollo.
-  const origin = import.meta.env.VITE_API_BASE || window.location.origin;
+  const origin = getApiOrigin() || window.location.origin;
   const protocol = origin.startsWith('https') ? 'wss' : 'ws';
   const host = origin.replace(/^https?:\/\//, '');
   return `${protocol}://${host}/api/ws/progress`;

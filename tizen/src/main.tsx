@@ -8,6 +8,7 @@ import { AuthProvider } from './contexts/AuthContext';
 import { FocusRoot } from './focus/react';
 import { startRemoteConsole } from './debug/remote';
 import { plataforma, soloPuntero, tienePuntero } from './tv/platform';
+import { usarServidor } from './services/api';
 import './index.css';
 
 // Solo Tizen (mando sin puntero) oculta el cursor. En LG el Magic Remote es
@@ -71,31 +72,39 @@ if (import.meta.env.VITE_DEBUG_HOST) startRemoteConsole();
  * abrir la tele ya esta la ultima version. Solo hay que reinstalar el paquete
  * si cambia la parte nativa.
  *
- * Tres detalles que lo hacen seguro:
+ * **Se prueban dos direcciones, por orden.** Primero `VITE_API_BASE`, la IP de
+ * casa: una pelicula son varios GB y no tiene sentido sacarlos a internet para
+ * volver a meterlos en la misma casa. Si no contesta, `VITE_API_BASE_RESPALDO`,
+ * el dominio publico. Hace falta porque el DHCP de casa **mueve la IP del
+ * servidor** (ya ha pasado), y entonces todas las teles se quedaban sin
+ * servidor hasta recompilar el paquete con la direccion nueva.
  *
- * - **La direccion sale de `VITE_API_BASE`**, que es la del servidor y ya va
- *   dentro de cada paquete. La version servida se compila sin ella (ver
- *   `.env.tv`), asi que no se reenvia a si misma y no hay bucle. La
- *   comparacion con la URL actual es el cinturon de seguridad por si alguien
- *   compila `/tv/` con la direccion puesta.
- * - **Si el servidor no contesta en un segundo y medio, se sigue con la copia
- *   del paquete.** Puede estar vieja, pero una interfaz vieja que funciona es
- *   mejor que una pantalla en negro; y en una LAN un segundo y medio es
- *   eternidad.
+ * Detalles que lo hacen seguro:
+ *
+ * - La version servida se compila **sin direcciones** (ver `.env.tv`), asi que
+ *   no se reenvia a si misma y no hay bucle. La comparacion con la URL actual
+ *   es el cinturon de seguridad por si alguien compila `/tv/` con ellas.
+ * - **Si no contesta ninguna, se sigue con la copia del paquete**: puede estar
+ *   vieja, pero una interfaz vieja que funciona es mejor que una pantalla en
+ *   negro. La IP tiene un segundo y medio (en una LAN es una eternidad) y el
+ *   dominio tres, porque va por internet.
+ * - No basta con un 200: se busca la marca `<div id="app"`, porque un portal
+ *   cautivo tambien contesta 200.
  * - **No se monta React antes de decidir.** Arrancar la app para tirarla a
  *   continuacion se veria como un parpadeo, y en una tele lenta como un
  *   arranque doble.
  *
- * Ojo: al pasar de la copia empaquetada a la servida cambia el origen, y la
- * sesion se guarda por origen. Hay que entrar una vez mas, solo la primera.
+ * Ojo: la sesion se guarda por origen, y la IP y el dominio son dos origenes.
+ * Si un dia la tele entra por el otro, habra que volver a iniciar sesion (con
+ * el QR es un momento).
  */
-function urlDelServidor(): string | null {
-  const base = (import.meta.env.VITE_API_BASE || '').replace(/\/+$/, '');
-  if (!base) return null;
-  const destino = `${base}/tv/`;
-  // Ya estamos ahi: no hay nada que hacer (y desde luego no recargar).
-  if (window.location.href.indexOf(destino) === 0) return null;
-  return destino;
+function servidores(): string[] {
+  const lista: string[] = [];
+  for (const d of [import.meta.env.VITE_API_BASE, import.meta.env.VITE_API_BASE_RESPALDO]) {
+    const base = (d || '').replace(/\/+$/, '');
+    if (base && lista.indexOf(base) < 0) lista.push(base);
+  }
+  return lista;
 }
 
 function montar() {
@@ -110,39 +119,53 @@ function montar() {
   );
 }
 
-function arrancar() {
-  const destino = urlDelServidor();
-  if (!destino) { montar(); return; }
-
+/** Si `destino` sirve la interfaz. Siempre llama a `fin` una sola vez. */
+function sirveLaInterfaz(destino: string, espera: number, fin: (si: boolean) => void) {
   let decidido = false;
-  const seguirAqui = () => { if (!decidido) { decidido = true; montar(); } };
-  const reloj = setTimeout(seguirAqui, 1500);
+  const decidir = (si: boolean) => { if (!decidido) { decidido = true; clearTimeout(reloj); fin(si); } };
+  const reloj = setTimeout(() => decidir(false), espera);
 
   // XMLHttpRequest y no fetch: el WebView de webOS 5 va por Chromium 68 y
   // AbortController para cortar un fetch no esta en todos los suelos.
   const peticion = new XMLHttpRequest();
   peticion.open('GET', `${destino}index.html?v=${Date.now()}`, true);
-  peticion.timeout = 1500;
-  peticion.onload = () => {
-    clearTimeout(reloj);
-    if (decidido) return;
-    decidido = true;
-    // 200 y algo que parezca la app: un portal cautivo o el 404 de otro
-    // servidor devuelven 200 con cualquier cosa.
-    if (peticion.status === 200 && peticion.responseText.indexOf('<div id="app"') >= 0) {
-      window.location.replace(destino);
-      return;
-    }
-    montar();
-  };
-  peticion.onerror = () => { clearTimeout(reloj); seguirAqui(); };
-  peticion.ontimeout = () => { clearTimeout(reloj); seguirAqui(); };
+  peticion.timeout = espera;
+  // 200 y algo que parezca la app: un portal cautivo o el 404 de otro
+  // servidor devuelven 200 con cualquier cosa.
+  peticion.onload = () => decidir(peticion.status === 200 && peticion.responseText.indexOf('<div id="app"') >= 0);
+  peticion.onerror = () => decidir(false);
+  peticion.ontimeout = () => decidir(false);
   try {
     peticion.send();
   } catch {
-    clearTimeout(reloj);
-    seguirAqui();
+    decidir(false);
   }
+}
+
+function arrancar() {
+  const lista = servidores();
+  // Ya estamos en la interfaz servida: no hay nada que hacer (y desde luego
+  // no recargar).
+  if (!lista.length || lista.some(b => window.location.href.indexOf(`${b}/tv/`) === 0)) {
+    montar();
+    return;
+  }
+
+  const probar = (i: number) => {
+    if (i >= lista.length) {
+      // Nadie sirve la interfaz: la copia del paquete, hablando con la
+      // primera direccion, que es la de siempre.
+      usarServidor(lista[0]);
+      montar();
+      return;
+    }
+    const destino = `${lista[i]}/tv/`;
+    sirveLaInterfaz(destino, i === 0 ? 1500 : 3000, (si) => {
+      if (si) window.location.replace(destino);
+      else probar(i + 1);
+    });
+  };
+  probar(0);
 }
 
 // Sin StrictMode: en desarrollo monta y desmonta cada efecto dos veces, lo que

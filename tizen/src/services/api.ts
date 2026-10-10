@@ -9,8 +9,22 @@
  * eso esta bien); si hace falta que sobreviva, va al servidor, que es quien
  * sabe de quien es cada cosa.
  */
-const API_ORIGIN = import.meta.env.VITE_API_BASE || '';
-const API_BASE = API_ORIGIN ? `${API_ORIGIN}/api` : '/api';
+// La direccion del servidor la decide `main.tsx` al arrancar (`usarServidor`):
+// la copia empaquetada prueba primero la IP de casa y, si no contesta, el
+// dominio. Hasta entonces vale la primera, que es la de siempre.
+let API_ORIGIN = import.meta.env.VITE_API_BASE || '';
+let API_BASE = API_ORIGIN ? `${API_ORIGIN}/api` : '/api';
+
+/** Fija el servidor antes de montar la app. '' = el mismo origen. */
+export function usarServidor(origen: string) {
+  API_ORIGIN = origen.replace(/\/+$/, '');
+  API_BASE = API_ORIGIN ? `${API_ORIGIN}/api` : '/api';
+}
+
+/** El servidor sin `/api`; '' cuando la app se sirve desde el propio servidor. */
+export function getApiOrigin() {
+  return API_ORIGIN;
+}
 
 const ACCESS = 'access_token';
 const REFRESH = 'refresh_token';
