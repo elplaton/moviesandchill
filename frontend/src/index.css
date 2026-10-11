@@ -74,13 +74,19 @@ body {
 @media (hover: hover) {
   .card:hover { transform: scale(1.06); z-index: 30; }
   .card:hover .card-media { box-shadow: 0 18px 44px rgba(0,0,0,0.65); }
-  .card:hover .card-info { opacity: 1; transform: translateY(0); pointer-events: auto; }
+  .card:hover .card-info { opacity: 1; transform: translateY(0); }
+  .card:hover .card-info :is(button, a) { pointer-events: auto; }
   /* El aspa de "quitar de Continuar viendo" solo con el ratón encima: es una
      acción destructiva y no tiene por qué estar siempre a la vista. */
   .card:hover .card-quitar { opacity: 1; }
 }
 .card:focus-within { transform: scale(1.06); z-index: 30; }
-.card:focus-within .card-info { opacity: 1; transform: translateY(0); pointer-events: auto; }
+.card:focus-within .card-info { opacity: 1; transform: translateY(0); }
+/* La capa en si nunca recoge el clic, solo sus botones: lo demas cae en la
+   caratula de debajo. Recogiendolo entera, pulsar fuera de un boton no hacia
+   nada, y en el onboarding (donde la accion es un rotulo, no un boton) no se
+   podia seleccionar ninguna pelicula. */
+.card:focus-within .card-info :is(button, a) { pointer-events: auto; }
 
 /* Flechas del carril: solo aparecen si hay a dónde ir y el ratón está encima. */
 .rail-arrow { opacity: 0; transition: opacity 160ms ease-out; }

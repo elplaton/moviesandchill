@@ -221,6 +221,7 @@ export default function TitleDetail({ input, onClose }: Props) {
       });
       return;
     }
+    toast('Preparando la descarga…');
     download(v.messageId, v.channelId).then((err) => {
       if (err) toast(err, 'error', 5000);
       else toast(`Descargando ${v.baseName}${v.parts > 1 ? ` (${v.parts} partes)` : ''}`);

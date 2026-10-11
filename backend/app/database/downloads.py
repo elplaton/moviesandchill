@@ -203,7 +203,8 @@ async def reconciliar_interrumpidas(extract_path: str) -> int:
 
     1. Si el lote sigue guardado en `paused_batches.json`, la fila deberia
        decir `paused`: se corrige y no se toca el disco, que las partes ya
-       bajadas se pueden reanudar.
+       bajadas se pueden reanudar. (Y una fila `paused` **sin** lote guardado
+       va al punto 3: no hay con que reanudarla y le come cuota a su dueño.)
     2. Si la ruta ya no es la carpeta de trabajo y existe, la descarga llego a
        moverse a su sitio: se da por terminada con su tamaño real, en vez de
        tirar algo que esta completo.
@@ -228,18 +229,24 @@ async def reconciliar_interrumpidas(extract_path: str) -> int:
     arregladas = 0
     async with pool.acquire() as conn:
         filas = await conn.fetch("""
-            SELECT d.id, d.folder_path, d.folder_name, u.username AS owner
+            SELECT d.id, d.folder_path, d.folder_name, d.status, u.username AS owner
             FROM downloads d LEFT JOIN users u ON u.id = d.owner_id
-            WHERE d.status = 'downloading'
+            WHERE d.status IN ('downloading', 'paused')
         """)
         for fila in filas:
             ruta = fila["folder_path"] or ""
             quien = fila["owner"] or "sin dueño"
 
-            if ruta in pausados:
+            # Una pausa con su lote guardado esta bien como esta. Sin el no se
+            # puede reanudar (no sale en "Pausadas") y sin embargo cuenta en la
+            # cuota: va al ultimo caso, como una carpeta de trabajo huerfana.
+            pausa = fila["status"] == "paused"
+            if pausa and ruta in pausados:
+                continue
+            if not pausa and ruta in pausados:
                 await conn.execute("UPDATE downloads SET status='paused', updated_at=NOW() WHERE id=$1", fila["id"])
                 logger.info("Descarga interrumpida marcada como pausada: %s (%s)", fila["folder_name"], quien)
-            elif ruta and os.path.exists(ruta) and not os.path.basename(ruta).startswith(WORK_PREFIX):
+            elif not pausa and ruta and os.path.exists(ruta) and not os.path.basename(ruta).startswith(WORK_PREFIX):
                 await conn.execute("UPDATE downloads SET status='done', size_bytes=$2, updated_at=NOW() WHERE id=$1",
                                    fila["id"], dir_size(ruta))
                 logger.info("Descarga interrumpida que ya estaba en su sitio: %s (%s)", fila["folder_name"], quien)

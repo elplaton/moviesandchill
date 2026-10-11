@@ -156,7 +156,11 @@ export default function Downloads() {
           {paused.map((b: any) => (
             <div key={b.batch_id} className="flex items-center justify-between gap-3 px-4 py-2.5 border-b border-white/5">
               <div className="min-w-0"><p className="text-[15px] font-medium truncate">{cleanTitle(b.folder_name)}</p><p className="text-[12px] text-nf-text3">{b.total_parts} partes · {b.total_size_str}</p></div>
-              <button onClick={() => { resume(b.batch_id); toast('Reanudando'); }} className="tap h-9 px-3 rounded-full bg-white text-black text-[13px] font-semibold shrink-0">Reanudar</button>
+              <div className="flex gap-2 shrink-0">
+                {/* Una pausa ocupa cuota: sin esto solo se podia soltar reanudandola. */}
+                <button onClick={() => { if (confirm(`¿Descartar "${cleanTitle(b.folder_name)}"? Se borra lo descargado.`)) { cancel(b.batch_id); toast('Descartada'); } }} className="tap h-9 px-3 rounded-full bg-nf-red/20 text-red-300 text-[13px]">Descartar</button>
+                <button onClick={() => { resume(b.batch_id); toast('Reanudando'); }} className="tap h-9 px-3 rounded-full bg-white text-black text-[13px] font-semibold">Reanudar</button>
+              </div>
             </div>
           ))}
         </Section>

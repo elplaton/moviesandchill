@@ -22,6 +22,8 @@ logger = logging.getLogger("tmd")
 router = APIRouter(prefix="/api", tags=["download"])
 
 _batch_tasks: dict[str, asyncio.Task] = {}
+# Lotes que `iniciar_descarga` esta preparando y aun no estan en active_batches.
+_preparando: set[str] = set()
 
 downloader = None
 config: dict = {}
@@ -60,16 +62,54 @@ async def iniciar_descarga(message_id: int, channel_id: int | None, account: dic
     por las mismas comprobaciones —cuota, duplicados, lo que ya esta en
     disco—, asi que son la misma funcion y no dos caminos parecidos.
     """
+    # Hasta que el lote entra en `active_batches` pasan segundos (preguntar a
+    # Telegram por el archivo): un segundo clic en ese hueco no veia nada y
+    # arrancaba otra descarga del mismo lote, que escribia encima de la
+    # primera. Se aparta el lote mientras se prepara.
+    clave = f"{channel_id or 0}_{message_id}"
+    if clave in _preparando:
+        return {"error": "Ya se está preparando esa descarga", "batch_id": clave, "already": True}
+    _preparando.add(clave)
+    try:
+        return await _iniciar_descarga(message_id, channel_id, account)
+    finally:
+        _preparando.discard(clave)
+
+
+async def _iniciar_descarga(message_id: int, channel_id: int | None, account: dict) -> dict:
     from app.database.downloads import find_existing, usage_by_user, create_download
     dl = downloader
     for batch_id, batch in list(dl.active_batches.items()):
-        if batch["status"] in ("downloading", "extracting"):
+        if batch["status"] in EN_MARCHA:
             for part in batch["parts"]:
                 if part["message_id"] == message_id:
                     return {"error": f"Ese archivo ya lo está descargando {batch.get('owner', 'otra cuenta')}",
                             "batch_id": batch_id, "folder_name": batch["folder_name"], "already": True}
 
-    base_name, folder_name, parts = await dl.find_related_parts(message_id, channel_id)
+    # Si esta en pausa, "Descargar" es reanudar. Antes se lanzaba una descarga
+    # nueva con el mismo batch_id en la misma carpeta de trabajo, y la pausada
+    # seguia ofreciendo "Reanudar": al pulsarlo habia dos tareas escribiendo el
+    # mismo archivo a la vez.
+    pausado = _pausado_de(message_id, channel_id)
+    if pausado:
+        from app.database.downloads import get_download_by_path
+        row = await get_download_by_path(pausado["folder_path"])
+        if not _puede_con_fila(row, account):
+            return {"error": f"Esa descarga la tiene en pausa {row.get('owner') or 'otra cuenta'}",
+                    "batch_id": pausado["batch_id"], "folder_name": pausado["folder_name"], "already": True}
+        return await _reanudar(pausado, row, account)
+
+    # Con tope: sin el, un Telegram que raciona (FloodWait) dejaba la peticion
+    # colgada y el boton de "Descargar" parecia no hacer nada.
+    t0 = time.monotonic()
+    try:
+        base_name, folder_name, parts = await asyncio.wait_for(dl.find_related_parts(message_id, channel_id), timeout=30)
+    except asyncio.TimeoutError:
+        logger.warning("Descarga de %s: Telegram no contesta en 30 s", message_id)
+        return {"error": "Telegram no contesta ahora mismo. Prueba otra vez en un minuto."}
+    tardanza = time.monotonic() - t0
+    if tardanza > 5:
+        logger.warning("Descarga de %s: buscar el archivo en Telegram ha tardado %.0f s", message_id, tardanza)
     if not parts:
         return {"error": "No se encontro el mensaje o no tiene archivo adjunto"}
 
@@ -127,21 +167,59 @@ async def iniciar_descarga(message_id: int, channel_id: int | None, account: dic
         "downloaded_size": 0, "progress": 0, "status": "downloading", "extracted_files": [], "error": None,
     }
 
-    task = asyncio.create_task(_download_batch(batch_id))
-    task.add_done_callback(lambda _, bid=batch_id: _batch_tasks.pop(bid, None))
-    _batch_tasks[batch_id] = task
+    _lanzar(batch_id)
 
     return {"status": "started", "batch_id": batch_id, "folder_name": folder_name, "folder_path": folder_path, "total_parts": len(parts), "parts": [{"message_id": p["message_id"], "file_name": p["file_name"]} for p in parts]}
+
+
+EN_MARCHA = ("downloading", "extracting", "converting")
+
+
+def _lanzar(batch_id: str) -> asyncio.Task:
+    """Arranca la tarea de un lote y la apunta en `_batch_tasks`.
+
+    Al acabar, la tarea solo se borra a si misma **si sigue siendo la
+    apuntada**. Pausar y reanudar reutilizan el mismo `batch_id`, y la tarea
+    vieja sigue viva unos segundos despues de pausar (ver el final de
+    `_download_batch`): borrando a ciegas, se llevaba por delante la tarea de la
+    reanudacion, que seguia bajando sin que nadie pudiera pausarla ni
+    cancelarla.
+    """
+    task = asyncio.create_task(_download_batch(batch_id))
+
+    def _olvidar(t, bid=batch_id):
+        if _batch_tasks.get(bid) is t:
+            _batch_tasks.pop(bid, None)
+
+    task.add_done_callback(_olvidar)
+    _batch_tasks[batch_id] = task
+    return task
+
+
+def _pausado_de(message_id: int, channel_id: int | None) -> dict | None:
+    """El lote en pausa que contiene este mensaje, si lo hay."""
+    for saved in load_paused_batches().values():
+        for p in saved.get("parts", []):
+            if p.get("message_id") == message_id and p.get("channel_id") in (None, channel_id):
+                return saved
+    return None
 
 
 def _may_manage(batch: dict, account: dict) -> bool:
     return account.get("role") == "admin" or batch.get("owner_id") in (None, account.get("id"))
 
 
+def _puede_con_fila(row: dict | None, account: dict) -> bool:
+    return not row or account.get("role") == "admin" or row.get("owner_id") == account.get("id")
+
+
 @router.post("/cancel")
 async def cancel(req: CancelRequest, account: Annotated[dict, Depends(get_current_account)]):
     task = _batch_tasks.get(req.batch_id)
     if not task:
+        saved = load_paused_batches().get(req.batch_id)
+        if saved:
+            return await _descartar_pausada(saved, account)
         return {"error": "Descarga no encontrada o ya finalizada"}
     batch = downloader.active_batches.get(req.batch_id)
     if not batch or batch["status"] != "downloading":
@@ -165,7 +243,17 @@ async def pause(req: PauseRequest, account: Annotated[dict, Depends(get_current_
     await set_download_status(batch["folder_path"], "paused")
     batch["_paused"] = True
     batch["_cancelled"] = True
+    limpio = batch["_limpio"] = asyncio.Event()
     task.cancel()
+    # Se espera a que la tarea borre sus partes a medias antes de contestar.
+    # Si no, un "Reanudar" pulsado enseguida empezaba a escribir el archivo y
+    # la limpieza de la pausa lo borraba debajo: la descarga "acababa" sin
+    # archivo y fallaba. Esperar tambien deja el estado de cada parte quieto
+    # antes de guardarlo.
+    try:
+        await asyncio.wait_for(limpio.wait(), timeout=15)
+    except asyncio.TimeoutError:
+        logger.warning("La pausa de %s no termino de limpiar a tiempo", batch.get("folder_name", ""))
     for p in batch["parts"]:
         if p["status"] == "done" and not os.path.isfile(os.path.join(batch.get("folder_path", ""), p.get("file_name", ""))):
             p["status"] = "pending"
@@ -187,24 +275,97 @@ async def resumable(user: Annotated[str, Depends(get_current_user)]):
 
 @router.post("/resume")
 async def resume(req: PauseRequest, background_tasks: BackgroundTasks, account: Annotated[dict, Depends(get_current_account)]):
-    from app.database.downloads import get_download_by_path, set_download_status
-    dl = downloader
+    from app.database.downloads import get_download_by_path
     saved = load_paused_batches().get(req.batch_id)
     if not saved:
         return {"error": "Descarga pausada no encontrada"}
+    vivo = downloader.active_batches.get(req.batch_id)
+    if vivo and vivo["status"] in EN_MARCHA:
+        # La pausa guardada ya no vale: alguien la volvio a lanzar. Se olvida
+        # para que deje de ofrecerse "Reanudar" sobre algo que ya esta bajando.
+        delete_paused_batch(req.batch_id)
+        return {"error": "Esa descarga ya está en marcha", "batch_id": req.batch_id, "already": True}
     row = await get_download_by_path(saved["folder_path"])
-    if row and account.get("role") != "admin" and row["owner_id"] != account["id"]:
+    if not _puede_con_fila(row, account):
         return {"error": f"Solo {row.get('owner') or 'su dueño'} puede reanudarla"}
-    await set_download_status(saved["folder_path"], "downloading")
-    batch = {"batch_id": saved["batch_id"], "base_name": saved.get("base_name", ""), "folder_name": saved["folder_name"], "folder_path": saved["folder_path"], "parts": saved["parts"], "total_parts": saved["total_parts"], "downloaded_parts": saved.get("downloaded_parts", 0), "total_size": saved.get("total_size", 0), "total_size_str": saved.get("total_size_str", ""), "downloaded_size": saved.get("downloaded_size", 0), "progress": 0, "status": "downloading", "extracted_files": [], "error": None,
-             "owner": (row or {}).get("owner") or account["username"], "owner_id": (row or {}).get("owner_id") or account["id"],
-             "kind": saved.get("kind", "movie"), "final_dir": saved.get("final_dir", saved["folder_path"]), "final_stem": saved.get("final_stem")}
-    dl.active_batches[req.batch_id] = batch
-    delete_paused_batch(req.batch_id)
-    task = asyncio.create_task(_download_batch(req.batch_id))
-    task.add_done_callback(lambda _, bid=req.batch_id: _batch_tasks.pop(bid, None))
-    _batch_tasks[req.batch_id] = task
-    return {"status": "resumed", "batch_id": req.batch_id, "folder_name": saved["folder_name"], "total_parts": saved["total_parts"], "parts": [{"message_id": p["message_id"], "file_name": p["file_name"]} for p in saved["parts"]]}
+    return await _reanudar(saved, row, account)
+
+
+async def _reanudar(saved: dict, row: dict | None, account: dict) -> dict:
+    """Vuelve a poner en marcha un lote pausado. Lo usan `/resume` y
+    `iniciar_descarga` (pulsar "Descargar" sobre algo en pausa)."""
+    from app.database.downloads import set_download_status, create_download
+    bid = saved["batch_id"]
+    folder = saved["folder_path"]
+
+    # Lo que no llego a terminar empieza de cero: sus bytes a medias se
+    # borraron al pausar. Arrastrar el `downloaded` viejo hacia que la barra
+    # arrancara adelantada, y una parte en `error` se saltaba para siempre y
+    # tumbaba el lote en cuanto arrancaba.
+    parts = []
+    for p in saved["parts"]:
+        p = dict(p)
+        if p.get("status") == "done" and os.path.isfile(os.path.join(folder, p.get("file_name", ""))):
+            p.update(downloaded=p.get("size", 0), progress=100)
+        else:
+            p.update(status="pending", downloaded=0, progress=0)
+            p.pop("error", None)
+        parts.append(p)
+    downloaded = sum(p["downloaded"] for p in parts)
+
+    owner = (row or {}).get("owner") or saved.get("owner") or account["username"]
+    owner_id = (row or {}).get("owner_id") or saved.get("owner_id") or account["id"]
+    if row:
+        await set_download_status(folder, "downloading")
+    else:
+        # Sin fila la descarga acabaria en disco sin dueño (y sin contar en
+        # su cuota). El batch_id es "<canal>_<mensaje>".
+        canal, _, msg = bid.partition("_")
+        await create_download(owner_id, saved["folder_name"], folder, saved.get("base_name", ""),
+                              int(msg or 0), int(canal or 0) or None, saved.get("total_size", 0), "downloading")
+
+    total = saved.get("total_size", 0)
+    downloader.active_batches[bid] = {
+        "batch_id": bid, "base_name": saved.get("base_name", ""),
+        "owner": owner, "owner_id": owner_id,
+        "tmdb_id": saved.get("tmdb_id"), "tmdb_type": saved.get("tmdb_type"),
+        "tmdb_title": saved.get("tmdb_title"), "tmdb_poster": saved.get("tmdb_poster"),
+        "season": saved.get("season"), "episode": saved.get("episode"),
+        "kind": saved.get("kind", "movie"), "final_dir": saved.get("final_dir", folder), "final_stem": saved.get("final_stem"),
+        "folder_name": saved["folder_name"], "folder_path": folder, "parts": parts,
+        "total_parts": saved["total_parts"], "downloaded_parts": 0,
+        "total_size": total, "total_size_str": saved.get("total_size_str", ""),
+        "downloaded_size": downloaded, "progress": min(100, int(downloaded / total * 100)) if total else 0,
+        "status": "downloading", "extracted_files": [], "error": None,
+    }
+    delete_paused_batch(bid)
+    _lanzar(bid)
+    return {"status": "resumed", "batch_id": bid, "folder_name": saved["folder_name"], "folder_path": folder,
+            "total_parts": saved["total_parts"], "parts": [{"message_id": p["message_id"], "file_name": p["file_name"]} for p in parts]}
+
+
+async def _descartar_pausada(saved: dict, account: dict) -> dict:
+    """Cancelar algo que esta en pausa: borra lo bajado y suelta la cuota.
+
+    No habia forma de hacerlo. Una descarga pausada cuenta en la cuota de su
+    dueño (`paused` esta en ACTIVE_STATES) y la unica salida era reanudarla,
+    asi que una pausa olvidada ocupaba cuota para siempre.
+    """
+    from app.database.downloads import get_download_by_path, delete_download
+    from app.services import cache
+    bid = saved["batch_id"]
+    folder = saved["folder_path"]
+    row = await get_download_by_path(folder)
+    if not _puede_con_fila(row, account):
+        return {"error": f"Solo {row.get('owner') or 'su dueño'} puede cancelarla"}
+    _cleanup_partial_files(folder, {p["file_name"] for p in saved.get("parts", [])})
+    _prune_work_dir(saved)
+    await delete_download(folder)
+    delete_paused_batch(bid)
+    cache.cambio_en_disco()
+    logger.info("Descarga pausada descartada | %s", saved.get("folder_name", ""))
+    await broadcast_progress({"type": "batch_status", "batch_id": bid, "status": "cancelled", "folder_name": saved.get("folder_name", "")})
+    return {"status": "cancelled", "batch_id": bid}
 
 
 @router.get("/status")
@@ -421,6 +582,8 @@ async def _download_batch(batch_id):
             kept = len(batch["parts"]) - len(incomplete)
             _cleanup_partial_files(batch.get("folder_path", ""), incomplete, remove_empty_dir=False)
             batch["status"] = "paused"
+            if batch.get("_limpio"):
+                batch.pop("_limpio").set()
             logger.info("Batch pausado | %s | %d partes conservadas", batch.get("folder_name", ""), kept)
         else:
             batch["status"] = "cancelled"
@@ -441,7 +604,12 @@ async def _download_batch(batch_id):
         await broadcast_progress({"type": "batch_status", "batch_id": batch_id, "status": "error", "error": str(e), "folder_name": batch["folder_name"], "parts": [{"message_id": p["message_id"], "file_name": p["file_name"], "status": p["status"], "error": p.get("error")} for p in batch["parts"]]})
 
     await asyncio.sleep(10)
-    downloader.active_batches.pop(batch_id, None)
+    # Solo si sigue siendo este lote. Tras una pausa, el mismo batch_id puede
+    # estar ya reanudado: quitarlo a ciegas lo hacia invisible (no salia en
+    # Descargas, no se podia pausar) y, peor, `iniciar_descarga` dejaba de
+    # verlo y permitia lanzar otra descarga del mismo archivo encima.
+    if downloader.active_batches.get(batch_id) is batch:
+        downloader.active_batches.pop(batch_id, None)
 
 
 async def _avisar_completada(batch: dict, archivos: list[str]) -> None:

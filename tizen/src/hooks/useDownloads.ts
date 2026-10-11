@@ -81,7 +81,7 @@ export function useDownloads() {
 
   const cancelBatch = async (batchId: string) => {
     await apiFetch('/cancel', { method: 'POST', body: JSON.stringify({ batch_id: batchId }) });
-    loadStatus();
+    loadStatus(); loadPaused();
   };
 
   const pauseBatch = async (batchId: string) => {

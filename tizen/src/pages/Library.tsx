@@ -36,6 +36,7 @@ export default function Library() {
                                            tmdb_id?: number | null; media_type?: 'movie' | 'series' } | null>(null);
   const [detail, setDetail] = useState<DetailInput | null>(null);
   const [batchDialog, setBatchDialog] = useState<Batch | null>(null);
+  const [pausedDialog, setPausedDialog] = useState<any | null>(null);
   const [resume, setResume] = useState<Watched[]>(() => cachedContinueWatching());
   // Estable a proposito: si cambia en cada render, el efecto del reproductor se
   // vuelve a montar con el y reanuda el video otra vez (ver Player.tsx).
@@ -183,7 +184,7 @@ export default function Library() {
           {pausedBatches.map((b: any, i: number) => (
             <PosterCard key={b.batch_id} index={i}
               item={{ key: `paused-${b.batch_id}`, kind: 'movie', title: cleanTitle(b.folder_name), poster: metas.get(cleanTitle(b.folder_name))?.poster, subtitle: `Pausada · ${b.total_parts} partes · ${b.total_size_str}` }}
-              onSelect={() => { resumeBatch(b.batch_id); toast('Reanudando descarga'); }} />
+              onSelect={() => setPausedDialog(b)} />
           ))}
         </Row>
       )}
@@ -217,6 +218,17 @@ export default function Library() {
             { label: 'Seguir', onSelect: () => setBatchDialog(null), primary: true },
             { label: 'Pausar', onSelect: () => { pauseBatch(batchDialog.batch_id); setBatchDialog(null); } },
             { label: 'Cancelar descarga', onSelect: () => { cancelBatch(batchDialog.batch_id); setBatchDialog(null); } },
+          ]} />
+      )}
+      {pausedDialog && (
+        // Una pausa ocupa cuota: sin "Descartar" solo se podia soltar reanudandola.
+        <Dialog title={cleanTitle(pausedDialog.folder_name)}
+          text={`Pausada · ${pausedDialog.total_parts} partes · ${pausedDialog.total_size_str}`}
+          onClose={() => setPausedDialog(null)}
+          actions={[
+            { label: 'Reanudar', onSelect: () => { resumeBatch(pausedDialog.batch_id); toast('Reanudando descarga'); setPausedDialog(null); }, primary: true },
+            { label: 'Descartar', onSelect: () => { cancelBatch(pausedDialog.batch_id); toast('Descarga descartada'); setPausedDialog(null); } },
+            { label: 'Volver', onSelect: () => setPausedDialog(null) },
           ]} />
       )}
       {detail && <TitleDetail input={detail} onClose={() => setDetail(null)} />}

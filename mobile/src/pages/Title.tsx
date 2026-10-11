@@ -109,6 +109,9 @@ export default function Title() {
     const st = stateOf(v);
     if (st.s === 'ready') { setPlaying({ path: st.f.path, subtitle }); return; }
     if (st.s === 'busy') { setMenu({ v, ds: st.ds }); return; }
+    // Preguntar a Telegram por el archivo puede tardar unos segundos: sin
+    // esto parecia que el boton no hacia nada y se volvia a pulsar.
+    toast('Preparando la descarga…');
     const err = await download(v.messageId, v.channelId);
     if (err) toast(err, 'error', 5000); else { toast(`Descargando ${v.baseName}`); refresh(); }
   }, [stateOf, download, refresh]);

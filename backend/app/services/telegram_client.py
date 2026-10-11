@@ -9,6 +9,27 @@ from telethon.errors import SessionPasswordNeededError
 
 from app.services.storage import _detect_multipart, suggest_folder_name, create_movie_folder
 
+# Cuanto se espera a Telegram al buscar las partes de un archivo en un canal.
+BUSQUEDA_PARTES_S = 8
+
+
+async def _partes_en_catalogo(channel_id, base):
+    """Mensajes del catalogo de ese canal cuyo nombre empieza por `base`."""
+    from app.database.connection import get_pool
+    pool = get_pool()
+    if not pool or not channel_id:
+        return []
+    patron = base.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+    try:
+        async with pool.acquire() as conn:
+            return await conn.fetch("""
+                SELECT channel_id, message_id, file_name, file_size FROM media_items
+                WHERE channel_id = $1 AND file_name ILIKE $2 LIMIT 200
+            """, channel_id, patron)
+    except Exception as e:
+        logger.warning("Buscando partes de %s en el catalogo: %s", base, e)
+        return []
+
 logger = logging.getLogger("tmd")
 
 
@@ -91,6 +112,17 @@ class TelegramDownloader:
                            "administracion, pestaña Telegram. No se pide ningun codigo "
                            "desde aqui para no gastar los envios disponibles.")
             return
+
+        # Sin Premium Telegram limita la velocidad de descarga de la cuenta; con
+        # Premium no. No hay nada que ajustar aqui, pero si las descargas van
+        # lentas lo primero es saber cual de las dos es.
+        try:
+            yo = await self.client.get_me()
+            logger.info("Cuenta de Telegram: %s | Premium: %s",
+                        getattr(yo, "username", None) or getattr(yo, "phone", "?"),
+                        "si" if getattr(yo, "premium", False) else "no")
+        except Exception as e:
+            logger.warning("No se pudo saber si la cuenta de Telegram es Premium: %s", e)
 
         for ch in self.channel_ids:
             try:
@@ -315,28 +347,55 @@ class TelegramDownloader:
         }
 
         base_lower = base.lower()
+
+        # Las demas partes, primero en el catalogo. Antes se buscaban siempre
+        # en Telegram, una busqueda por canal y una detras de otra: Telegram
+        # raciona mucho las busquedas y, al pasarse, Telethon se duerme en
+        # silencio hasta un minuto por llamada (FloodWait). El boton de
+        # "Descargar" se quedaba sin contestar y parecia que no hacia nada.
+        for r in await _partes_en_catalogo(own_channel, base):
+            b, p, a = _detect_multipart(r["file_name"])
+            if b and b.lower() == base_lower and p not in parts_found:
+                parts_found[p] = {
+                    "message_id": r["message_id"],
+                    "file_name": r["file_name"],
+                    "part_num": p,
+                    "size": r["file_size"] or 0,
+                    "channel_id": r["channel_id"],
+                }
+        if len(parts_found) > 1:
+            parts = [parts_found[p] for p in sorted(parts_found.keys())]
+            return base, suggest_folder_name(base), parts
+
+        # Si el catalogo no las tiene (canal sin indexar todavia), Telegram;
+        # con tiempo limitado por canal para no colgar la peticion.
         for ch_id, ch in self.channels.items():
             try:
-                ch_entity = ch["entity"]
-                async for m in self.client.iter_messages(ch_entity, search=base, limit=100):
-                    fname = self._get_file_name(m)
-                    if not fname or m.id == message_id:
-                        continue
-                    b, p, a = _detect_multipart(fname)
-                    if b and b.lower() == base_lower and p not in parts_found:
-                        parts_found[p] = {
-                            "message_id": m.id,
-                            "file_name": fname,
-                            "part_num": p,
-                            "size": self._get_file_size(m),
-                            "channel_id": ch_id,
-                        }
+                await asyncio.wait_for(self._buscar_partes(ch_id, ch["entity"], base, base_lower, message_id, parts_found),
+                                       timeout=BUSQUEDA_PARTES_S)
+            except asyncio.TimeoutError:
+                logger.warning("Buscando partes de %s: el canal %s no contesta a tiempo", base, ch.get("name", ch_id))
             except Exception:
                 continue
 
         parts = [parts_found[p] for p in sorted(parts_found.keys())]
         folder_name = suggest_folder_name(base)
         return base, folder_name, parts
+
+    async def _buscar_partes(self, ch_id, ch_entity, base, base_lower, message_id, parts_found):
+        async for m in self.client.iter_messages(ch_entity, search=base, limit=100):
+            fname = self._get_file_name(m)
+            if not fname or m.id == message_id:
+                continue
+            b, p, a = _detect_multipart(fname)
+            if b and b.lower() == base_lower and p not in parts_found:
+                parts_found[p] = {
+                    "message_id": m.id,
+                    "file_name": fname,
+                    "part_num": p,
+                    "size": self._get_file_size(m),
+                    "channel_id": ch_id,
+                }
 
     async def download_to_folder(self, message_id, folder, progress_callback=None, channel_id=None):
         msg = None
@@ -355,8 +414,16 @@ class TelegramDownloader:
 
         file_name = self._get_file_name(msg) or f"file_{message_id}"
         file_path = os.path.join(folder, file_name)
-        if os.path.isfile(file_path) and os.path.getsize(file_path) > 0:
-            return file_path
+        # Ya bajado solo si mide lo que dice Telegram. Bastaba con que pesara
+        # algo, y un archivo a medias tambien pesa: una segunda descarga del
+        # mismo lote encontraba el que la primera estaba escribiendo, lo daba
+        # por hecho y a los tres segundos dejaba en la biblioteca una pelicula
+        # cortada.
+        esperado = self._get_file_size(msg)
+        if os.path.isfile(file_path):
+            if esperado and os.path.getsize(file_path) == esperado:
+                return file_path
+            os.remove(file_path)
 
         os.makedirs(folder, exist_ok=True)
 

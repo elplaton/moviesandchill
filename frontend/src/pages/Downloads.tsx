@@ -219,7 +219,11 @@ export default function Downloads() {
                 <div key={b.batch_id} className="rounded-panel border border-nf-line bg-nf-surface px-5 py-4">
                   <p className="text-base font-medium">{cleanTitle(b.folder_name)}</p>
                   <p className="mb-3 mt-0.5 text-xs text-nf-faint">{b.total_parts} partes · {b.total_size_str}</p>
-                  <Button size="sm" variant="primary" onClick={() => resumeBatch(b.batch_id)}>Reanudar</Button>
+                  <div className="flex gap-2">
+                    <Button size="sm" variant="primary" onClick={() => resumeBatch(b.batch_id)}>Reanudar</Button>
+                    {/* Una pausa ocupa cuota: sin esto solo se podia soltar reanudandola. */}
+                    <Button size="sm" variant="ghost" onClick={() => { if (confirm(`¿Descartar "${cleanTitle(b.folder_name)}"? Se borra lo descargado.`)) cancelBatch(b.batch_id); }}>Descartar</Button>
+                  </div>
                 </div>
               ))}
             </div>

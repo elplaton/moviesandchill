@@ -149,6 +149,16 @@ def save_paused_batch(batch_id, batch_data):
         "kind": batch_data.get("kind", "movie"),
         "final_dir": batch_data.get("final_dir", batch_data["folder_path"]),
         "final_stem": batch_data.get("final_stem"),
+        # La ficha y el dueño tambien: al reanudar sin ellos el aviso de
+        # "descarga completada" salia con el nombre del fichero.
+        "owner": batch_data.get("owner"),
+        "owner_id": batch_data.get("owner_id"),
+        "tmdb_id": batch_data.get("tmdb_id"),
+        "tmdb_type": batch_data.get("tmdb_type"),
+        "tmdb_title": batch_data.get("tmdb_title"),
+        "tmdb_poster": batch_data.get("tmdb_poster"),
+        "season": batch_data.get("season"),
+        "episode": batch_data.get("episode"),
         "parts": [{
             "message_id": p["message_id"],
             "channel_id": p.get("channel_id"),

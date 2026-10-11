@@ -25,6 +25,56 @@ interface Props { input: SheetInput; onClose: () => void }
 type RowState = { s: 'ready'; f: LocalFile } | { s: 'busy'; label: string; progress: number; batchId: string } | { s: 'idle' };
 
 /**
+ * Fila de la lista: episodio de una serie o versión de una película.
+ *
+ * Vive fuera de `TitleSheet` a propósito. Definida dentro, era un componente
+ * nuevo en cada render, y React tiraba y recreaba todas las filas: la ficha se
+ * repinta con cada aviso de progreso (uno por segundo mientras algo baja), así
+ * que el botón de debajo del ratón volvía a nacer en su color normal y repetía
+ * la transición al de hover sin parar. Parecía que parpadeaba.
+ */
+const Row = ({ label, title, sub, st, onEnter, onDelete, marcado, onMarcar }: {
+  label: string; title: string; sub: string; st: RowState; onEnter: () => void; onDelete?: () => void;
+  /** Visto por capítulo: solo en series, y solo si el título está en TMDB. */
+  marcado?: boolean; onMarcar?: () => void;
+}) => (
+  <div className={`group flex items-center gap-4 rounded px-3 py-2.5 hover:bg-white/[0.06] ${marcado ? 'opacity-55' : ''}`}>
+    <span className="w-14 shrink-0 text-base font-semibold tabular-nums text-nf-faint">{label}</span>
+    <button onClick={onEnter} className="min-w-0 flex-1 text-left">
+      <p className="truncate text-base font-medium">{title}</p>
+      <p className="truncate text-xs text-nf-faint">{sub}</p>
+    </button>
+    <div className="flex shrink-0 items-center gap-2">
+      {onMarcar && (
+        <button onClick={onMarcar} title={marcado ? 'Marcar como no visto' : 'Marcar como visto'}
+          aria-label={marcado ? 'Marcar como no visto' : 'Marcar como visto'}
+          className={`grid h-8 w-8 place-items-center rounded-pill border transition-colors ${
+            marcado ? 'border-nf-ok/60 bg-nf-ok/20 text-nf-ok'
+                    : 'border-white/20 text-nf-faint opacity-0 hover:border-white/50 hover:text-white group-hover:opacity-100'}`}>
+          <span className="w-4 h-4"><IconCheck /></span>
+        </button>
+      )}
+      {st.s === 'busy' ? (
+        <div className="w-32">
+          <p className="mb-1 text-right text-xs text-nf-dim">{st.label}</p>
+          <div className="h-1 overflow-hidden rounded-full bg-white/15"><div className="h-full bg-nf-red" style={{ width: `${st.progress}%` }} /></div>
+        </div>
+      ) : st.s === 'ready' ? (
+        <Button variant="light" size="sm" icon={<IconPlay />} onClick={onEnter}>Ver</Button>
+      ) : (
+        <Button variant="ghost" size="sm" icon={<IconDownload />} onClick={onEnter}>Descargar</Button>
+      )}
+      {st.s === 'ready' && onDelete && (
+        <button onClick={onDelete} title="Borrar del servidor"
+          className="grid h-8 w-8 place-items-center rounded text-nf-faint opacity-0 transition-opacity hover:bg-nf-red/25 hover:text-white group-hover:opacity-100">
+          <span className="w-4 h-4"><IconTrash /></span>
+        </button>
+      )}
+    </div>
+  </div>
+);
+
+/**
  * Ficha de un título, a pantalla casi completa.
  *
  * Sustituye a los dos modales anteriores (uno para películas y otro para
@@ -92,6 +142,9 @@ export default function TitleSheet({ input, onClose }: Props) {
     const st = stateOf(v);
     if (st.s === 'ready') { setPlaying({ path: st.f.path, subtitle }); return; }
     if (st.s === 'busy') { cancelBatch(st.batchId); say('Descarga cancelada'); return; }
+    // Preguntar a Telegram por el archivo puede tardar unos segundos: sin
+    // esto parecia que el boton no hacia nada y se volvia a pulsar.
+    say('Preparando la descarga…');
     const err = await download(v.messageId, v.channelId);
     if (err) say(err); else { say(`Descargando ${v.baseName}`); refreshMe(); }
   }, [stateOf, download, cancelBatch, refreshMe]);
@@ -127,48 +180,6 @@ export default function TitleSheet({ input, onClose }: Props) {
     meta.genres?.slice(0, 3).join(' · ') || '',
     isSeries ? `${episodes.length} episodios` : `${versions.length} ${versions.length === 1 ? 'versión' : 'versiones'}`,
   ].filter(Boolean);
-
-  /** Fila de la lista: episodio de una serie o versión de una película. */
-  const Row = ({ label, title, sub, st, onEnter, onDelete, marcado, onMarcar }: {
-    label: string; title: string; sub: string; st: RowState; onEnter: () => void; onDelete?: () => void;
-    /** Visto por capítulo: solo en series, y solo si el título está en TMDB. */
-    marcado?: boolean; onMarcar?: () => void;
-  }) => (
-    <div className={`group flex items-center gap-4 rounded px-3 py-2.5 hover:bg-white/[0.06] ${marcado ? 'opacity-55' : ''}`}>
-      <span className="w-14 shrink-0 text-base font-semibold tabular-nums text-nf-faint">{label}</span>
-      <button onClick={onEnter} className="min-w-0 flex-1 text-left">
-        <p className="truncate text-base font-medium">{title}</p>
-        <p className="truncate text-xs text-nf-faint">{sub}</p>
-      </button>
-      <div className="flex shrink-0 items-center gap-2">
-        {onMarcar && (
-          <button onClick={onMarcar} title={marcado ? 'Marcar como no visto' : 'Marcar como visto'}
-            aria-label={marcado ? 'Marcar como no visto' : 'Marcar como visto'}
-            className={`grid h-8 w-8 place-items-center rounded-pill border transition-colors ${
-              marcado ? 'border-nf-ok/60 bg-nf-ok/20 text-nf-ok'
-                      : 'border-white/20 text-nf-faint opacity-0 hover:border-white/50 hover:text-white group-hover:opacity-100'}`}>
-            <span className="w-4 h-4"><IconCheck /></span>
-          </button>
-        )}
-        {st.s === 'busy' ? (
-          <div className="w-32">
-            <p className="mb-1 text-right text-xs text-nf-dim">{st.label}</p>
-            <div className="h-1 overflow-hidden rounded-full bg-white/15"><div className="h-full bg-nf-red" style={{ width: `${st.progress}%` }} /></div>
-          </div>
-        ) : st.s === 'ready' ? (
-          <Button variant="light" size="sm" icon={<IconPlay />} onClick={onEnter}>Ver</Button>
-        ) : (
-          <Button variant="ghost" size="sm" icon={<IconDownload />} onClick={onEnter}>Descargar</Button>
-        )}
-        {st.s === 'ready' && onDelete && (
-          <button onClick={onDelete} title="Borrar del servidor"
-            className="grid h-8 w-8 place-items-center rounded text-nf-faint opacity-0 transition-opacity hover:bg-nf-red/25 hover:text-white group-hover:opacity-100">
-            <span className="w-4 h-4"><IconTrash /></span>
-          </button>
-        )}
-      </div>
-    </div>
-  );
 
   return (
     <div className="fixed inset-0 z-[70] overflow-y-auto bg-black/80 py-10" onClick={onClose}>

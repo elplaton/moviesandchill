@@ -35,8 +35,8 @@ class PoolFalso:
         return Ctx()
 
 
-def fila(id, ruta, nombre, owner="elpajas"):
-    return {"id": id, "folder_path": ruta, "folder_name": nombre, "owner": owner}
+def fila(id, ruta, nombre, owner="elpajas", status="downloading"):
+    return {"id": id, "folder_path": ruta, "folder_name": nombre, "owner": owner, "status": status}
 
 
 def correr(filas, pausados=()):
@@ -90,10 +90,22 @@ comprueba("se marca done y no se borra", True, "status='done'" in hechas[0][0])
 comprueba("con su tamaño real", 1234, hechas[0][1][1])
 comprueba("y el archivo sigue ahi", True, os.path.isfile(os.path.join(final, "Dune (2021).mp4")))
 
+print("\nUna pausa con su lote guardado se deja como esta:")
+n, hechas = correr([fila(8, trabajo2, "Suits 1x01", status="paused")], pausados=[trabajo2])
+comprueba("ni una consulta", (0, []), (n, hechas))
+
+print("\nUna pausa sin lote guardado no se puede reanudar y come cuota:")
+trabajo3 = os.path.join(raiz, "Oppenheimer (2023)", ".dl_0_123")
+os.makedirs(trabajo3)
+open(os.path.join(trabajo3, "Oppenheimer.mkv"), "wb").write(b"x" * 10)
+n, hechas = correr([fila(10, trabajo3, "Oppenheimer (2023)", owner="spi", status="paused")])
+comprueba("se borra la fila (y con ella la cuota)", True, hechas[0][0].startswith("DELETE FROM downloads"))
+comprueba("y la carpeta temporal", False, os.path.exists(trabajo3))
+
 print("\nSin nada colgado no hace nada:")
 n, hechas = correr([])
 comprueba("cero filas, cero consultas", (0, []), (n, hechas))
 
 print()
-print(f"{12 - len(fallos)} correctas, {len(fallos)} fallidas")
+print(f"{15 - len(fallos)} correctas, {len(fallos)} fallidas")
 sys.exit(1 if fallos else 0)
