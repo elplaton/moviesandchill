@@ -302,13 +302,22 @@ async def _stream_tg(request: Request, path: str):
     start, end, parcial = _rango(request.headers.get("Range"), v.tamano)
 
     async def desde_telegram():
+        enviados = 0
         try:
             async for trozo in reproduccion.leer(v, start, end):
+                enviados += len(trozo)
                 yield trozo
         except Exception as e:
             # La respuesta ya ha empezado: solo queda cortarla y dejar rastro.
-            logger.warning("Ver sin descargar %s: se corta en el tramo %d-%d: %s: %s",
-                           v.nombre, start, end, type(e).__name__, e)
+            logger.warning("Ver sin descargar %s: se corta en el tramo %d-%d tras %d bytes: %s: %s",
+                           v.nombre, start, end, enviados, type(e).__name__, e)
+            return
+        # Un tramo que acaba antes de lo prometido sin que el navegador se haya
+        # ido (eso llega como cancelacion, no por aqui) es grave: el `<video>`
+        # se cree que la pelicula ha terminado y el reproductor se cierra.
+        if enviados < end - start + 1:
+            logger.warning("Ver sin descargar %s: el tramo %d-%d se quedo en %d de %d bytes",
+                           v.nombre, start, end, enviados, end - start + 1)
 
     headers = {**cabeceras, "Content-Length": str(end - start + 1)}
     if parcial:

@@ -195,6 +195,17 @@ export default function Player(props: Props) {
     const onPause = () => { setPlaying(false); setUi(true); };
     const onWaiting = () => setBuffering(true);
     const onEnded = () => {
+      // Un `ended` lejos del final no es el final: es que el tramo de video
+      // llego mas corto de lo prometido (pasa al ver sin descargar, si
+      // Telegram corta a mitad de un salto). Antes eso cerraba el reproductor
+      // y encima marcaba la pelicula como vista; ahora se vuelve a pedir ese
+      // punto y se sigue.
+      if (v.duration && isFinite(v.duration) && v.currentTime < v.duration - 15) {
+        const t = v.currentTime;
+        v.currentTime = Math.max(0, t - 1);
+        v.play().catch(() => {});
+        return;
+      }
       markWatched({ ...entrada(), position: v.duration || 0, duration: v.duration || 0 });
       // Si queda algo que preguntar (el siguiente episodio, o si se baja) el
       // reproductor no se cierra: la pregunta se contesta aqui.
