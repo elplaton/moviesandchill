@@ -162,7 +162,6 @@ export default function TitleSheet({ input, onClose }: Props) {
   // primera vez) y, si se puede, el reproductor abre la ruta `tg:` que
   // devuelve como si fuera un archivo del disco.
   const ver = useCallback(async (v: Version, subtitle?: string) => {
-    say('Preparando…');
     const r = await comprobarReproduccion(v.channelId, v.messageId);
     if (r.modo !== 'ver' || !r.path) { setNotice(''); setNoSeVe({ v, motivo: r.motivo, subtitle }); return; }
     if (audioQueNoSuena(r)) say('El audio es AC-3/DTS: en este navegador puede verse sin sonido');

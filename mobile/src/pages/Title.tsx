@@ -130,7 +130,6 @@ export default function Title() {
   // comprueba leyendo unos KB de Telegram); el iPhone ademas tiene que
   // entender el formato. El reproductor abre la ruta `tg:` como cualquier otra.
   const ver = useCallback(async (v: Version, subtitle?: string) => {
-    toast('Preparando…');
     const r = await comprobarReproduccion(v.channelId, v.messageId);
     const motivo = motivoNoSeVe(r);
     if (motivo || !r.path) { setNoSeVe({ v, motivo: motivo || r.motivo, subtitle }); return; }
