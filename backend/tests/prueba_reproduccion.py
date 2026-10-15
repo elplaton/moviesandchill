@@ -103,6 +103,7 @@ async def main():
         comprueba(f"{nombre} -> {esperado}", esperado, rp.clasificar(nombre))
     comprueba("ver ahora en partes", True, rp.se_puede_intentar("Peli.mkv.003"))
     comprueba("no en un rar", False, rp.se_puede_intentar("Peli.part2.rar"))
+    comprueba("ni en un zip: la extension decide antes de pulsar", False, rp.se_puede_intentar("Peli.zip.001"))
     comprueba("rutas tg", (-100123, 45), rp.leer_ruta(rp.ruta(-100123, 45)))
     comprueba("una ruta de disco no es tg", False, rp.es_ruta("Peli/Peli.mp4"))
 

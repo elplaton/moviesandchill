@@ -30,7 +30,7 @@ class SearchRequest(BaseModel):
 # campo a `_row_to_result` se sube, y las entradas de antes (que no lo traen)
 # dejan de encontrarse sin tener que vaciar Redis: si no, durante su caducidad
 # los clientes no ven el campo nuevo (paso con `streamable`).
-FORMA_RESULTADO = 2
+FORMA_RESULTADO = 3
 
 
 def _row_to_result(r: dict, existing: set, done: dict | None = None, me: dict | None = None) -> dict:
@@ -60,9 +60,8 @@ def _row_to_result(r: dict, existing: set, done: dict | None = None, me: dict | 
         "tmdb_poster": r.get("tmdb_poster"),
         "tmdb_backdrop": r.get("tmdb_backdrop"), "tmdb_overview": r.get("tmdb_overview"),
         "tmdb_genres": r.get("tmdb_genres") or [],
-        # Si se puede intentar ver sin descargar, solo por el nombre: un
-        # video suelto, partes sin comprimir o un zip (que se mira por dentro
-        # al pulsar). Lo comprimido de verdad sale en False.
+        # "Ver" en vez de "Descargar", por la extension: un video suelto o
+        # partes sin comprimir (.mkv.001...). Zip, rar y 7z se descargan.
         "streamable": reproduccion.se_puede_intentar(r.get("file_name")),
     }
 

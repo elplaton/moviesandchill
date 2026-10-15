@@ -100,8 +100,13 @@ def clasificar(file_name: str | None) -> str | None:
 
 
 def se_puede_intentar(file_name: str | None) -> bool:
-    """Si merece la pena ofrecer "Ver ahora" antes de comprobar nada."""
-    return clasificar(file_name) in ("video", "partes", "zip")
+    """Si se ofrece "Ver" en vez de "Descargar", solo por la extension.
+
+    Un zip queda fuera aunque `_video_en_zip` sepa servir uno sin comprimir:
+    lo que se pidio es que la extension decida antes de pulsar, y que "Ver"
+    no acabe en "pues estaba comprimido". Todo zip, rar o 7z se descarga.
+    """
+    return clasificar(file_name) in ("video", "partes")
 
 
 # --- El archivo virtual ------------------------------------------------------
