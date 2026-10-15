@@ -229,6 +229,7 @@ from app.routers.admin_router import router as admin_router
 from app.routers.telegram_router import router as telegram_router
 from app.routers.novedades_router import router as novedades_router
 from app.routers.tracks_router import router as tracks_router
+from app.routers.hls_router import router as hls_router
 from app.routers.favorites_router import router as favorites_router
 from app.routers.progress_router import router as progress_router
 from app.routers.follows_router import router as follows_router
@@ -253,6 +254,7 @@ app.include_router(admin_router)
 app.include_router(telegram_router)
 app.include_router(novedades_router)
 app.include_router(tracks_router)
+app.include_router(hls_router)
 app.include_router(favorites_router)
 app.include_router(progress_router)
 app.include_router(follows_router)

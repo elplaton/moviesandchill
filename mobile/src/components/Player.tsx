@@ -6,6 +6,7 @@ import { IAirplay, IClose } from './Icons';
 import { markWatched, resumePoint, setWatched } from '../utils/progress';
 import { useSiguiente } from '../hooks/useSiguiente';
 import SiguienteEp from './SiguienteEp';
+import { modoDeReproduccion } from '../services/reproducir';
 
 interface Props {
   path: string; title: string; subtitle?: string; poster?: string; backdrop?: string;
@@ -143,9 +144,14 @@ export default function Player(props: Props) {
   // la hora y cortaba las películas largas por la mitad. Con AirPlay es
   // imprescindible, porque quien pide los trozos es el Apple TV.
   const [ticket, setTicket] = useState<string | null>(null);
-  const src = ticket === null
+  // Viendo sin descargar en el iPhone, un MKV o un audio AC-3/DTS no se abren
+  // tal cual: se pide la version que el servidor adapta al vuelo (HLS). Hasta
+  // saberlo no hay `src`, o el <video> empezaria por el archivo que no abre.
+  const [modo, setModo] = useState<'directo' | 'hls' | null>(null);
+  const consulta = ticket === null ? '' : `path=${encodeURIComponent(path)}&token=${encodeURIComponent(ticket)}`;
+  const src = ticket === null || modo === null
     ? undefined
-    : `/api/stream?path=${encodeURIComponent(path)}&token=${encodeURIComponent(ticket)}`;
+    : modo === 'hls' ? `/api/hls/index.m3u8?${consulta}` : `/api/stream?${consulta}`;
 
   // El selector de subtítulos lo pone el reproductor del sistema; aquí solo
   // hay que colgarle las pistas que haya.
@@ -156,8 +162,10 @@ export default function Player(props: Props) {
     // episodio se olvida en vez de reaprovecharla: con la vieja el servidor
     // contesta 401 y el <video> suelta un error que no significa nada.
     setTicket(null);
+    setModo(null);
     setSubs([]);
     streamTicket(path).then(t => { if (vivo) setTicket(t); });
+    modoDeReproduccion(path).then(m => { if (vivo) setModo(m); });
     fetchSubtitles(path).then(s => { if (vivo) setSubs(s); });
     return () => { vivo = false; };
   }, [path]);

@@ -46,6 +46,10 @@ MIME = {"mkv": "video/x-matroska", "mp4": "video/mp4", "m4v": "video/mp4", "mov"
         "avi": "video/x-msvideo", "webm": "video/webm", "ts": "video/mp2t", "wmv": "video/x-ms-wmv",
         "flv": "video/x-flv"}
 
+# Sube cuando cambia lo que se guarda en `reproduccion`: lo guardado con otra
+# version se vuelve a comprobar (la 2 añadio `hls` a las pistas).
+VERSION = 2
+
 # Cuanto vale lo leido de Telegram (mensajes con su referencia de archivo, que
 # caduca a las horas) y el archivo virtual armado a partir de ellos.
 VIRTUAL_TTL = 20 * 60
@@ -382,20 +386,30 @@ async def comprobar(channel_id: int, message_id: int, forzar: bool = False) -> d
 
     if not forzar:
         guardado = await leer_guardado(channel_id, message_id)
-        if guardado:
+        if guardado and guardado.get("v") == VERSION:
             return guardado
 
     path = ruta(channel_id, message_id)
     try:
         v = await virtual(channel_id, message_id)
     except NoReproducible as e:
-        r = {"modo": "descargar", "motivo": str(e), "path": None, "pistas": None}
+        r = {"v": VERSION, "modo": "descargar", "motivo": str(e), "path": None, "pistas": None}
         if e.definitivo:
             await guardar(channel_id, message_id, r)
         return r
 
     pistas = await _pistas(path)
-    r = {"modo": "ver", "motivo": "", "path": path, "nombre": v.nombre,
+    if pistas is not None:
+        # Si se puede adaptar al vuelo para el iPhone (services/hls.py): MKV
+        # con imagen que se copia y con indice de fotogramas clave legible.
+        from app.services import hls
+        pistas["hls"] = False
+        if hls.se_puede(pistas):
+            try:
+                pistas["hls"] = bool(await hls.claves_de(v))
+            except Exception as e:
+                logger.warning("No se pudo leer el indice de %s: %s", v.nombre, e)
+    r = {"v": VERSION, "modo": "ver", "motivo": "", "path": path, "nombre": v.nombre,
          "tamano": v.tamano, "partes": len(v.tramos), "pistas": pistas}
     if pistas is None:
         r["motivo"] = "no se han podido leer las pistas"
