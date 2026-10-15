@@ -24,6 +24,8 @@ export interface Version {
   localPath?: string | null;
   owner?: string | null;
   canDelete?: boolean;
+  /** Se puede intentar ver sin descargar (ver `streamable` en SearchResult). */
+  streamable?: boolean;
 }
 
 export interface Episode {
@@ -81,6 +83,7 @@ export function groupVersions(files: SearchResult[]): Version[] {
       season: first.season ?? undefined,
       episode: first.episode ?? undefined,
       localPath: first.local_path, owner: first.owner, canDelete: first.can_delete,
+      streamable: !!first.streamable,
     };
   });
 }

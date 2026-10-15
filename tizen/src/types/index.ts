@@ -20,6 +20,9 @@ export interface SearchResult {
   local_path?: string | null;
   owner?: string | null;
   can_delete?: boolean;
+  /** Si se puede intentar ver sin descargar (solo por el nombre: video
+   *  suelto, partes sin comprimir o zip). Lo confirma `/reproducir`. */
+  streamable?: boolean;
   tmdb_title?: string;
   tmdb_year?: number;
   tmdb_rating?: number;

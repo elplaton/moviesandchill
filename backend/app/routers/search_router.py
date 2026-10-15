@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 from app.auth.dependencies import get_current_user
+from app.services import reproduccion
 from app.services.layout import video_en
 from app.services.title_parser import parse_filename
 
@@ -52,6 +53,10 @@ def _row_to_result(r: dict, existing: set, done: dict | None = None, me: dict | 
         "tmdb_poster": r.get("tmdb_poster"),
         "tmdb_backdrop": r.get("tmdb_backdrop"), "tmdb_overview": r.get("tmdb_overview"),
         "tmdb_genres": r.get("tmdb_genres") or [],
+        # Si se puede intentar ver sin descargar, solo por el nombre: un
+        # video suelto, partes sin comprimir o un zip (que se mira por dentro
+        # al pulsar). Lo comprimido de verdad sale en False.
+        "streamable": reproduccion.se_puede_intentar(r.get("file_name")),
     }
 
 

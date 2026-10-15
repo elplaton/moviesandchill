@@ -9,6 +9,7 @@ import { useDownloads } from '../hooks/useDownloads';
 import { groupEpisodes, groupVersions, episodeLabel, seasonLabel, type Episode, type Version } from '../utils/versions';
 import Button from './ui/Button';
 import Player from './Player';
+import { audioQueNoSuena, comprobarReproduccion } from '../services/reproducir';
 import { IconBell, IconCheck, IconClose, IconDownload, IconHeart, IconPlay, IconStar, IconTrash } from './ui/Icon';
 import type { SearchResult, TMDBMetadata } from '../types';
 
@@ -33,8 +34,10 @@ type RowState = { s: 'ready'; f: LocalFile } | { s: 'busy'; label: string; progr
  * que el botón de debajo del ratón volvía a nacer en su color normal y repetía
  * la transición al de hover sin parar. Parecía que parpadeaba.
  */
-const Row = ({ label, title, sub, st, onEnter, onDelete, marcado, onMarcar }: {
+const Row = ({ label, title, sub, st, onEnter, onDelete, marcado, onMarcar, onVer }: {
   label: string; title: string; sub: string; st: RowState; onEnter: () => void; onDelete?: () => void;
+  /** Ver sin descargar, cuando el archivo se puede leer de Telegram al vuelo. */
+  onVer?: () => void;
   /** Visto por capítulo: solo en series, y solo si el título está en TMDB. */
   marcado?: boolean; onMarcar?: () => void;
 }) => (
@@ -62,7 +65,10 @@ const Row = ({ label, title, sub, st, onEnter, onDelete, marcado, onMarcar }: {
       ) : st.s === 'ready' ? (
         <Button variant="light" size="sm" icon={<IconPlay />} onClick={onEnter}>Ver</Button>
       ) : (
-        <Button variant="ghost" size="sm" icon={<IconDownload />} onClick={onEnter}>Descargar</Button>
+        <>
+          {onVer && <Button variant="light" size="sm" icon={<IconPlay />} onClick={onVer}>Ver ahora</Button>}
+          <Button variant="ghost" size="sm" icon={<IconDownload />} onClick={onEnter}>Descargar</Button>
+        </>
       )}
       {st.s === 'ready' && onDelete && (
         <button onClick={onDelete} title="Borrar del servidor"
@@ -149,6 +155,18 @@ export default function TitleSheet({ input, onClose }: Props) {
     if (err) say(err); else { say(`Descargando ${v.baseName}`); refreshMe(); }
   }, [stateOf, download, cancelBatch, refreshMe]);
 
+  // Ver sin descargar: se pregunta al servidor (lee unos KB de Telegram la
+  // primera vez) y, si se puede, el reproductor abre la ruta `tg:` que
+  // devuelve como si fuera un archivo del disco.
+  const ver = useCallback(async (v: Version, subtitle?: string) => {
+    say('Preparando…');
+    const r = await comprobarReproduccion(v.channelId, v.messageId);
+    if (r.modo !== 'ver' || !r.path) { say(`Hay que descargarla: ${r.motivo}`); return; }
+    if (audioQueNoSuena(r)) say('El audio es AC-3/DTS: en este navegador puede verse sin sonido');
+    else setNotice('');
+    setPlaying({ path: r.path, subtitle });
+  }, []);
+
   const del = useCallback(async (f: LocalFile, label: string) => {
     if (!confirm(`¿Borrar "${label}" del servidor?`)) return;
     const err = await remove(f.path);
@@ -170,6 +188,10 @@ export default function TitleSheet({ input, onClose }: Props) {
     const sub = ready.v.episode !== undefined ? `${ready.v.season ?? 1}x${String(ready.v.episode).padStart(2, '0')}` : undefined;
     return { path: ready.st.f.path, subtitle: sub };
   }, [versions, stateOf]);
+
+  // Sin nada en disco, la primera version que se pueda ver sin descargar.
+  const alVuelo = useMemo(() => (playable || isSeries ? null : versions.find(v => v.streamable) || null),
+    [playable, isSeries, versions]);
 
   const onDisk = versions.filter(v => stateOf(v).s === 'ready').length;
   const marcado = !!input.tmdbId && esFavorito(input.tmdbId, kind);
@@ -209,6 +231,7 @@ export default function TitleSheet({ input, onClose }: Props) {
             </div>
             <div className="mt-5 flex items-center gap-3">
               {playable && <Button variant="light" icon={<IconPlay />} onClick={() => setPlaying(playable)}>Reproducir</Button>}
+              {alVuelo && <Button variant="light" icon={<IconPlay />} onClick={() => ver(alVuelo)}>Ver ahora</Button>}
               {input.tmdbId ? (
                 <Button variant="ghost" onClick={() => alternar(input.tmdbId!, kind)}
                   className={marcado ? 'text-nf-red' : ''}
@@ -270,10 +293,12 @@ export default function TitleSheet({ input, onClose }: Props) {
                 const best = e.variants.find(v => stateOf(v).s !== 'idle') || e.variants[0];
                 const st = stateOf(best);
                 const name = names.get(`${e.season}:${e.episode}`) || best.baseName;
+                const alVueloEp = e.variants.find(v => v.streamable);
                 return (
                   <Row key={`${e.season}:${e.episode}`} label={episodeLabel(e)} title={name}
                     sub={`${best.quality} · ${best.sizeStr}${e.variants.length > 1 ? ` · ${e.variants.length} versiones` : ''}${best.channelName ? ` · ${best.channelName}` : ''}`}
                     st={st} onEnter={() => onEpisode(e)}
+                    onVer={alVueloEp ? () => ver(alVueloEp, `${episodeLabel(e)}${names.get(`${e.season}:${e.episode}`) ? ` · ${names.get(`${e.season}:${e.episode}`)}` : ''}`) : undefined}
                     marcado={visto.esVisto(e.season, e.episode ?? 0)}
                     onMarcar={input.tmdbId ? () => visto.alternarEpisodio(e.season, e.episode ?? 0) : undefined}
                     onDelete={st.s === 'ready' ? () => del(st.f, `${episodeLabel(e)} · ${name}`) : undefined} />
@@ -285,6 +310,7 @@ export default function TitleSheet({ input, onClose }: Props) {
                   <Row key={v.key} label={v.quality.split(' · ')[0]} title={v.baseName}
                     sub={`${v.quality} · ${v.sizeStr}${v.parts > 1 ? ` · ${v.parts} partes` : ''}${v.channelName ? ` · ${v.channelName}` : ''}`}
                     st={st} onEnter={() => act(v)}
+                    onVer={v.streamable ? () => ver(v) : undefined}
                     onDelete={st.s === 'ready' ? () => del(st.f, v.baseName) : undefined} />
                 );
               })}

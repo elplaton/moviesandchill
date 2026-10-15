@@ -194,6 +194,19 @@ async def _ensure_tables():
                 PRIMARY KEY (user_id, tmdb_id)
             )
         """)
+        # Si un archivo de Telegram se puede ver sin descargarlo, y como: lo
+        # que salio de mirarlo una vez (services/reproduccion.py). `datos`
+        # lleva el modo, el motivo y las pistas que leyo ffprobe.
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS reproduccion (
+                channel_id    BIGINT NOT NULL,
+                message_id    INTEGER NOT NULL,
+                modo          VARCHAR(20) NOT NULL,
+                datos         JSONB,
+                comprobado_en TIMESTAMP DEFAULT NOW(),
+                PRIMARY KEY (channel_id, message_id)
+            )
+        """)
         # Estado de la interfaz que es **de la cuenta** y no del aparato: lo
         # ultimo que se busco, por ejemplo. Es el gemelo por usuario de
         # `app_settings`, y existe para que estas cosas no acaben en el

@@ -204,7 +204,9 @@ def continuar_viendo(filas: list[dict], limite: int = 20,
         if not terminado:
             if posicion < MIN_SEGUNDOS or duracion <= 0:
                 continue
-            if not os.path.isfile(os.path.join(_base(), rel)):
+            # `tg:<canal>:<msg>` se vio sin descargar: no esta en disco y no
+            # tiene por que estarlo.
+            if not rel.startswith("tg:") and not os.path.isfile(os.path.join(_base(), rel)):
                 continue  # se borro de la biblioteca
             tarjetas.append(_tarjeta(fila, rel, posicion, duracion, temporada, episodio, False))
         else:
