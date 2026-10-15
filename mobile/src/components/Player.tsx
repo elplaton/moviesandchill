@@ -352,7 +352,6 @@ export default function Player(props: Props) {
             <span className="block w-10 h-10 mx-auto rounded-full border-[3px] border-white/20 border-t-white animate-spin" />
             <p className="mt-5 text-[17px] font-semibold leading-tight">{title}</p>
             {subtitle && <p className="mt-1 text-[14px] text-nf-text2">{subtitle}</p>}
-            <p className="mt-3 text-[13px] text-nf-text3">Preparando el vídeo…</p>
             {airplay.disponible && (
               <button onClick={airplay.elegir}
                 className="mt-6 inline-flex items-center gap-2 h-11 px-5 rounded-xl bg-white/15 text-[15px] font-semibold active:bg-white/25">
