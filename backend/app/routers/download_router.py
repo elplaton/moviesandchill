@@ -497,6 +497,11 @@ async def _download_batch(batch_id):
                     raise
                 except Exception as e:
                     part["status"] = "error"; part["error"] = str(e)
+                    # Sin esto el lote decia "una o mas partes fallaron" y el
+                    # motivo se quedaba en memoria, sin rastro en el log.
+                    logger.warning("Parte fallida | %s | %s | %s: %s", batch.get("folder_name", ""),
+                                   part.get("file_name", part["message_id"]), type(e).__name__, e,
+                                   exc_info=not isinstance(e, (ValueError, IOError)))
                 await broadcast_progress({"type": "batch_update", "batch_id": batch_id, "part_message_id": part["message_id"], "status": "done" if part["status"] == "done" else "error", "downloaded_parts": batch["downloaded_parts"], "total_parts": batch["total_parts"], "overall_progress": batch.get("progress", 0)})
 
         await asyncio.gather(*[_download_one_part(idx, p) for idx, p in enumerate(batch["parts"])])

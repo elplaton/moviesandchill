@@ -31,9 +31,14 @@ from telethon.tl.alltlobjects import LAYER
 
 logger = logging.getLogger("tmd")
 
-# El maximo que acepta upload.getFile por peticion. Con offsets multiplos de
-# esto ningun trozo cruza un limite de 1 MB, que Telegram tambien exige.
-TROZO = 512 * 1024
+# Lo que se pide en cada upload.getFile: 1 MB, el maximo que admite Telegram
+# (con offsets multiplos de esto ningun trozo cruza un limite de 1 MB, que
+# tambien lo exige). Medido en el servidor, Telegram no limita los bytes sino
+# las peticiones: con 512 KB se quedaba en ~10 por segundo y 5,3 MB/s, con
+# miles de esperas forzosas. Si un DC rechaza el tamaño se vuelve a 512 KB,
+# que es lo que pide Telethon.
+TROZO = 1024 * 1024
+TROZO_PEQUENO = 512 * 1024
 
 # Por debajo de esto no compensa abrir conexiones: cada una son un par de idas
 # y vueltas antes del primer byte.
@@ -49,6 +54,10 @@ _disco = concurrent.futures.ThreadPoolExecutor(max_workers=4, thread_name_prefix
 
 class SinParalelo(Exception):
     """No se pudo preparar la descarga en paralelo; usar la normal."""
+
+
+class _TrozoRechazado(Exception):
+    """Telegram no acepta trozos de ese tamaño; probar con los pequeños."""
 
 
 def motor_cifrado():
@@ -108,12 +117,21 @@ async def bajar(client, msg, destino, conexiones, progreso=None):
     `progreso(actual, total)` se llama tras cada trozo escrito. Escribe en
     `destino` directamente: quien llama decide el nombre (y si es temporal).
     """
+    try:
+        return await _bajar(client, msg, destino, conexiones, progreso, TROZO)
+    except _TrozoRechazado:
+        logger.info("Telegram no acepta trozos de %d KB para %s: se baja en trozos de %d KB",
+                    TROZO // 1024, msg.id, TROZO_PEQUENO // 1024)
+        return await _bajar(client, msg, destino, conexiones, progreso, TROZO_PEQUENO)
+
+
+async def _bajar(client, msg, destino, conexiones, progreso, trozo):
     doc = getattr(msg.media, "document", None)
     if not isinstance(doc, types.Document):
         raise SinParalelo("no es un documento")
 
     tamano = doc.size
-    total_trozos = (tamano + TROZO - 1) // TROZO
+    total_trozos = (tamano + trozo - 1) // trozo
     reparto_ = reparto(total_trozos, conexiones)
     n = len(reparto_)
     ubicacion = types.InputDocumentFileLocation(
@@ -128,6 +146,10 @@ async def bajar(client, msg, destino, conexiones, progreso=None):
     fd = os.open(destino, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644)
     en_vuelo = set()
     escrito = 0
+    # Las esperas que impone Telegram, por tipo: FLOOD_WAIT es un limite de
+    # peticiones; FLOOD_PREMIUM_WAIT es el freno a las cuentas sin Premium.
+    esperas = {}
+    segundos_esperando = 0
     referencia_lock = asyncio.Lock()
     inicio = time.monotonic()
 
@@ -145,34 +167,48 @@ async def bajar(client, msg, destino, conexiones, progreso=None):
             ubicacion.file_reference = d.file_reference
 
     async def pedir(sender, offset):
-        for intento in range(REINTENTOS):
+        nonlocal segundos_esperando
+        fallos = 0
+        while True:
             referencia = ubicacion.file_reference
             try:
+                # flood_sleep_threshold=0: Telethon no duerme por su cuenta, nos
+                # pasa la espera para contarla y saber de que tipo es.
                 r = await client._call(sender, functions.upload.GetFileRequest(
-                    location=ubicacion, offset=offset, limit=TROZO))
+                    location=ubicacion, offset=offset, limit=trozo), flood_sleep_threshold=0)
                 return r.bytes
+            except (errors.FloodWaitError, errors.FloodPremiumWaitError) as e:
+                tipo = "FLOOD_PREMIUM_WAIT" if isinstance(e, errors.FloodPremiumWaitError) else "FLOOD_WAIT"
+                esperas[tipo] = esperas.get(tipo, 0) + 1
+                pausa = max(1, e.seconds)
+                segundos_esperando += pausa
+                await asyncio.sleep(pausa)
             except (errors.FileReferenceExpiredError, errors.FilerefUpgradeNeededError):
                 await refrescar_referencia(referencia)
+            except errors.LimitInvalidError:
+                if escrito == 0 and trozo > TROZO_PEQUENO:
+                    raise _TrozoRechazado()
+                raise
             except errors.FileMigrateError as e:
                 if escrito == 0:
                     raise SinParalelo(f"el archivo vive en el DC {e.new_dc}") from e
                 raise
             except (errors.TimedOutError, ConnectionError, OSError) as e:
-                if intento == REINTENTOS - 1:
+                fallos += 1
+                if fallos >= REINTENTOS:
                     raise
-                logger.info("Trozo %d de %s: %s, reintentando", offset // TROZO, msg.id, type(e).__name__)
-                await asyncio.sleep(1 + intento)
-        raise RuntimeError(f"El trozo {offset // TROZO} no se pudo bajar")
+                logger.info("Trozo %d de %s: %s, reintentando", offset // trozo, msg.id, type(e).__name__)
+                await asyncio.sleep(fallos)
 
     async def trabajador(i, sender):
         nonlocal escrito
         for k in range(reparto_[i]):
-            offset = (i + k * n) * TROZO
+            offset = (i + k * n) * trozo
             datos = await pedir(sender, offset)
-            esperado = min(TROZO, tamano - offset)
+            esperado = min(trozo, tamano - offset)
             if len(datos) != esperado:
                 raise IOError(f"Telegram devolvio {len(datos)} bytes en el trozo "
-                              f"{offset // TROZO} y se esperaban {esperado}")
+                              f"{offset // trozo} y se esperaban {esperado}")
             cf = _disco.submit(os.pwrite, fd, datos, offset)
             en_vuelo.add(cf)
             try:
@@ -203,6 +239,9 @@ async def bajar(client, msg, destino, conexiones, progreso=None):
         await asyncio.gather(*[s.disconnect() for s in senders], return_exceptions=True)
 
     segundos = max(time.monotonic() - inicio, 0.001)
-    logger.info("Descargado %s | %.1f MB en %.0f s | %.1f MB/s | %d conexiones",
-                os.path.basename(destino), tamano / 1e6, segundos, tamano / 1e6 / segundos, n)
+    frenos = ", ".join(f"{v} {k}" for k, v in sorted(esperas.items())) or "ninguna"
+    logger.info("Descargado %s | %.1f MB en %.0f s | %.1f MB/s | %d conexiones | trozos de %d KB | "
+                "esperas de Telegram: %s (%d s en total, sumando las de todas las conexiones)",
+                os.path.basename(destino), tamano / 1e6, segundos, tamano / 1e6 / segundos, n,
+                trozo // 1024, frenos, segundos_esperando)
     return destino

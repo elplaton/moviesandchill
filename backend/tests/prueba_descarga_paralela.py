@@ -41,8 +41,12 @@ class Sender:
 class Cliente:
     """Sirve `datos` como upload.getFile, con retrasos al azar."""
 
-    def __init__(self, datos, caduca_en=None, falla_en=None):
+    def __init__(self, datos, caduca_en=None, falla_en=None, frenos=0, frenos_premium=0, sin_mega=False):
         self.datos = datos
+        self.frenos = frenos                  # FLOOD_WAIT que quedan por mandar
+        self.frenos_premium = frenos_premium  # FLOOD_PREMIUM_WAIT que quedan
+        self.sin_mega = sin_mega              # rechaza trozos de mas de 512 KB
+        self.limites = set()
         self.referencia = b"ref-1"
         self.caduca_en = caduca_en      # offset en el que la referencia caduca
         self.falla_en = falla_en        # offset que devuelve un error definitivo
@@ -51,18 +55,28 @@ class Cliente:
         self.en_vuelo = 0
         self.max_en_vuelo = 0
 
-    async def _call(self, sender, req):
+    async def _call(self, sender, req, flood_sleep_threshold=None):
+        assert flood_sleep_threshold == 0, "las esperas las cuenta descarga_paralela"
         self.peticiones += 1
+        self.limites.add(req.limit)
         self.en_vuelo += 1
         self.max_en_vuelo = max(self.max_en_vuelo, self.en_vuelo)
         try:
             await asyncio.sleep(random.uniform(0, 0.01))
+            if self.sin_mega and req.limit > 512 * 1024:
+                raise errors.LimitInvalidError(None)
+            if self.frenos:
+                self.frenos -= 1
+                raise errors.FloodWaitError(None, 0)
+            if self.frenos_premium:
+                self.frenos_premium -= 1
+                raise errors.FloodPremiumWaitError(None, 0)
             if req.offset == self.falla_en:
                 raise errors.RPCError(None, "FALLO_DE_PRUEBA", 400)
             if self.caduca_en is not None and req.offset >= self.caduca_en and req.location.file_reference == b"ref-1":
                 self.referencia = b"ref-2"
                 raise errors.FileReferenceExpiredError(None)
-            assert req.offset % dp.TROZO == 0 and req.limit == dp.TROZO
+            assert req.offset % req.limit == 0 and req.limit in (dp.TROZO, dp.TROZO_PEQUENO)
             return SimpleNamespace(bytes=self.datos[req.offset:req.offset + req.limit])
         finally:
             self.en_vuelo -= 1
@@ -158,6 +172,16 @@ async def main():
     await asyncio.sleep(0.1)
     comprueba("no se piden mas trozos", antes, cliente.peticiones)
     comprueba("se cierran todas las conexiones", True, all(s.desconectado for s in senders))
+
+    print("Telegram frena con esperas")
+    datos, bajado, cliente, _ = await caso("g.bin", dp.TROZO * 6 + 99, frenos=2, frenos_premium=1)
+    comprueba("el archivo es identico al original", True, datos == bajado)
+    comprueba("cada espera se repite la peticion", 7 + 3, cliente.peticiones)
+
+    print("Un DC no acepta trozos de 1 MB")
+    datos, bajado, cliente, _ = await caso("h.bin", dp.TROZO * 5 + 3, sin_mega=True)
+    comprueba("el archivo es identico al original", True, datos == bajado)
+    comprueba("se acaba pidiendo en trozos de 512 KB", True, dp.TROZO_PEQUENO in cliente.limites)
 
     print("No es un documento")
     try:
