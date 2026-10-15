@@ -274,7 +274,12 @@ export default function Player(props: Props) {
   const hayPistas = audio.length > 1 || subs.length > 0;
 
   return (
-    <div ref={boxRef} className="fixed inset-0 z-[80] bg-black" onMouseMove={wake} onDoubleClick={fullscreen}>
+    /* Los clics no salen del reproductor. Se monta dentro de la ficha, cuyo
+       fondo cierra al pulsarlo, y en React los clics suben por el arbol de
+       componentes aunque el reproductor tape la pantalla entera: elegir un
+       minuto en la barra cerraba la ficha y, con ella, la pelicula. */
+    <div ref={boxRef} className="fixed inset-0 z-[80] bg-black" onMouseMove={wake} onDoubleClick={fullscreen}
+      onClick={e => e.stopPropagation()}>
       <video ref={ref} src={src} autoPlay onClick={toggle} crossOrigin="use-credentials"
         x-webkit-airplay="allow"
         className="h-full w-full bg-black object-contain">

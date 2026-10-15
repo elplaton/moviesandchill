@@ -327,7 +327,7 @@ export default function TitleSheet({ input, onClose }: Props) {
       </div>
 
       {pick && (
-        <div className="fixed inset-0 z-[75] grid place-items-center bg-black/70 p-4" onClick={() => setPick(null)}>
+        <div className="fixed inset-0 z-[75] grid place-items-center bg-black/70 p-4" onClick={e => { e.stopPropagation(); setPick(null); }}>
           <div onClick={e => e.stopPropagation()} className="w-[min(520px,92vw)] rounded-panel bg-nf-surface p-6 shadow-panel animate-scale-in">
             <h3 className="mb-4 text-md font-semibold">Elige versión</h3>
             {pick.variants.map(v => (
@@ -345,7 +345,7 @@ export default function TitleSheet({ input, onClose }: Props) {
       )}
 
       {noSeVe && (
-        <div className="fixed inset-0 z-[75] grid place-items-center bg-black/70 p-4" onClick={() => setNoSeVe(null)}>
+        <div className="fixed inset-0 z-[75] grid place-items-center bg-black/70 p-4" onClick={e => { e.stopPropagation(); setNoSeVe(null); }}>
           <div onClick={e => e.stopPropagation()} className="w-[min(480px,92vw)] rounded-panel bg-nf-surface p-6 shadow-panel animate-scale-in">
             <h3 className="mb-2 text-md font-semibold">No se puede ver sin descargar</h3>
             <p className="mb-5 text-base text-nf-dim">{noSeVe.motivo ? noSeVe.motivo.charAt(0).toUpperCase() + noSeVe.motivo.slice(1) : 'Hay que descargarla primero'}.</p>
