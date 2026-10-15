@@ -26,6 +26,13 @@ class SearchRequest(BaseModel):
     channel_ids: list[int] | None = None
 
 
+# Va en la clave de las entradas cacheadas que llevan resultados. Al añadir un
+# campo a `_row_to_result` se sube, y las entradas de antes (que no lo traen)
+# dejan de encontrarse sin tener que vaciar Redis: si no, durante su caducidad
+# los clientes no ven el campo nuevo (paso con `streamable`).
+FORMA_RESULTADO = 2
+
+
 def _row_to_result(r: dict, existing: set, done: dict | None = None, me: dict | None = None) -> dict:
     # Lo descargado se sabe por la tabla de descargas (ruta final, dueño), no
     # adivinando por el nombre del archivo.
@@ -110,7 +117,7 @@ async def search(req: SearchRequest, user: Annotated[str, Depends(get_current_us
     if not req.query.strip():
         return {"results": [], "count": 0, "has_more": False, "last_message_id": 0}
     return await cache.recordar(
-        "busqueda", [req.query.strip().lower(), req.page_size, req.offset, req.offset_id,
+        "busqueda", [FORMA_RESULTADO, req.query.strip().lower(), req.page_size, req.offset, req.offset_id,
                      int(req.sort_asc), ",".join(map(str, req.channel_ids or []))],
         lambda: _buscar(req, user), user_id=user)
 
@@ -175,7 +182,7 @@ async def media_files(tmdb_id: int, user: Annotated[str, Depends(get_current_use
     if media_type not in ("movie", "tv"):
         media_type = None
     return await cache.recordar(
-        "ficha", [tmdb_id, media_type or "todo"],
+        "ficha", [FORMA_RESULTADO, tmdb_id, media_type or "todo"],
         lambda: _ficha(tmdb_id, user, media_type), user_id=user)
 
 

@@ -43,7 +43,7 @@ const Row = ({ label, title, sub, st, onEnter, onDelete, marcado, onMarcar, onVe
 }) => (
   <div className={`group flex items-center gap-4 rounded px-3 py-2.5 hover:bg-white/[0.06] ${marcado ? 'opacity-55' : ''}`}>
     <span className="w-14 shrink-0 text-base font-semibold tabular-nums text-nf-faint">{label}</span>
-    <button onClick={onEnter} className="min-w-0 flex-1 text-left">
+    <button onClick={st.s === 'idle' && onVer ? onVer : onEnter} className="min-w-0 flex-1 text-left">
       <p className="truncate text-base font-medium">{title}</p>
       <p className="truncate text-xs text-nf-faint">{sub}</p>
     </button>
@@ -65,10 +65,11 @@ const Row = ({ label, title, sub, st, onEnter, onDelete, marcado, onMarcar, onVe
       ) : st.s === 'ready' ? (
         <Button variant="light" size="sm" icon={<IconPlay />} onClick={onEnter}>Ver</Button>
       ) : (
-        <>
-          {onVer && <Button variant="light" size="sm" icon={<IconPlay />} onClick={onVer}>Ver ahora</Button>}
-          <Button variant="ghost" size="sm" icon={<IconDownload />} onClick={onEnter}>Descargar</Button>
-        </>
+        /* Lo que se puede ver al vuelo no se descarga: solo lo comprimido.
+           Si al final no se puede ver, `ver` ofrece descargar con el motivo. */
+        onVer
+          ? <Button variant="light" size="sm" icon={<IconPlay />} onClick={onVer}>Ver</Button>
+          : <Button variant="ghost" size="sm" icon={<IconDownload />} onClick={onEnter}>Descargar</Button>
       )}
       {st.s === 'ready' && onDelete && (
         <button onClick={onDelete} title="Borrar del servidor"
@@ -102,13 +103,15 @@ export default function TitleSheet({ input, onClose }: Props) {
   const [playing, setPlaying] = useState<{ path: string; subtitle?: string } | null>(null);
   const [notice, setNotice] = useState('');
   const [pick, setPick] = useState<{ variants: Version[]; subtitle?: string } | null>(null);
+  /** "Ver" no ha podido: el motivo y la version, para ofrecer descargarla. */
+  const [noSeVe, setNoSeVe] = useState<{ v: Version; motivo: string; subtitle?: string } | null>(null);
 
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && !playing && !pick) onClose(); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && !playing && !pick && !noSeVe) onClose(); };
     window.addEventListener('keydown', onKey);
     document.body.style.overflow = 'hidden';
     return () => { window.removeEventListener('keydown', onKey); document.body.style.overflow = ''; };
-  }, [onClose, playing, pick]);
+  }, [onClose, playing, pick, noSeVe]);
 
   const say = (m: string) => { setNotice(m); setTimeout(() => setNotice(''), 4000); };
 
@@ -161,7 +164,7 @@ export default function TitleSheet({ input, onClose }: Props) {
   const ver = useCallback(async (v: Version, subtitle?: string) => {
     say('Preparando…');
     const r = await comprobarReproduccion(v.channelId, v.messageId);
-    if (r.modo !== 'ver' || !r.path) { say(`Hay que descargarla: ${r.motivo}`); return; }
+    if (r.modo !== 'ver' || !r.path) { setNotice(''); setNoSeVe({ v, motivo: r.motivo, subtitle }); return; }
     if (audioQueNoSuena(r)) say('El audio es AC-3/DTS: en este navegador puede verse sin sonido');
     else setNotice('');
     setPlaying({ path: r.path, subtitle });
@@ -337,6 +340,19 @@ export default function TitleSheet({ input, onClose }: Props) {
                 <span className="w-4 h-4 shrink-0 text-nf-faint"><IconDownload /></span>
               </button>
             ))}
+          </div>
+        </div>
+      )}
+
+      {noSeVe && (
+        <div className="fixed inset-0 z-[75] grid place-items-center bg-black/70 p-4" onClick={() => setNoSeVe(null)}>
+          <div onClick={e => e.stopPropagation()} className="w-[min(480px,92vw)] rounded-panel bg-nf-surface p-6 shadow-panel animate-scale-in">
+            <h3 className="mb-2 text-md font-semibold">No se puede ver sin descargar</h3>
+            <p className="mb-5 text-base text-nf-dim">{noSeVe.motivo ? noSeVe.motivo.charAt(0).toUpperCase() + noSeVe.motivo.slice(1) : 'Hay que descargarla primero'}.</p>
+            <div className="flex justify-end gap-3">
+              <Button variant="ghost" onClick={() => setNoSeVe(null)}>Cerrar</Button>
+              <Button variant="light" icon={<IconDownload />} onClick={() => { const x = noSeVe; setNoSeVe(null); act(x.v, x.subtitle); }}>Descargar</Button>
+            </div>
           </div>
         </div>
       )}

@@ -41,14 +41,9 @@ function Action({ state, onPlay, onDownload, onDelete, onManage, onVer }: {
     );
   }
   if (onVer) {
-    // Los dos no caben con texto en una fila de telefono: ver es lo principal
-    // y descargar queda como icono al lado.
-    return (
-      <div className="flex items-center gap-2 shrink-0">
-        <button onClick={onVer} className="tap h-9 px-3 rounded-full bg-white text-black text-[13px] font-semibold flex items-center gap-1 active:opacity-70"><span className="w-4 h-4"><IPlay /></span>Ver</button>
-        <button onClick={onDownload} aria-label="Descargar" className="tap w-9 h-9 rounded-full bg-nf-red text-white flex items-center justify-center active:bg-nf-reddeep"><span className="w-4 h-4"><IDown /></span></button>
-      </div>
-    );
+    // Lo que se puede ver al vuelo no se descarga: solo lo comprimido. Si al
+    // final no se puede ver, `ver` ofrece descargarlo con el motivo.
+    return <button onClick={onVer} className="tap h-9 px-3 rounded-full bg-white text-black text-[13px] font-semibold flex items-center gap-1 shrink-0 active:opacity-70"><span className="w-4 h-4"><IPlay /></span>Ver</button>;
   }
   return <button onClick={onDownload} className="tap h-9 px-3 rounded-full bg-nf-red text-white text-[13px] font-semibold shrink-0 active:bg-nf-reddeep">Descargar</button>;
 }
@@ -73,6 +68,8 @@ export default function Title() {
   const [playing, setPlaying] = useState<{ path: string; subtitle?: string } | null>(null);
   const [menu, setMenu] = useState<{ v: Version; ds: DownloadState } | null>(null);
   const [pick, setPick] = useState<{ variants: Version[]; subtitle?: string } | null>(null);
+  /** "Ver" no ha podido: el motivo y la version, para ofrecer descargarla. */
+  const [noSeVe, setNoSeVe] = useState<{ v: Version; motivo: string; subtitle?: string } | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -136,7 +133,7 @@ export default function Title() {
     toast('Preparando…');
     const r = await comprobarReproduccion(v.channelId, v.messageId);
     const motivo = motivoNoSeVe(r);
-    if (motivo || !r.path) { toast(`No se puede ver sin descargar: ${motivo || r.motivo}`, 'error', 6000); return; }
+    if (motivo || !r.path) { setNoSeVe({ v, motivo: motivo || r.motivo, subtitle }); return; }
     setPlaying({ path: r.path, subtitle });
   }, []);
 
@@ -292,6 +289,16 @@ export default function Title() {
                 <p className="text-[15px]">{v.quality} · {v.sizeStr}</p><p className="text-[12px] text-nf-text3">{v.channelName}{v.parts > 1 ? ` · ${v.parts} partes` : ''}</p>
               </button>
             ))}
+          </div>
+        </div>
+      )}
+      {noSeVe && (
+        <div className="fixed inset-0 z-[65] bg-black/70 flex items-end" onClick={() => setNoSeVe(null)}>
+          <div className="w-full bg-nf-raised rounded-t-2xl p-4 rise" style={{ paddingBottom: 'calc(16px + var(--safe-b))' }} onClick={e => e.stopPropagation()}>
+            <p className="text-[15px] font-semibold">No se puede ver sin descargar</p>
+            <p className="text-[13px] text-nf-text2 mt-1 mb-4">{noSeVe.motivo ? noSeVe.motivo.charAt(0).toUpperCase() + noSeVe.motivo.slice(1) : 'Hay que descargarla primero'}.</p>
+            <button onClick={() => { const x = noSeVe; setNoSeVe(null); act(x.v, x.subtitle); }} className="w-full h-12 rounded-xl bg-nf-red text-white text-[15px] font-semibold mb-2 flex items-center justify-center gap-2"><span className="w-4 h-4"><IDown /></span>Descargar</button>
+            <button onClick={() => setNoSeVe(null)} className="w-full h-12 rounded-xl bg-white/10 text-[15px] font-medium">Cerrar</button>
           </div>
         </div>
       )}
