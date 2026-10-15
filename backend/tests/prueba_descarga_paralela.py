@@ -31,8 +31,14 @@ def comprueba(nombre, esperado, obtenido):
 
 
 class Sender:
-    def __init__(self):
+    """Una conexion: lo que se manda por ella lo contesta el cliente falso."""
+
+    def __init__(self, cliente):
+        self.cliente = cliente
         self.desconectado = False
+
+    def send(self, req):
+        return asyncio.ensure_future(self.cliente.servir(req))
 
     async def disconnect(self):
         self.desconectado = True
@@ -55,8 +61,7 @@ class Cliente:
         self.en_vuelo = 0
         self.max_en_vuelo = 0
 
-    async def _call(self, sender, req, flood_sleep_threshold=None):
-        assert flood_sleep_threshold == 0, "las esperas las cuenta descarga_paralela"
+    async def servir(self, req):
         self.peticiones += 1
         self.limites.add(req.limit)
         self.en_vuelo += 1
@@ -100,7 +105,7 @@ senders = []
 
 
 async def abrir_falso(client, dc_id, n):
-    nuevos = [Sender() for _ in range(n)]
+    nuevos = [Sender(client) for _ in range(n)]
     senders.extend(nuevos)
     return nuevos
 

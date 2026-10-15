@@ -384,6 +384,39 @@ async def save_credentials(req: CredentialsRequest, user: Annotated[str, Depends
     }
 
 
+@router.post("/logout")
+async def logout(user: Annotated[str, Depends(get_current_admin)]):
+    """Cierra la sesion de Telegram para volver a entrar con el codigo.
+
+    Existe porque Telegram puede tratar una sesion vieja peor que una nueva:
+    con la cuenta ya Premium y cryptg, esta bajaba a 5,3 MB/s con miles de
+    esperas forzosas mientras Telegram Desktop, misma cuenta y misma casa,
+    bajaba la misma pelicula en un minuto. Se cierra tambien en Telegram
+    (log_out), para que no quede un dispositivo fantasma en la cuenta.
+    """
+    downloader, config = _ctx()
+    if downloader.active_batches and any(
+            b.get("status") in ("downloading", "extracting") for b in downloader.active_batches.values()):
+        raise HTTPException(status_code=409,
+                            detail="Hay descargas en marcha. Espera a que acaben o pausalas antes de cerrar la sesion.")
+
+    cerrada_en_telegram = False
+    if downloader.client is not None:
+        try:
+            if not downloader.client.is_connected():
+                await downloader.client.connect()
+            cerrada_en_telegram = bool(await downloader.client.log_out())
+        except Exception as e:
+            logger.warning("No se pudo cerrar la sesion en Telegram (se aparta igualmente): %s", e)
+    await _clear_pending()
+    # log_out ya borra el fichero; si fallo, se aparta como al cambiar de app.
+    await _reset_client(downloader)
+    downloader.premium = None
+    logger.info("Sesion de Telegram cerrada por %s (en Telegram: %s)", user, "si" if cerrada_en_telegram else "no")
+    return {"authorized": False,
+            "detail": "Sesion cerrada. Pide un codigo para volver a entrar."}
+
+
 async def _reset_client(downloader) -> None:
     """Desconecta el cliente y aparta el fichero de sesion, que pertenece a la
     aplicacion anterior. Se renombra en vez de borrarse: si el cambio fue un

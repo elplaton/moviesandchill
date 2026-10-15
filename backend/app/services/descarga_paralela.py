@@ -172,10 +172,13 @@ async def _bajar(client, msg, destino, conexiones, progreso, trozo):
         while True:
             referencia = ubicacion.file_reference
             try:
-                # flood_sleep_threshold=0: Telethon no duerme por su cuenta, nos
-                # pasa la espera para contarla y saber de que tipo es.
-                r = await client._call(sender, functions.upload.GetFileRequest(
-                    location=ubicacion, offset=offset, limit=trozo), flood_sleep_threshold=0)
+                # Directo por la conexion y no por client._call: ese duerme las
+                # esperas de Telegram por su cuenta (e ignora el
+                # flood_sleep_threshold que se le pasa, mira solo el del
+                # cliente), y aqui hay que verlas para contarlas y saber de que
+                # tipo son.
+                r = await sender.send(functions.upload.GetFileRequest(
+                    location=ubicacion, offset=offset, limit=trozo))
                 return r.bytes
             except (errors.FloodWaitError, errors.FloodPremiumWaitError) as e:
                 tipo = "FLOOD_PREMIUM_WAIT" if isinstance(e, errors.FloodPremiumWaitError) else "FLOOD_WAIT"
@@ -193,7 +196,8 @@ async def _bajar(client, msg, destino, conexiones, progreso, trozo):
                 if escrito == 0:
                     raise SinParalelo(f"el archivo vive en el DC {e.new_dc}") from e
                 raise
-            except (errors.TimedOutError, ConnectionError, OSError) as e:
+            except (errors.TimedOutError, errors.ServerError, errors.RpcCallFailError,
+                    ConnectionError, OSError) as e:
                 fallos += 1
                 if fallos >= REINTENTOS:
                     raise

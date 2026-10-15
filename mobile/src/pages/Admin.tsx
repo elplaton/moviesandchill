@@ -458,6 +458,17 @@ function Telegram() {
     } finally { setBusy(false); }
   };
 
+  // Cerrar la sesion para volver a entrar con el codigo (ver AdminTelegram de la web).
+  const [confirmaSalida, setConfirmaSalida] = useState(false);
+  const salir = async () => {
+    setBusy(true); setError('');
+    try {
+      const r = await apiFetch('/admin/telegram/logout', { method: 'POST' });
+      if (!r.ok) setError(await detalle(r, 'No se ha podido cerrar la sesión.'));
+      else { toast('Sesión cerrada', 'ok'); setCode(''); setPass(''); setPidePass(false); load(); }
+    } finally { setBusy(false); setConfirmaSalida(false); }
+  };
+
   const entrar = async () => {
     if (!code.trim()) return;
     setBusy(true); setError('');
@@ -506,7 +517,31 @@ function Telegram() {
               </span>
             )}
           </p>
-        ) : st.configured ? (
+        ) : null}
+        {st.authorized && (
+          <>
+            {error && <p className="mt-3 text-[13px] text-red-300">{error}</p>}
+            {!confirmaSalida ? (
+              <button onClick={() => setConfirmaSalida(true)} disabled={busy} className={`${boton} mt-3 bg-white/10`}>
+                Cerrar sesión de Telegram
+              </button>
+            ) : (
+              <>
+                <p className="mt-3 text-[13px] text-nf-text3 leading-relaxed">
+                  Se cerrará también en Telegram y habrá que volver a entrar con un código.
+                  Mientras tanto no se descarga ni se indexa nada.
+                </p>
+                <button onClick={salir} disabled={busy} className={`${boton} mt-3 bg-nf-red`}>
+                  {busy ? 'Cerrando…' : 'Sí, cerrar sesión'}
+                </button>
+                <button onClick={() => setConfirmaSalida(false)} disabled={busy} className={`${boton} mt-2 bg-white/10`}>
+                  Cancelar
+                </button>
+              </>
+            )}
+          </>
+        )}
+        {st.authorized ? null : st.configured ? (
           <>
             <p className="text-[13px] text-nf-text3 leading-relaxed">
               El código llega como mensaje del propio Telegram dentro de la app, no por SMS,
