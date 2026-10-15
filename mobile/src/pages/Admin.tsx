@@ -498,6 +498,13 @@ function Telegram() {
         {st.authorized ? (
           <p className="text-[13px] text-nf-text3">
             Conectado como {st.phone} · {st.channels_resolved === 1 ? '1 canal resuelto' : `${st.channels_resolved} canales resueltos`}
+            {st.premium != null && (
+              <span className={`block mt-1 ${st.premium === false || st.cifrado === 'python' ? 'text-amber-300' : ''}`}>
+                {st.premium ? 'Premium' : 'Sin Premium (Telegram limita la velocidad)'}
+                {st.cifrado === 'python' ? ' · cifrado en Python, muy lento' : st.cifrado ? ` · cifrado con ${st.cifrado}` : ''}
+                {st.conexiones ? ` · ${st.conexiones} conexiones por archivo` : ''}
+              </span>
+            )}
           </p>
         ) : st.configured ? (
           <>

@@ -649,7 +649,8 @@ def _cleanup_partial_files(folder, target_files=None, remove_empty_dir=True):
     if not folder or not os.path.isdir(folder):
         return
     for f in os.listdir(folder):
-        if target_files is not None and f not in target_files:
+        # Lo que se estaba bajando se llama `<nombre>.parcial` hasta acabar.
+        if target_files is not None and f not in target_files and f.removesuffix(".parcial") not in target_files:
             continue
         fpath = os.path.join(folder, f)
         try:

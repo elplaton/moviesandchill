@@ -51,6 +51,9 @@ def load_config(force_reload: bool = False) -> dict:
         "server_host": os.getenv("TMD_SERVER_HOST", "0.0.0.0"),
         "server_port": _env_int("TMD_SERVER_PORT", 8000),
         "download_parallel": _env_int("TMD_DOWNLOAD_PARALLEL", 3),
+        # Conexiones a Telegram por archivo. Bajando de una en una la velocidad
+        # la pone la latencia (unos 5 MB/s), no la cuenta ni la linea.
+        "download_conexiones": _env_int("TMD_DOWNLOAD_CONEXIONES", 6),
         "stream_max": _env_int("TMD_STREAM_MAX", 3),
         "delete_archives_after_extract": _env_bool("TMD_DELETE_ARCHIVES", True),
         "convert_dts_to_ac3": _env_bool("TMD_CONVERT_DTS", True),

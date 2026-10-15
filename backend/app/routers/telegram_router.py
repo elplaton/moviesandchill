@@ -31,6 +31,7 @@ from telethon.errors import (
 )
 
 from app.auth.dependencies import get_current_admin
+from app.services.descarga_paralela import motor_cifrado
 
 logger = logging.getLogger("tmd")
 
@@ -161,6 +162,10 @@ async def telegram_status(user: Annotated[str, Depends(get_current_admin)]):
     try:
         client, _ = await _ensure_client(downloader, config)
         authorized = await client.is_user_authorized()
+        # Se pregunta cada vez: quien acaba de pagar Premium quiere verlo aqui
+        # sin tener que reiniciar nada.
+        if authorized:
+            downloader.premium = bool(getattr(await client.get_me(), "premium", False))
     except Exception as e:
         logger.warning("No se pudo comprobar la sesion de Telegram: %s", e)
 
@@ -171,6 +176,11 @@ async def telegram_status(user: Annotated[str, Depends(get_current_admin)]):
         "phone": _mask_phone(config.get("phone", "")),
         "channels_resolved": len(downloader.channels),
         "credentials": _credentials_out(config),
+        # Lo que decide la velocidad de descarga: si Telegram limita la cuenta,
+        # con que se descifra y cuantas conexiones se abren por archivo.
+        "premium": downloader.premium if authorized else None,
+        "cifrado": motor_cifrado(),
+        "conexiones": downloader.conexiones,
     }
 
 

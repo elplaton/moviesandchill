@@ -15,6 +15,17 @@ interface Status {
   channels_resolved: number;
   credentials?: Credentials;
   detail?: string;
+  premium?: boolean | null;
+  cifrado?: string;
+  conexiones?: number;
+}
+
+/** Lo que decide la velocidad de descarga, en una línea. */
+function lineaVelocidad(st: Status) {
+  const premium = st.premium == null ? null : st.premium ? 'Premium' : 'sin Premium (Telegram limita la velocidad)';
+  const cifrado = st.cifrado === 'python' ? 'cifrado en Python: falta cryptg, va muy lento' : st.cifrado ? `cifrado con ${st.cifrado}` : null;
+  const conexiones = st.conexiones ? `${st.conexiones} conexiones por archivo` : null;
+  return [premium, cifrado, conexiones].filter(Boolean).join(' · ');
 }
 
 const CARD = 'bg-white/5 backdrop-blur-md border border-white/10 rounded-2xl p-6 shadow-xl';
@@ -193,6 +204,11 @@ export default function AdminTelegram({ onToast }: { onToast: (m: string) => voi
                 ? '1 canal resuelto'
                 : `${status.channels_resolved} canales resueltos`}
             </p>
+            {lineaVelocidad(status) && (
+              <p className={`text-sm mt-1 ${status.premium === false || status.cifrado === 'python' ? 'text-amber-400/90' : 'text-nf-dim'}`}>
+                {lineaVelocidad(status)}
+              </p>
+            )}
             {status.channels_resolved === 0 && (
               <p className="text-amber-400/90 text-sm mt-3">
                 La sesión vale, pero no se ha resuelto ningún canal. Revísalos en la pestaña Canales.

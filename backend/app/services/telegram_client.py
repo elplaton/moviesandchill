@@ -7,7 +7,11 @@ from datetime import datetime, timedelta
 from telethon import TelegramClient
 from telethon.errors import SessionPasswordNeededError
 
+from app.services import descarga_paralela
 from app.services.storage import _detect_multipart, suggest_folder_name, create_movie_folder
+
+# Lo que se esta bajando lleva esto detras hasta que esta entero.
+SUFIJO_PARCIAL = ".parcial"
 
 # Cuanto se espera a Telegram al buscar las partes de un archivo en un canal.
 BUSQUEDA_PARTES_S = 8
@@ -39,7 +43,12 @@ class TelegramDownloader:
         self.api_hash = config["api_hash"]
         self.phone = config["phone"]
         self.download_path = config["download_path"]
+        # Conexiones por archivo (ver services/descarga_paralela.py). 1 = como
+        # antes, un trozo detras de otro.
+        self.conexiones = max(1, config.get("download_conexiones", 6))
         self.client = None
+        # None hasta preguntarselo a Telegram al arrancar.
+        self.premium = None
         self.active_batches = {}
         self.channel_ids = []
         self.channels = {}
@@ -118,9 +127,14 @@ class TelegramDownloader:
         # lentas lo primero es saber cual de las dos es.
         try:
             yo = await self.client.get_me()
-            logger.info("Cuenta de Telegram: %s | Premium: %s",
+            self.premium = bool(getattr(yo, "premium", False))
+            logger.info("Cuenta de Telegram: %s | Premium: %s | Cifrado: %s | Conexiones por archivo: %d",
                         getattr(yo, "username", None) or getattr(yo, "phone", "?"),
-                        "si" if getattr(yo, "premium", False) else "no")
+                        "si" if self.premium else "no",
+                        descarga_paralela.motor_cifrado(), self.conexiones)
+            if descarga_paralela.motor_cifrado() == "python":
+                logger.warning("Telethon esta descifrando en Python puro: las descargas no pasaran "
+                               "de ~1 MB/s. Falta el paquete cryptg en la imagen.")
         except Exception as e:
             logger.warning("No se pudo saber si la cuenta de Telegram es Premium: %s", e)
 
@@ -431,7 +445,22 @@ class TelegramDownloader:
             if progress_callback:
                 progress_callback(message_id, current, total)
 
-        await self.client.download_media(msg, file=file_path, progress_callback=progress)
+        # Se baja a `<nombre>.parcial` y solo se renombra al acabar: en paralelo
+        # el ultimo trozo puede escribirse antes que los del medio, y entonces
+        # el archivo mide lo que tiene que medir sin estar entero. Con el
+        # nombre final solo existe lo que esta completo.
+        parcial = file_path + SUFIJO_PARCIAL
+        if self.conexiones > 1:
+            try:
+                await descarga_paralela.bajar(self.client, msg, parcial, self.conexiones, progress)
+                os.replace(parcial, file_path)
+                return file_path
+            except descarga_paralela.SinParalelo as e:
+                logger.warning("Descarga en paralelo no disponible para %s (%s): se baja de la forma normal",
+                               file_name, e)
+
+        await self.client.download_media(msg, file=parcial, progress_callback=progress)
+        os.replace(parcial, file_path)
         return file_path
 
     def _get_file_name(self, msg):
