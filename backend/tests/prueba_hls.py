@@ -109,6 +109,36 @@ async def main(carpeta):
               round(sum(s.duracion_de(i) for i in range(s.total))))
     await hls._parar(s)
 
+    print("Lo adelantado que va ffmpeg")
+    # Una tanda anterior llego lejos (sus trozos siguen en `listos`) y se ha
+    # vuelto atras: la tanda nueva va justo por donde se mira y no debe
+    # pausarse. Antes se median los trozos de todas las tandas, la nueva se
+    # pausaba nada mas arrancar y el trozo pedido no llegaba nunca.
+    class Proc:
+        returncode = None
+        def __init__(self):
+            self.senales = []
+        def send_signal(self, sig):
+            self.senales.append(sig)
+    s = hls.Sesion(path="tg:1:3", url=peli, claves=claves, duracion=duracion,
+                   audio=0, hevc=False, dir=d)
+    s.run_dir = os.path.join(d, "r2")
+    os.makedirs(s.run_dir)
+    for j in (2, 3):
+        open(os.path.join(s.run_dir, f"s{j}.m4s"), "wb").close()
+    s.listos = {n: os.path.join(d, "viejo", f"s{n}.m4s") for n in range(15, 22)}
+    s.proc, s.desfase, s.run_desde, s.pedido = Proc(), 0, 2, 2
+    viejo = hls.ADELANTE_MAX
+    hls.ADELANTE_MAX = 5
+    hls._refrescar(s)
+    comprueba("la tanda nueva no se pausa por los trozos de la vieja", [], s.proc.senales)
+    comprueba("y sabe hasta donde ha llegado ella", 3, s.hecho)
+    for j in range(4, 10):
+        open(os.path.join(s.run_dir, f"s{j}.m4s"), "wb").close()
+    hls._refrescar(s)
+    comprueba("pero si se adelanta de verdad, si", 1, len(s.proc.senales))
+    hls.ADELANTE_MAX = viejo
+
 
 if not shutil.which("ffmpeg"):
     print("Sin ffmpeg: no se puede probar el HLS al vuelo")

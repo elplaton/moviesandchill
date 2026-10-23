@@ -52,6 +52,7 @@ ATRAS = 30
 ESPERA_TROZO = 45
 SESIONES_MAX = 3
 INACTIVA_S = 5 * 60
+VIGILA_S = 2
 
 
 @dataclass
@@ -67,6 +68,10 @@ class Sesion:
     run_dir: str = ""
     run_desde: int = 0
     desfase: int | None = None
+    # El ultimo trozo que ha hecho **esta** tanda de ffmpeg. No vale mirar
+    # `listos`: ahi siguen los trozos de tandas anteriores, y uno lejano hacia
+    # creer que la tanda nueva iba muy adelantada (ver `_refrescar`).
+    hecho: int = -1
     listos: dict[int, str] = field(default_factory=dict)
     pedido: int = 0
     pausado: bool = False
@@ -210,6 +215,7 @@ async def _arrancar(s: Sesion, n: int) -> None:
     await _parar(s)
     s.run_desde = n
     s.desfase = None
+    s.hecho = -1
     s.run_dir = os.path.join(s.dir, f"r{n}-{int(time.monotonic() * 1000)}")
     os.makedirs(s.run_dir, exist_ok=True)
     numero = max(0, n - 1)
@@ -337,10 +343,15 @@ def _refrescar(s: Sesion) -> None:
         n = j + s.desfase
         if 0 <= n < s.total:
             s.listos[n] = os.path.join(s.run_dir, f"s{j}.m4s")
+            s.hecho = max(s.hecho, n)
 
+    # Lo adelantada que va se mide con lo que ha hecho esta tanda. Con todo
+    # `listos` (como estaba) una tanda anterior que hubiera llegado lejos
+    # dejaba a la nueva pausada nada mas arrancar: volver al principio tras
+    # un salto se quedaba esperando un trozo que no iba a llegar nunca.
     p = s.proc
     if p and p.returncode is None:
-        adelanto = max(s.listos) - s.pedido if s.listos else 0
+        adelanto = s.hecho - s.pedido if s.hecho >= 0 else 0
         if not s.pausado and adelanto > ADELANTE_MAX:
             p.send_signal(signal.SIGSTOP)
             s.pausado = True
@@ -360,7 +371,7 @@ def _fabricando(s: Sesion, n: int) -> bool:
     """Si el ffmpeg en marcha llegara a `n` pronto sin reiniciarlo."""
     if not s.proc or s.proc.returncode is not None:
         return False
-    hasta = max((k for k in s.listos if k >= s.run_desde - 1), default=s.run_desde)
+    hasta = max(s.hecho, s.run_desde)
     return s.run_desde - 1 <= n <= hasta + SALTO
 
 
@@ -434,8 +445,15 @@ def _arrancar_limpiador() -> None:
     from app.tasks import spawn
 
     async def bucle():
+        # Tambien vigila lo adelantado que va cada ffmpeg. Antes solo se miraba
+        # al pedir un trozo, y cuando el reproductor tiene el buffer lleno deja
+        # de pedir: ffmpeg seguia sin freno y se bajaba de Telegram la pelicula
+        # entera (se vio llegar al trozo 558 de 600 con nadie mirando).
         while _sesiones:
-            await asyncio.sleep(60)
+            await asyncio.sleep(VIGILA_S)
+            for s in list(_sesiones.values()):
+                async with s.lock:
+                    _refrescar(s)
             ahora = time.monotonic()
             for path in [p for p, s in _sesiones.items() if ahora - s.usado > INACTIVA_S]:
                 await _cerrar(path)

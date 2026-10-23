@@ -5,6 +5,7 @@ import { useAirplay } from '../hooks/useAirplay';
 import { IconAirplay, IconClose, IconExpand, IconMute, IconPause, IconPlay, IconSubtitles, IconVolume } from './ui/Icon';
 import { markWatched, resumePoint, setWatched } from '../utils/progress';
 import { useSiguiente } from '../hooks/useSiguiente';
+import { useFuente } from '../hooks/useFuente';
 import NextUp from './NextUp';
 
 interface Props {
@@ -100,12 +101,15 @@ export default function Player(props: Props) {
   // El `src` espera a la entrada de reproducción: el token de acceso caduca a
   // la hora y cortaba las películas largas por la mitad.
   const [ticket, setTicket] = useState<string | null>(null);
-  const src = ticket === null
-    ? undefined
-    : `/api/stream?path=${encodeURIComponent(path)}&token=${encodeURIComponent(ticket)}`;
+  // Viendo sin descargar, un audio AC-3/DTS (que Chrome no decodifica) o un
+  // MKV en Safari se piden en la version que el servidor adapta al vuelo (HLS).
+  const src = useFuente(ref, path, ticket);
 
   useEffect(() => {
     let vivo = true;
+    // La entrada del episodio anterior no vale para este archivo (va limitada
+    // a una ruta): se olvida al cambiar, o el servidor contestaria 401.
+    setTicket(null);
     streamTicket(path).then(t => { if (vivo) setTicket(t); });
     fetchTracks(path).then(t => { if (vivo) { setTracks(t); setAudioActivo(t.default_audio ?? 0); } });
     return () => { vivo = false; };
