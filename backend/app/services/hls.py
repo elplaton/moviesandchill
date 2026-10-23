@@ -1,14 +1,16 @@
-"""HLS al vuelo: un MKV de Telegram servido en el formato que el iPhone abre.
+"""HLS al vuelo: un MKV o MP4 de Telegram servido en un formato que se oye.
 
-Safari no abre MKV ni decodifica AC-3/DTS, que es como viene media biblioteca.
+Safari no abre MKV, y ni Safari en el iPhone ni Chrome decodifican AC-3/DTS,
+que es como viene media biblioteca.
 Al descargar se arregla convirtiendo (`make_compatible()`); para verlo sin
 descargar, el servidor lo reempaqueta mientras se ve: la imagen se copia tal
 cual (H.264 o HEVC, sin gastar CPU) y el audio se pasa a AAC estereo. Se sirve
 como HLS, que es el streaming nativo de Apple y deja saltar a cualquier punto.
 
 Lo delicado es saltar. Copiando la imagen, un trozo solo puede empezar en un
-fotograma clave, asi que la lista de trozos se arma con los del propio MKV
-(su indice, `mkv.fotogramas_clave`): un trozo por fotograma clave. ffmpeg
+fotograma clave, asi que la lista de trozos se arma con los del propio
+archivo (el indice del MKV, `mkv.fotogramas_clave`, o las tablas de la
+cabecera del MP4, `mp4.fotogramas_clave`): un trozo por fotograma clave. ffmpeg
 corta igual (`-hls_time` minimo: corta en cada uno), de modo que el trozo N
 de la lista es el trozo N que fabrica. Tres cosas medidas que sostienen eso:
 
@@ -94,25 +96,28 @@ _limpiador: asyncio.Task | None = None
 
 
 def se_puede(pistas: dict | None) -> bool:
-    """Si este archivo se puede servir por HLS: MKV con imagen H.264 o HEVC
-    (que se copia; lo demas habria que recodificarlo, y eso el servidor no lo
-    aguanta en tiempo real)."""
+    """Si este archivo se puede servir por HLS: MKV o MP4 con imagen H.264 o
+    HEVC (que se copia; lo demas habria que recodificarlo, y eso el servidor
+    no lo aguanta en tiempo real)."""
     if not pistas:
         return False
     contenedor = (pistas.get("container") or "").lower()
     codec = ((pistas.get("video") or {}).get("codec") or "").lower()
-    return "matroska" in contenedor and codec in ("h264", "hevc")
+    return ("matroska" in contenedor or "mp4" in contenedor) and codec in ("h264", "hevc")
 
 
 async def claves_de(v) -> tuple[list[float], float] | None:
-    """Los fotogramas clave de un archivo virtual (ver reproduccion.py)."""
-    from app.services import mkv, reproduccion
+    """Los fotogramas clave de un archivo virtual (ver reproduccion.py). Si
+    es MKV o MP4 lo dicen sus primeros bytes, no el nombre."""
+    from app.services import mkv, mp4, reproduccion
 
     async def leer(desde: int, cuanto: int) -> bytes:
         trozos = [t async for t in reproduccion.leer(v, desde, desde + cuanto - 1)]
         return b"".join(trozos)
 
-    return await mkv.fotogramas_clave(leer, v.tamano)
+    if (await leer(0, min(4, v.tamano))) == EBML:
+        return await mkv.fotogramas_clave(leer, v.tamano)
+    return await mp4.fotogramas_clave(leer, v.tamano)
 
 
 def _url_interna(path: str) -> str:
@@ -142,6 +147,10 @@ async def sesion(path: str) -> Sesion:
         return s
 
 
+# Los cuatro primeros bytes de un MKV (la cabecera EBML).
+EBML = b"\x1a\x45\xdf\xa3"
+
+
 class SinHls(Exception):
     pass
 
@@ -159,7 +168,7 @@ async def _crear(path: str) -> Sesion:
     v = await reproduccion.virtual(*ids)
     claves = await claves_de(v)
     if not claves:
-        raise SinHls("el MKV no trae indice de fotogramas clave")
+        raise SinHls("el archivo no trae indice de fotogramas clave")
     tiempos, duracion = claves
     if tiempos[0] > 0.5:
         tiempos = [0.0] + tiempos

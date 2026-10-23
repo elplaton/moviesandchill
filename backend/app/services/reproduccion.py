@@ -47,8 +47,9 @@ MIME = {"mkv": "video/x-matroska", "mp4": "video/mp4", "m4v": "video/mp4", "mov"
         "flv": "video/x-flv"}
 
 # Sube cuando cambia lo que se guarda en `reproduccion`: lo guardado con otra
-# version se vuelve a comprobar (la 2 añadio `hls` a las pistas).
-VERSION = 2
+# version se vuelve a comprobar (la 2 añadio `hls` a las pistas; la 3, `hls`
+# tambien para los MP4).
+VERSION = 3
 
 # Cuanto vale lo leido de Telegram (mensajes con su referencia de archivo, que
 # caduca a las horas) y el archivo virtual armado a partir de ellos.
@@ -400,8 +401,8 @@ async def comprobar(channel_id: int, message_id: int, forzar: bool = False) -> d
 
     pistas = await _pistas(path)
     if pistas is not None:
-        # Si se puede adaptar al vuelo para el iPhone (services/hls.py): MKV
-        # con imagen que se copia y con indice de fotogramas clave legible.
+        # Si se puede adaptar al vuelo (services/hls.py): MKV o MP4 con imagen
+        # que se copia y con indice de fotogramas clave legible.
         from app.services import hls
         pistas["hls"] = False
         if hls.se_puede(pistas):

@@ -6,7 +6,9 @@ como tras un salto adelante o atras (que reinicia ffmpeg y lo hace caer un
 fotograma clave antes), y que el audio vaya con la imagen.
 
 Genera un MKV de prueba con fotogramas clave irregulares y audio AC-3, como
-los de verdad. Necesita ffmpeg; sin el, no prueba nada y lo dice.
+los de verdad, y lo mismo en MP4: con fotogramas B (que es lo que obliga a
+leer `ctts` y la lista de edicion) y con la cabecera al principio y al final.
+Necesita ffmpeg; sin el, no prueba nada y lo dice.
 
     PYTHONPATH=backend <venv>/bin/python backend/tests/prueba_hls.py
 """
@@ -17,7 +19,7 @@ import subprocess
 import sys
 import tempfile
 
-from app.services import hls, mkv
+from app.services import hls, mkv, mp4
 
 fallos = []
 
@@ -65,41 +67,79 @@ def tfdts(ruta):
     return r
 
 
-async def main(carpeta):
-    peli = os.path.join(carpeta, "peli.mkv")
+CLAVES_FORZADAS = "3.7,11.2,19.9,33.1,51.4"
+
+
+def generar(carpeta, nombre, video, contenedor=()):
+    peli = os.path.join(carpeta, nombre)
     subprocess.run(
         ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
          "-f", "lavfi", "-i", "testsrc2=size=320x180:rate=24",
          "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000", "-t", "90",
-         "-c:v", "libx264", "-preset", "ultrafast", "-g", "120", "-keyint_min", "24",
-         "-force_key_frames", "3.7,11.2,19.9,33.1,51.4", "-c:a", "ac3", peli], check=True)
+         "-c:v", "libx264", *video, "-g", "120", "-keyint_min", "24",
+         "-force_key_frames", CLAVES_FORZADAS, "-c:a", "ac3", *contenedor, peli], check=True)
+    return peli
+
+
+def claves_ffprobe(peli):
+    reales = subprocess.run(
+        ["ffprobe", "-v", "error", "-select_streams", "v:0", "-skip_frame", "nokey",
+         "-show_entries", "frame=pts_time", "-of", "csv=p=0", peli],
+        capture_output=True, text=True).stdout.split()
+    return [round(float(x.strip(",")), 2) for x in reales if x.strip(",")]
+
+
+async def probar(carpeta, titulo, peli, lector):
     datos = open(peli, "rb").read()
 
     async def leer(d, c):
         return datos[d:d + c]
 
-    print("Indice del MKV")
-    claves, duracion = await mkv.fotogramas_clave(leer, len(datos))
-    reales = subprocess.run(
-        ["ffprobe", "-v", "error", "-select_streams", "v:0", "-skip_frame", "nokey",
-         "-show_entries", "frame=pts_time", "-of", "csv=p=0", peli],
-        capture_output=True, text=True).stdout.split()
-    reales = [round(float(x.strip(",")), 2) for x in reales if x.strip(",")]
-    comprueba("los fotogramas clave son los del video", reales, [round(c, 2) for c in claves])
+    print(f"Indice ({titulo})")
+    claves, duracion = await lector(leer, len(datos))
+    comprueba("los fotogramas clave son los del video", claves_ffprobe(peli), [round(c, 2) for c in claves])
     comprueba("la duracion", 90, round(duracion))
 
-    print("Trozos")
-    d = os.path.join(carpeta, "hls")
+    print(f"Trozos ({titulo})")
+    d = os.path.join(carpeta, "hls-" + os.path.basename(peli))
     os.makedirs(d)
     s = hls.Sesion(path="tg:1:2", url=peli, claves=claves, duracion=duracion,
                    audio=0, hevc=False, dir=d)
     for n in (0, 1, 7, 8, 15, 3):
         ruta = await hls.trozo(s, n)
         t = tfdts(ruta)
+        # El `tfdt` es el tiempo de decodificacion: con fotogramas B va unas
+        # centesimas por delante del de presentacion, que es el de la lista.
         comprueba(f"el trozo {n} empieza en su fotograma clave ({claves[n]:.2f} s)",
-                  round(claves[n], 1), round(t.get(1, -1), 1))
+                  True, abs(claves[n] - t.get(1, -99)) < 0.15)
         comprueba(f"y el audio va con la imagen", True, abs(t.get(2, -99) - t.get(1, 0)) < 0.2)
     comprueba("el init existe", True, os.path.isfile(await hls.init(s)))
+    await hls._parar(s)
+    return s, claves, duracion, d
+
+
+async def main(carpeta):
+    peli = generar(carpeta, "peli.mkv", ["-preset", "ultrafast"])
+    s, claves, duracion, d = await probar(carpeta, "MKV", peli, mkv.fotogramas_clave)
+
+    # Con fotogramas B el primero se muestra despues de decodificarse, y el
+    # MP4 lo apunta con `ctts` y una lista de edicion que corre la pista.
+    for titulo, nombre, contenedor in (
+            ("MP4, cabecera al final", "peli.mp4", ()),
+            ("MP4, cabecera al principio", "peli-fs.mp4", ("-movflags", "+faststart"))):
+        mp = generar(carpeta, nombre, ["-preset", "veryfast", "-bf", "3"], contenedor)
+        await probar(carpeta, titulo, mp, mp4.fotogramas_clave)
+
+    print("MP4 que no se sirven por aqui")
+    frag = generar(carpeta, "frag.mp4", ["-preset", "ultrafast"],
+                   ("-movflags", "+frag_keyframe+empty_moov+delay_moov"))
+    datos = open(frag, "rb").read()
+
+    async def leer(d_, c):
+        return datos[d_:d_ + c]
+    comprueba("un MP4 fragmentado no da indice", None, await mp4.fotogramas_clave(leer, len(datos)))
+    comprueba("un MKV no se toma por MP4", None,
+              await mp4.fotogramas_clave(lambda d_, c: _leer_de(peli, d_, c), os.path.getsize(peli)))
 
     print("La lista")
     texto = hls.lista(s, "path=tg%3A1%3A2&token=x")
@@ -107,7 +147,6 @@ async def main(carpeta):
     comprueba("cada URI lleva la entrada", len(claves), texto.count(".m4s?path=tg%3A1%3A2&token=x"))
     comprueba("la suma es la pelicula", round(duracion),
               round(sum(s.duracion_de(i) for i in range(s.total))))
-    await hls._parar(s)
 
     print("Lo adelantado que va ffmpeg")
     # Una tanda anterior llego lejos (sus trozos siguen en `listos`) y se ha
@@ -138,6 +177,12 @@ async def main(carpeta):
     hls._refrescar(s)
     comprueba("pero si se adelanta de verdad, si", 1, len(s.proc.senales))
     hls.ADELANTE_MAX = viejo
+
+
+async def _leer_de(ruta, d, c):
+    with open(ruta, "rb") as f:
+        f.seek(d)
+        return f.read(c)
 
 
 if not shutil.which("ffmpeg"):
