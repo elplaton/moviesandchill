@@ -15,10 +15,11 @@ export interface Reproduccion {
 
 export interface Pistas {
   container?: string;
-  video?: { codec?: string; bits?: number | null; apple?: boolean } | null;
+  video?: { codec?: string; bits?: number | null; apple?: boolean; height?: number } | null;
   audio?: { codec?: string }[];
   audio_apple?: boolean;
-  /** El servidor puede adaptarlo al vuelo (HLS): imagen copiada, audio a AAC. */
+  /** El servidor puede adaptarlo al vuelo (HLS): audio a AAC y la imagen
+   *  copiada o, si no es H.264/HEVC (un AVI con XviD), recodificada. */
   hls?: boolean;
   default_audio?: number | null;
 }
@@ -84,14 +85,20 @@ function esSafari(): boolean {
 
 /** Audio que ningun navegador decodifica: se veria la imagen sin sonido. */
 const SIN_SONIDO = /^(ac3|eac3|dts|truehd)$/i;
+/** Contenedores e imagen que abre un navegador. Un AVI no lo abre ninguno, y
+ *  XviD/DivX (`mpeg4`), que es lo que llevan casi todos, tampoco. */
+const CONTENEDOR_WEB = /matroska|webm|mp4|mov/i;
+const VIDEO_WEB = /^(h264|hevc|vp8|vp9|av1)$/i;
 
 /** Si este aparato abre el archivo sin adaptarlo. En el iPhone, solo MP4/MOV
- *  compatibles; en el resto, casi todo menos el audio AC-3/DTS. Cuenta la
- *  pista que va a sonar, no que haya alguna buena: Chrome no deja elegir y
- *  suena la primera (o la marcada por defecto), y con el castellano en AC-3 y
- *  el ingles en AAC la pelicula se veia muda. */
+ *  compatibles; en el resto, MKV/MP4/WebM con imagen que entienda y sin audio
+ *  AC-3/DTS. Del audio cuenta la pista que va a sonar, no que haya alguna
+ *  buena: Chrome no deja elegir y suena la primera (o la marcada por
+ *  defecto), y con el castellano en AC-3 y el ingles en AAC se veia muda. */
 function abreTalCual(p: Pistas): boolean {
   if (esIOS() || esSafari()) return nativoEnIOS(p);
+  if (!CONTENEDOR_WEB.test(p.container || '')) return false;
+  if (p.video?.codec && !VIDEO_WEB.test(p.video.codec)) return false;
   const audio = p.audio || [];
   const suenan = [audio[0], audio[p.default_audio ?? 0]].filter(Boolean);
   return !suenan.some(a => SIN_SONIDO.test(a.codec || ''));
@@ -121,16 +128,19 @@ export function esIOS(): boolean {
 
 /**
  * Por que no se puede ver en este aparato sin descargar, o '' si se puede.
- * El reproductor del iPhone solo abre MP4/MOV con video que entienda y audio
- * AAC; el resto se convierte al descargar, y al vuelo aun no se adapta.
+ * Lo que no se abre tal cual lo adapta el servidor al vuelo (`hls`); lo que
+ * ni eso (un AVI en 1080p, una imagen que no se puede recodificar a tiempo)
+ * se dice aqui, con «Descargar» al lado, en vez de abrir un reproductor negro.
  */
 export function motivoNoSeVe(r: Reproduccion): string {
   if (r.modo !== 'ver' || !r.path) return r.motivo || 'hay que descargarla';
-  if (!esIOS()) return '';
   const p = r.pistas;
   if (!p) return '';
-  // Lo que el iPhone no abre tal cual, el servidor lo adapta al vuelo.
   if (p.hls) return '';
+  if (!esIOS()) {
+    if (esSafari() ? nativoEnIOS(p) : abreTalCual(p)) return '';
+    return 'este formato no se puede ver sin descargar: descárgalo y se convierte';
+  }
   if (!/mp4|mov/i.test(p.container || '')) return 'el iPhone no abre este formato (MKV/AVI): descárgala y se convierte';
   if (p.video && p.video.apple === false) return 'el vídeo no es compatible con el iPhone: descárgala y se convierte';
   if (p.audio_apple === false) return 'el audio (AC-3/DTS) no suena en el iPhone: descárgala y se convierte';

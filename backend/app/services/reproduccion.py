@@ -48,7 +48,7 @@ MIME = {"mkv": "video/x-matroska", "mp4": "video/mp4", "m4v": "video/mp4", "mov"
 
 # Sube cuando cambia lo que se guarda en `reproduccion`: lo guardado con otra
 # version se vuelve a comprobar (la 2 añadio `hls` a las pistas; la 3, `hls`
-# tambien para los MP4).
+# tambien para los MP4 y para lo que hay que recodificar, como los AVI).
 VERSION = 3
 
 # Cuanto vale lo leido de Telegram (mensajes con su referencia de archivo, que
@@ -402,12 +402,13 @@ async def comprobar(channel_id: int, message_id: int, forzar: bool = False) -> d
     pistas = await _pistas(path)
     if pistas is not None:
         # Si se puede adaptar al vuelo (services/hls.py): MKV o MP4 con imagen
-        # que se copia y con indice de fotogramas clave legible.
+        # que se copia y con indice de fotogramas clave legible, o algo que se
+        # pueda recodificar (un AVI hasta 720p y con indice).
         from app.services import hls
         pistas["hls"] = False
         if hls.se_puede(pistas):
             try:
-                pistas["hls"] = bool(await hls.claves_de(v))
+                pistas["hls"] = bool(await hls.claves_de(v, pistas))
             except Exception as e:
                 logger.warning("No se pudo leer el indice de %s: %s", v.nombre, e)
     r = {"v": VERSION, "modo": "ver", "motivo": "", "path": path, "nombre": v.nombre,

@@ -15,10 +15,11 @@ export interface Reproduccion {
 
 export interface Pistas {
   container?: string;
-  video?: { codec?: string; bits?: number | null; apple?: boolean } | null;
+  video?: { codec?: string; bits?: number | null; apple?: boolean; height?: number } | null;
   audio?: { codec?: string }[];
   audio_apple?: boolean;
-  /** El servidor puede adaptarlo al vuelo (HLS): imagen copiada, audio a AAC. */
+  /** El servidor puede adaptarlo al vuelo (HLS): audio a AAC y la imagen
+   *  copiada o, si no es H.264/HEVC (un AVI con XviD), recodificada. */
   hls?: boolean;
   default_audio?: number | null;
 }
@@ -76,13 +77,19 @@ function esSafari(): boolean {
 
 /** Audio que ningun navegador decodifica: se veria la imagen sin sonido. */
 const SIN_SONIDO = /^(ac3|eac3|dts|truehd)$/i;
+/** Contenedores e imagen que abre un navegador. Un AVI no lo abre ninguno, y
+ *  XviD/DivX (`mpeg4`), que es lo que llevan casi todos, tampoco. */
+const CONTENEDOR_WEB = /matroska|webm|mp4|mov/i;
+const VIDEO_WEB = /^(h264|hevc|vp8|vp9|av1)$/i;
 
-/** Si el navegador abre el archivo sin adaptarlo. Safari no abre MKV. En el
- *  resto cuenta la pista que va a sonar, no que haya alguna buena: Chrome no
- *  deja elegir y suena la primera (o la marcada por defecto), y con el
- *  castellano en AC-3 y el ingles en AAC la pelicula se veia muda. */
+/** Si el navegador abre el archivo sin adaptarlo: MKV/MP4/WebM (Safari, solo
+ *  MP4) con imagen que entienda y sin audio AC-3/DTS. Del audio cuenta la
+ *  pista que va a sonar, no que haya alguna buena: Chrome no deja elegir y
+ *  suena la primera (o la marcada por defecto), y con el castellano en AC-3 y
+ *  el ingles en AAC la pelicula se veia muda. */
 function abreTalCual(p: Pistas): boolean {
-  if (esSafari() && !/mp4|mov/i.test(p.container || '')) return false;
+  if (!(esSafari() ? /mp4|mov/i : CONTENEDOR_WEB).test(p.container || '')) return false;
+  if (p.video?.codec && !VIDEO_WEB.test(p.video.codec)) return false;
   const audio = p.audio || [];
   const suenan = [audio[0], audio[p.default_audio ?? 0]].filter(Boolean);
   return !suenan.some(a => SIN_SONIDO.test(a.codec || ''));
@@ -98,8 +105,22 @@ export async function comprobarReproduccion(channelId: number | undefined, messa
   }
 }
 
+/**
+ * Por que este navegador no puede ver el archivo sin descargarlo, o '' si
+ * puede. Lo que no abre tal cual lo adapta el servidor al vuelo (`hls`); lo
+ * que ni eso (un AVI en 1080p) se dice antes de abrir un reproductor negro.
+ */
+export function motivoNoSeVe(r: Reproduccion): string {
+  const p = r.pistas;
+  if (!p || p.hls || abreTalCual(p)) return '';
+  if (p.video?.codec && !VIDEO_WEB.test(p.video.codec) || !CONTENEDOR_WEB.test(p.container || '')) {
+    return 'este formato no se puede ver sin descargar: descárgalo y se convierte';
+  }
+  return '';
+}
+
 /** Audio que Chrome no sabe decodificar y que el servidor no puede adaptar
- *  al vuelo (hoy solo adapta MKV): el video se veria sin sonido. */
+ *  al vuelo: el video se veria sin sonido. */
 export function audioQueNoSuena(r: Reproduccion): boolean {
   if (r.pistas?.hls) return false;
   const audio = r.pistas?.audio || [];

@@ -8,11 +8,13 @@ fotograma clave antes), y que el audio vaya con la imagen.
 Genera un MKV de prueba con fotogramas clave irregulares y audio AC-3, como
 los de verdad, y lo mismo en MP4: con fotogramas B (que es lo que obliga a
 leer `ctts` y la lista de edicion) y con la cabecera al principio y al final.
+Y un AVI XviD con MP3, como los del catalogo, que no se copia: se recodifica.
 Necesita ffmpeg; sin el, no prueba nada y lo dice.
 
     PYTHONPATH=backend <venv>/bin/python backend/tests/prueba_hls.py
 """
 import asyncio
+import json
 import os
 import shutil
 import subprocess
@@ -141,6 +143,8 @@ async def main(carpeta):
     comprueba("un MKV no se toma por MP4", None,
               await mp4.fotogramas_clave(lambda d_, c: _leer_de(peli, d_, c), os.path.getsize(peli)))
 
+    await probar_avi(carpeta)
+
     print("La lista")
     texto = hls.lista(s, "path=tg%3A1%3A2&token=x")
     comprueba("un trozo por fotograma clave", len(claves), texto.count("#EXTINF"))
@@ -177,6 +181,52 @@ async def main(carpeta):
     hls._refrescar(s)
     comprueba("pero si se adelanta de verdad, si", 1, len(s.proc.senales))
     hls.ADELANTE_MAX = viejo
+
+
+async def probar_avi(carpeta):
+    print("AVI (se recodifica)")
+    avi = os.path.join(carpeta, "peli.avi")
+    subprocess.run(
+        ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+         "-f", "lavfi", "-i", "testsrc2=size=640x352:rate=25",
+         "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000", "-t", "90",
+         "-c:v", "mpeg4", "-vtag", "XVID", "-q:v", "4", "-bf", "2",
+         "-c:a", "libmp3lame", "-b:a", "128k", avi], check=True)
+    info = json.loads(subprocess.run(
+        ["ffprobe", "-v", "error", "-show_entries", "stream=codec_type,codec_name,height:format=format_name,duration",
+         "-of", "json", avi], capture_output=True, text=True).stdout)
+    video = next(x for x in info["streams"] if x["codec_type"] == "video")
+    pistas = {"container": info["format"]["format_name"], "duration": info["format"]["duration"],
+              "video": {"codec": video["codec_name"], "height": video["height"]}, "audio": [{"codec": "mp3"}]}
+    comprueba("un XviD se recodifica", "recodificar", hls.modo(pistas))
+    comprueba("un 1080p no", None, hls.modo({**pistas, "video": {"codec": "mpeg4", "height": 1080}}))
+    comprueba("un MKV H.264 se copia", "copiar",
+              hls.modo({**pistas, "container": "matroska,webm", "video": {"codec": "h264", "height": 1080}}))
+
+    cabeza = open(avi, "rb").read(64 * 1024)
+    comprueba("el AVI trae indice", True, hls.avi_con_indice(cabeza))
+    i = cabeza.find(b"avih")
+    sin = bytearray(cabeza)
+    sin[i + 20:i + 24] = b"\0\0\0\0"
+    sin = bytes(sin).replace(b"indx", b"JUNK")
+    comprueba("y uno sin indice se nota", False, hls.avi_con_indice(sin))
+    comprueba("lo que no es AVI no se mira", True, hls.avi_con_indice(b"\x1a\x45\xdf\xa3" + b"\0" * 60))
+
+    duracion = float(pistas["duration"])
+    claves = [n * hls.TROZO_S for n in range(int(-(-duracion // hls.TROZO_S)))]
+    d = os.path.join(carpeta, "hls-avi")
+    os.makedirs(d)
+    s = hls.Sesion(path="tg:1:4", url=avi, claves=claves, duracion=duracion,
+                   audio=0, hevc=False, dir=d, recodificar=True)
+    for n in (0, 1, 7, 8, 15, 3, 22):
+        ruta = await hls.trozo(s, n)
+        t = tfdts(ruta)
+        comprueba(f"el trozo {n} empieza en el segundo {claves[n]}", True, abs(claves[n] - t.get(1, -99)) < 0.15)
+        comprueba(f"y el audio va con la imagen", True, abs(t.get(2, -99) - t.get(1, 0)) < 0.2)
+    init = open(await hls.init(s), "rb").read()
+    comprueba("la imagen sale en H.264", True, b"avc1" in init)
+    comprueba("y el audio en AAC", True, b"mp4a" in init)
+    await hls._parar(s)
 
 
 async def _leer_de(ruta, d, c):

@@ -9,7 +9,7 @@ import { useDownloads } from '../hooks/useDownloads';
 import { groupEpisodes, groupVersions, episodeLabel, seasonLabel, type Episode, type Version } from '../utils/versions';
 import Button from './ui/Button';
 import Player from './Player';
-import { audioQueNoSuena, comprobarReproduccion } from '../services/reproducir';
+import { audioQueNoSuena, comprobarReproduccion, motivoNoSeVe } from '../services/reproducir';
 import { IconBell, IconCheck, IconClose, IconDownload, IconHeart, IconPlay, IconStar, IconTrash } from './ui/Icon';
 import type { SearchResult, TMDBMetadata } from '../types';
 
@@ -164,6 +164,8 @@ export default function TitleSheet({ input, onClose }: Props) {
   const ver = useCallback(async (v: Version, subtitle?: string) => {
     const r = await comprobarReproduccion(v.channelId, v.messageId);
     if (r.modo !== 'ver' || !r.path) { setNotice(''); setNoSeVe({ v, motivo: r.motivo, subtitle }); return; }
+    const motivo = motivoNoSeVe(r);
+    if (motivo) { setNotice(''); setNoSeVe({ v, motivo, subtitle }); return; }
     if (audioQueNoSuena(r)) say('El audio es AC-3/DTS: en este navegador puede verse sin sonido');
     else setNotice('');
     setPlaying({ path: r.path, subtitle });

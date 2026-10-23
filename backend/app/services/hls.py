@@ -23,6 +23,14 @@ de la lista es el trozo N que fabrica. Tres cosas medidas que sostienen eso:
   `movflags=+frag_discont` escribe el tiempo real de la pelicula, que es lo
   que el reproductor necesita para encajar un trozo pedido tras un salto.
 
+Lo que no se puede copiar (un AVI, que casi siempre es XviD/DivX: ningun
+navegador ni el iPhone lo decodifican) se **recodifica**: la imagen pasa a
+H.264. Ahi no hace falta indice, porque los fotogramas clave los pone el
+propio ffmpeg donde se le dice: uno cada `TROZO_S`, y el trozo N empieza en
+el segundo N*TROZO_S. Solo hasta 720p (`ALTO_MAX`): medido en el servidor, un
+XviD de definicion estandar se recodifica a 9 veces el tiempo real con un
+solo nucleo; un 1080p cuesta unas cuatro veces mas.
+
 Una sesion por archivo: un ffmpeg que va fabricando hacia delante desde donde
 se pidio. Pedir un trozo lejos de lo fabricado lo reinicia ahi. Si se adelanta
 mucho a lo que se ve se pausa (SIGSTOP), para no bajarse la pelicula entera
@@ -30,6 +38,7 @@ de Telegram; lo ya visto se borra.
 """
 import asyncio
 import logging
+import math
 import os
 import shutil
 import signal
@@ -52,7 +61,13 @@ SALTO = 12
 # Lo que queda detras de lo pedido y se conserva (volver unos segundos atras).
 ATRAS = 30
 ESPERA_TROZO = 45
-SESIONES_MAX = 3
+# Copiando la imagen una sesion casi no gasta (solo el audio pasa a AAC);
+# recodificando, con dos hilos y a 9 veces el tiempo real, tampoco mucho.
+SESIONES_MAX = 6
+# Recodificando: cada cuanto se pone un fotograma clave (y por tanto un trozo)
+# y hasta que alto de imagen se acepta.
+TROZO_S = 4
+ALTO_MAX = 720
 INACTIVA_S = 5 * 60
 VIGILA_S = 2
 
@@ -66,6 +81,7 @@ class Sesion:
     audio: int | None
     hevc: bool
     dir: str
+    recodificar: bool = False
     proc: asyncio.subprocess.Process | None = None
     run_dir: str = ""
     run_desde: int = 0
@@ -95,29 +111,62 @@ _creando: dict[str, asyncio.Lock] = {}
 _limpiador: asyncio.Task | None = None
 
 
-def se_puede(pistas: dict | None) -> bool:
-    """Si este archivo se puede servir por HLS: MKV o MP4 con imagen H.264 o
-    HEVC (que se copia; lo demas habria que recodificarlo, y eso el servidor
-    no lo aguanta en tiempo real)."""
+def modo(pistas: dict | None) -> str | None:
+    """Como se sirve este archivo por HLS: `copiar` la imagen (MKV o MP4 con
+    H.264 o HEVC), `recodificarla` (lo demas, hasta 720p: AVI, XviD...) o
+    None si no se puede."""
     if not pistas:
-        return False
+        return None
     contenedor = (pistas.get("container") or "").lower()
-    codec = ((pistas.get("video") or {}).get("codec") or "").lower()
-    return ("matroska" in contenedor or "mp4" in contenedor) and codec in ("h264", "hevc")
+    video = pistas.get("video") or {}
+    codec = (video.get("codec") or "").lower()
+    if not codec:
+        return None
+    if ("matroska" in contenedor or "mp4" in contenedor) and codec in ("h264", "hevc"):
+        return "copiar"
+    if 0 < (video.get("height") or 0) <= ALTO_MAX and float(pistas.get("duration") or 0) > 0:
+        return "recodificar"
+    return None
 
 
-async def claves_de(v) -> tuple[list[float], float] | None:
-    """Los fotogramas clave de un archivo virtual (ver reproduccion.py). Si
-    es MKV o MP4 lo dicen sus primeros bytes, no el nombre."""
+def se_puede(pistas: dict | None) -> bool:
+    return modo(pistas) is not None
+
+
+async def claves_de(v, pistas: dict | None) -> tuple[list[float], float] | None:
+    """Donde empieza cada trozo de un archivo virtual (ver reproduccion.py).
+
+    Copiando, en sus fotogramas clave: si es MKV o MP4 lo dicen sus primeros
+    bytes, no el nombre. Recodificando, cada `TROZO_S` segundos; pero un AVI
+    sin indice no vale, porque para saltar ffmpeg tendria que leerlo desde el
+    principio (de Telegram)."""
     from app.services import mkv, mp4, reproduccion
 
     async def leer(desde: int, cuanto: int) -> bytes:
         trozos = [t async for t in reproduccion.leer(v, desde, desde + cuanto - 1)]
         return b"".join(trozos)
 
+    if modo(pistas) == "recodificar":
+        if not avi_con_indice(await leer(0, min(64 * 1024, v.tamano))):
+            return None
+        duracion = float(pistas.get("duration") or 0)
+        return [i * TROZO_S for i in range(math.ceil(duracion / TROZO_S))], duracion
     if (await leer(0, min(4, v.tamano))) == EBML:
         return await mkv.fotogramas_clave(leer, v.tamano)
     return await mp4.fotogramas_clave(leer, v.tamano)
+
+
+def avi_con_indice(cabeza: bytes) -> bool:
+    """Si un archivo que no es AVI, o un AVI que trae indice: `idx1` al final
+    (lo dice la bandera AVIF_HASINDEX de su cabecera) o `indx`, el de los AVI
+    de mas de 1 GB (OpenDML), que va en la cabecera."""
+    if cabeza[:4] != b"RIFF" or cabeza[8:12] != b"AVI ":
+        return True
+    i = cabeza.find(b"avih")
+    if i >= 0 and len(cabeza) >= i + 24:
+        if struct.unpack("<I", cabeza[i + 20:i + 24])[0] & 0x10:
+            return True
+    return b"indx" in cabeza
 
 
 def _url_interna(path: str) -> str:
@@ -166,7 +215,8 @@ async def _crear(path: str) -> Sesion:
     if r.get("modo") != "ver" or not se_puede(pistas):
         raise SinHls("este archivo no se puede adaptar al vuelo")
     v = await reproduccion.virtual(*ids)
-    claves = await claves_de(v)
+    recodificar = modo(pistas) == "recodificar"
+    claves = await claves_de(v, pistas)
     if not claves:
         raise SinHls("el archivo no trae indice de fotogramas clave")
     tiempos, duracion = claves
@@ -179,9 +229,11 @@ async def _crear(path: str) -> Sesion:
     shutil.rmtree(d, ignore_errors=True)
     os.makedirs(d, exist_ok=True)
     logger.info("HLS al vuelo %s: %d trozos, %.0f min, %s, audio %s",
-                v.nombre, len(tiempos), duracion / 60, "HEVC" if hevc else "H.264", audio)
+                v.nombre, len(tiempos), duracion / 60,
+                "recodificando " + str((pistas.get("video") or {}).get("codec")) if recodificar
+                else "HEVC" if hevc else "H.264", audio)
     return Sesion(path=path, url=_url_interna(path), claves=tiempos, duracion=duracion,
-                  audio=audio, hevc=hevc, dir=d)
+                  audio=audio, hevc=hevc, dir=d, recodificar=recodificar)
 
 
 # --- La lista ------------------------------------------------------------------
@@ -227,19 +279,40 @@ async def _arrancar(s: Sesion, n: int) -> None:
     s.hecho = -1
     s.run_dir = os.path.join(s.dir, f"r{n}-{int(time.monotonic() * 1000)}")
     os.makedirs(s.run_dir, exist_ok=True)
-    numero = max(0, n - 1)
     cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin"]
-    if n > 0:
-        cmd += ["-noaccurate_seek", "-ss", f"{s.claves[n] + 0.05:.3f}"]
-    cmd += ["-i", s.url, "-map", "0:v:0"]
-    if s.audio is not None:
-        cmd += ["-map", f"0:a:{s.audio}"]
-    cmd += ["-c:v", "copy"]
-    if s.hevc:
-        cmd += ["-tag:v", "hvc1"]
+    if s.recodificar:
+        # Aqui ffmpeg empieza justo donde se le pide (decodifica desde el
+        # fotograma clave de antes y tira lo que sobra), y los fotogramas
+        # clave los pone el: uno cada TROZO_S contando desde ahi, que como
+        # el punto de partida es multiplo de TROZO_S cae en los de la lista.
+        # Sin `-copyts` el tiempo empezaria en 0: `-output_ts_offset` lo
+        # devuelve al de la pelicula, que es lo que lleva cada trozo.
+        numero = n
+        if n > 0:
+            cmd += ["-ss", f"{s.claves[n]:.3f}"]
+        cmd += ["-i", s.url, "-map", "0:v:0"]
+        if s.audio is not None:
+            cmd += ["-map", f"0:a:{s.audio}"]
+        cmd += ["-c:v", "libx264", "-preset", "veryfast", "-crf", "21", "-pix_fmt", "yuv420p",
+                "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2",
+                "-force_key_frames", f"expr:gte(t,n_forced*{TROZO_S})", "-threads", "2"]
+        tiempo = ["-output_ts_offset", f"{s.claves[n]:.3f}"]
+        corte = str(TROZO_S)
+    else:
+        numero = max(0, n - 1)
+        if n > 0:
+            cmd += ["-noaccurate_seek", "-ss", f"{s.claves[n] + 0.05:.3f}"]
+        cmd += ["-i", s.url, "-map", "0:v:0"]
+        if s.audio is not None:
+            cmd += ["-map", f"0:a:{s.audio}"]
+        cmd += ["-c:v", "copy"]
+        if s.hevc:
+            cmd += ["-tag:v", "hvc1"]
+        tiempo = ["-copyts"]
+        corte = "0.1"
     if s.audio is not None:
         cmd += ["-c:a", "aac", "-ac", "2", "-b:a", "192k"]
-    cmd += ["-copyts", "-f", "hls", "-hls_time", "0.1", "-hls_segment_type", "fmp4",
+    cmd += [*tiempo, "-f", "hls", "-hls_time", corte, "-hls_segment_type", "fmp4",
             "-hls_fmp4_init_filename", "init.mp4",
             "-hls_segment_options", "movflags=+frag_discont",
             "-start_number", str(numero),
