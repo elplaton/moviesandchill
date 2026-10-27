@@ -78,6 +78,18 @@ async def guardar_contexto(filas: list[tuple]) -> None:
         """, filas)
 
 
+async def marcar_leidos(channel_id: int, message_ids: list[int]) -> None:
+    """Da por releidos unos archivos sin tocar nada mas (sus mensajes ya no
+    estan en Telegram)."""
+    pool = get_pool()
+    if not pool or not message_ids:
+        return
+    async with pool.acquire() as conn:
+        await conn.execute("""UPDATE media_items SET contexto_leido = TRUE
+                               WHERE channel_id = $1 AND message_id = ANY($2::int[])""",
+                           channel_id, message_ids)
+
+
 async def olvidar_contexto() -> int:
     """Marca todo como sin releer, para que la relectura lo vuelva a pasar
     con las reglas de ahora (cuando cambia `contexto.VERSION`)."""

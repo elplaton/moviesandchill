@@ -52,6 +52,132 @@ async function motivoDe(res: Response): Promise<string> {
   return `Error ${res.status}`;
 }
 
+interface RelecturaCanal {
+  channel_id: number;
+  nombre: string;
+  estado: 'en_cola' | 'releyendo' | 'terminado' | 'al_dia' | 'pendiente' | 'sin_resolver' | 'fallo';
+  total: number;
+  leidos: number;
+  con_ficha: number;
+  mensaje: number | null;
+  desde: number | null;
+  hasta: number | null;
+  error: string | null;
+}
+
+interface RelecturaEstado {
+  corriendo: boolean;
+  siguiente: string | null;
+  canales: RelecturaCanal[];
+}
+
+const ESTADO_RELECTURA: Record<RelecturaCanal['estado'], [string, string]> = {
+  releyendo: ['Releyendo…', 'bg-yellow-500/20 text-yellow-400'],
+  en_cola: ['En cola', 'bg-white/10 text-nf-dim'],
+  terminado: ['Terminado', 'bg-green-500/20 text-green-400'],
+  al_dia: ['Al día', 'bg-green-500/20 text-green-400'],
+  pendiente: ['Pendiente', 'bg-white/10 text-nf-dim'],
+  sin_resolver: ['Sin conexión al canal', 'bg-red-500/20 text-red-400'],
+  fallo: ['Falló', 'bg-red-500/20 text-red-400'],
+};
+
+function hora(iso: string): string {
+  return new Date(iso).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
+}
+
+// La relectura del contexto (services/relectura.py) va en segundo plano y
+// tarda: vuelve a leer en Telegram lo ya indexado para ponerle su ficha y su
+// pie. Sin esto solo se veía en el log, o sea, parecía que no hacía nada.
+function Relectura() {
+  const [datos, setDatos] = useState<RelecturaEstado | null>(null);
+  const [aviso, setAviso] = useState('');
+
+  const cargar = async () => {
+    try {
+      const res = await apiFetch('/index/relectura');
+      if (res.ok) setDatos(await res.json());
+    } catch {}
+  };
+
+  useEffect(() => { cargar(); }, []);
+  useEffect(() => {
+    const cada = datos?.corriendo ? 5000 : 20000;
+    const t = setInterval(() => { if (!document.hidden) cargar(); }, cada);
+    return () => clearInterval(t);
+  }, [datos?.corriendo]);
+
+  const ahora = async () => {
+    setAviso('');
+    const res = await apiFetch('/index/relectura', { method: 'POST' });
+    if (!res.ok) { setAviso(await motivoDe(res)); return; }
+    const r = await res.json();
+    setAviso(r.ok ? (r.ya_en_marcha ? 'Ya estaba en marcha.' : 'Empezando…') : (r.error || 'No se ha podido empezar.'));
+    setTimeout(cargar, 1500);
+  };
+
+  if (!datos) return null;
+  const leidos = datos.canales.reduce((s, c) => s + c.leidos, 0);
+  const total = datos.canales.reduce((s, c) => s + c.total, 0);
+
+  return (
+    <div className="bg-white/5 backdrop-blur-md border border-white/10 rounded-2xl p-6 mb-6 shadow-xl">
+      <div className="flex items-center justify-between mb-1">
+        <h2 className="text-white text-lg font-medium flex items-center gap-2">
+          Relectura del contexto
+          {datos.corriendo && (
+            <span className="inline-flex items-center gap-1 text-yellow-400 text-xs font-normal">
+              <span className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 bg-yellow-400" />
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-yellow-500" />
+              </span>
+              En marcha
+            </span>
+          )}
+        </h2>
+        <button onClick={ahora} disabled={datos.corriendo}
+          className="text-xs bg-white/10 hover:bg-white/20 disabled:opacity-40 disabled:hover:bg-white/10 text-white px-4 py-2 rounded-lg transition-all font-medium">
+          Releer ahora
+        </button>
+      </div>
+      <p className="text-nf-dim text-xs mb-4">
+        Vuelve a leer en Telegram lo ya indexado para ponerle la ficha y el pie de cada archivo, y busca otra vez en TMDB lo que no tenía ficha.
+        {' '}{datos.corriendo
+          ? `${leidos.toLocaleString()} de ${total.toLocaleString()} archivos leídos.`
+          : datos.siguiente ? `La siguiente empieza sola a las ${hora(datos.siguiente)}.` : ''}
+      </p>
+      {aviso && <p className="text-xs text-nf-dim mb-3">{aviso}</p>}
+
+      <div className="space-y-2">
+        {datos.canales.map(c => {
+          const [texto, color] = ESTADO_RELECTURA[c.estado] || [c.estado, 'bg-white/10 text-nf-dim'];
+          const pct = c.total ? Math.round((c.leidos / c.total) * 100) : 100;
+          const releyendo = c.estado === 'releyendo';
+          return (
+            <div key={c.channel_id} className="bg-black/20 rounded-xl px-4 py-3">
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-white text-sm truncate">{c.nombre}</p>
+                <span className={`text-[10px] px-2 py-0.5 rounded-full shrink-0 ml-2 ${color}`}>{texto}</span>
+              </div>
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-nf-faint text-[10px]">
+                  {c.leidos.toLocaleString()} / {c.total.toLocaleString()} archivos · {c.con_ficha.toLocaleString()} con ficha
+                  {releyendo && c.mensaje != null && c.hasta ? ` · mensaje ${c.mensaje.toLocaleString()} de ${c.hasta.toLocaleString()}` : ''}
+                </span>
+                <span className="text-nf-dim text-[10px]">{pct}%</span>
+              </div>
+              <div className="w-full bg-white/10 rounded-full h-1.5 overflow-hidden">
+                <div className={`h-full rounded-full transition-all duration-700 ${releyendo ? 'bg-yellow-500' : pct === 100 ? 'bg-green-500' : 'bg-gray-600'}`}
+                  style={{ width: `${Math.min(pct, 100)}%` }} />
+              </div>
+              {c.error && <p className="text-red-400 text-[11px] mt-1.5">{c.error}</p>}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 // Temas de un grupo con foro: elegir cuáles NO se indexan. Existe porque en
 // un mismo grupo conviven «Películas» y «Series» con «Deportes», «Libros» o
 // «APKs», y lo de esos otros temas entraba en el catálogo como si fueran
@@ -507,6 +633,8 @@ export default function Channels({ embedded = false }: { embedded?: boolean } = 
             </div>
           </div>
         )}
+
+        <Relectura />
 
         <div className="bg-white/5 backdrop-blur-md border border-white/10 rounded-2xl p-6 mb-8 shadow-xl">
           <h2 className="text-white text-lg font-medium mb-4">Anadir canal por URL</h2>

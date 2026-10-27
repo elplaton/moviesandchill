@@ -123,6 +123,30 @@ async def _contados(channel_id: int) -> dict:
     return {f["tema_id"]: f["n"] for f in filas}
 
 
+@router.get("/index/relectura")
+async def relectura_estado(user: Annotated[str, Depends(get_current_admin)]):
+    """Como va la relectura del contexto (services/relectura.py), por canal."""
+    from app.services.relectura import estado
+
+    return await estado()
+
+
+@router.post("/index/relectura")
+async def relectura_ahora(user: Annotated[str, Depends(get_current_admin)]):
+    """Empieza la relectura ya, sin esperar a la de fondo. Si hay una en
+    marcha no se lanza otra."""
+    from app.routers.download import config, downloader
+    from app.services.relectura import en_marcha, releer_todo
+
+    if en_marcha():
+        return {"ok": True, "ya_en_marcha": True}
+    if not downloader or not downloader.client or not downloader.client.is_connected():
+        return {"ok": False, "error": "Telegram no está conectado"}
+    api_key = config.get("tmdb_api_key", "") if config and config.get("tmdb_enabled") else ""
+    spawn(releer_todo(downloader, api_key), "relectura_manual")
+    return {"ok": True, "ya_en_marcha": False}
+
+
 @router.get("/channels/{channel_id}/temas")
 async def temas_del_canal(channel_id: int, user: Annotated[str, Depends(get_current_admin)]):
     """Los temas del canal (si es un grupo con foro), con cuantos archivos hay

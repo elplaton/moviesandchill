@@ -236,6 +236,74 @@ function TemasCanal({ channelId }: { channelId: number }) {
   );
 }
 
+interface RelecturaCanal { channel_id: number; nombre: string; estado: string; total: number; leidos: number; con_ficha: number; mensaje: number | null; hasta: number | null; error: string | null }
+interface RelecturaEstado { corriendo: boolean; siguiente: string | null; canales: RelecturaCanal[] }
+
+const ESTADO_RELECTURA: Record<string, string> = {
+  releyendo: 'Releyendo…', en_cola: 'En cola', terminado: 'Terminado', al_dia: 'Al día',
+  pendiente: 'Pendiente', sin_resolver: 'Sin conexión al canal', fallo: 'Falló',
+};
+
+/**
+ * La relectura del contexto (services/relectura.py): vuelve a leer en Telegram
+ * lo ya indexado para ponerle su ficha y su pie. Va en segundo plano y tarda,
+ * y sin esto solo se veía en el log, o sea, parecía que no hacía nada.
+ */
+function Relectura() {
+  const [datos, setDatos] = useState<RelecturaEstado | null>(null);
+  const cargar = () => { apiFetch('/index/relectura').then(r => r.ok ? r.json() : null).then(d => d && setDatos(d)).catch(() => {}); };
+  useEffect(() => { cargar(); }, []);
+  useEffect(() => {
+    const t = setInterval(() => { if (!document.hidden) cargar(); }, datos?.corriendo ? 5000 : 20000);
+    return () => clearInterval(t);
+  }, [datos?.corriendo]);
+  const ahora = async () => {
+    try {
+      const d = await (await apiFetch('/index/relectura', { method: 'POST' })).json();
+      toast(d.ok ? (d.ya_en_marcha ? 'Ya estaba en marcha' : 'Empezando la relectura…') : (d.error || 'No se ha podido empezar'), d.ok ? 'ok' : 'error');
+    } catch { toast('No se ha podido empezar', 'error'); }
+    setTimeout(cargar, 1500);
+  };
+  if (!datos) return null;
+  const leidos = datos.canales.reduce((s, c) => s + c.leidos, 0);
+  const total = datos.canales.reduce((s, c) => s + c.total, 0);
+  const hora = (iso: string) => new Date(iso).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
+
+  return (
+    <section className="rounded-2xl bg-white/5 p-4 mb-4">
+      <div className="flex items-center justify-between mb-1">
+        <p className="text-[13px] font-semibold text-nf-text2">Relectura del contexto</p>
+        {datos.corriendo && <span className="text-[11px] text-yellow-400">En marcha</span>}
+      </div>
+      <p className="text-[12px] text-nf-text3 mb-3">
+        Vuelve a leer en Telegram lo ya indexado para ponerle la ficha y el pie de cada archivo.
+        {' '}{datos.corriendo ? `${leidos.toLocaleString('es-ES')} de ${total.toLocaleString('es-ES')} leídos.`
+          : datos.siguiente ? `La siguiente empieza sola a las ${hora(datos.siguiente)}.` : ''}
+      </p>
+      {datos.canales.map(c => {
+        const pct = c.total ? Math.round((c.leidos / c.total) * 100) : 100;
+        const releyendo = c.estado === 'releyendo';
+        return (
+          <div key={c.channel_id} className="py-2 border-t border-white/5">
+            <div className="flex items-center justify-between">
+              <p className="text-[14px] truncate">{c.nombre}</p>
+              <span className={`text-[11px] shrink-0 ml-2 ${releyendo ? 'text-yellow-400' : c.estado === 'fallo' || c.estado === 'sin_resolver' ? 'text-nf-red' : 'text-nf-text3'}`}>{ESTADO_RELECTURA[c.estado] || c.estado}</span>
+            </div>
+            <p className="text-[11px] text-nf-text3 mt-0.5 tabular-nums">
+              {c.leidos.toLocaleString('es-ES')} / {c.total.toLocaleString('es-ES')} · {c.con_ficha.toLocaleString('es-ES')} con ficha · {pct} %
+            </p>
+            <div className="mt-1 h-1.5 rounded-full bg-white/10 overflow-hidden">
+              <div className={`h-full ${releyendo ? 'bg-yellow-500' : pct >= 100 ? 'bg-nf-ok' : 'bg-white/30'}`} style={{ width: `${Math.min(pct, 100)}%` }} />
+            </div>
+            {c.error && <p className="text-[11px] text-nf-red mt-1">{c.error}</p>}
+          </div>
+        );
+      })}
+      <button onClick={ahora} disabled={datos.corriendo} className="mt-3 w-full h-11 rounded-xl bg-white/10 disabled:opacity-40 text-[15px] font-medium">Releer ahora</button>
+    </section>
+  );
+}
+
 function Channels() {
   // Canal con los temas desplegados (uno a la vez: la lista puede ser larga).
   const [temasDe, setTemasDe] = useState<number | null>(null);
@@ -296,6 +364,7 @@ function Channels() {
         <button onClick={reclass} className="mt-4 w-full h-11 rounded-xl bg-white/10 text-[15px] font-medium">Reclasificar catálogo</button>
         <button onClick={rescanAll} className="mt-2 w-full h-11 rounded-xl bg-nf-red text-[15px] font-semibold">Reescanear todo</button>
       </section>
+      <Relectura />
       {channels.map(c => {
         const p = progress.find((x: any) => x.channel_id === c.id);
         const pct = p?.total_estimate ? Math.round((p.total_scanned / p.total_estimate) * 100) : 0;
