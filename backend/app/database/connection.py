@@ -225,6 +225,40 @@ async def _ensure_tables():
         # lo de una version vieja se vuelve a mirar.
         await conn.execute(
             "ALTER TABLE tmdb_plataformas ADD COLUMN IF NOT EXISTS version SMALLINT NOT NULL DEFAULT 1")
+        # Peticiones de titulos que no tenemos, mandadas a un chat de Telegram
+        # (services/peticiones.py). Una fila por titulo: si dos personas piden
+        # lo mismo, el mensaje sale una vez y las dos esperan la misma fila.
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS peticiones (
+                id            SERIAL PRIMARY KEY,
+                tmdb_id       INTEGER NOT NULL,
+                media_type    VARCHAR(10) NOT NULL,
+                titulo        TEXT NOT NULL,
+                year          INTEGER,
+                poster        TEXT,
+                estado        VARCHAR(20) NOT NULL DEFAULT 'enviada',
+                chat_id       BIGINT,
+                chat_nombre   TEXT,
+                mensaje_id    INTEGER,
+                error         TEXT,
+                creada_en     TIMESTAMP DEFAULT NOW(),
+                conseguida_en TIMESTAMP,
+                UNIQUE (tmdb_id, media_type)
+            )
+        """)
+        # Quien espera cada peticion. `origen` es quien la mando de verdad (lo
+        # que cuenta para el limite diario); sumarse a una ya mandada no
+        # escribe nada en Telegram y por eso no cuenta.
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS peticiones_usuarios (
+                peticion_id INTEGER NOT NULL REFERENCES peticiones(id) ON DELETE CASCADE,
+                user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                origen      BOOLEAN NOT NULL DEFAULT FALSE,
+                avisado     BOOLEAN NOT NULL DEFAULT FALSE,
+                creada_en   TIMESTAMP DEFAULT NOW(),
+                PRIMARY KEY (peticion_id, user_id)
+            )
+        """)
         # Estado de la interfaz que es **de la cuenta** y no del aparato: lo
         # ultimo que se busco, por ejemplo. Es el gemelo por usuario de
         # `app_settings`, y existe para que estas cosas no acaben en el

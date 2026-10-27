@@ -194,6 +194,10 @@ async def startup():
         from app.services.plataformas import relleno_periodico as relleno_plataformas
         _spawn(relleno_plataformas(api_key_tmdb), "relleno_plataformas")
 
+    # Lo pedido que ya ha llegado: se marca y se avisa a quien lo esperaba.
+    from app.services.peticiones import vigilante as vigilante_peticiones
+    _spawn(vigilante_peticiones(), "vigilante_peticiones")
+
 
 @app.on_event("shutdown")
 async def shutdown():
@@ -241,6 +245,7 @@ from app.routers.push_router import router as push_router
 from app.routers.watched_router import router as watched_router
 from app.routers.state_router import router as state_router
 from app.routers.siguiente_router import router as siguiente_router
+from app.routers.peticiones_router import router as peticiones_router
 
 app.include_router(search_router)
 app.include_router(download_router)
@@ -260,6 +265,7 @@ app.include_router(novedades_router)
 app.include_router(tracks_router)
 app.include_router(hls_router)
 app.include_router(favorites_router)
+app.include_router(peticiones_router)
 app.include_router(progress_router)
 app.include_router(follows_router)
 app.include_router(push_router)
