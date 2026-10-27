@@ -3,10 +3,10 @@ import Overlay from './Overlay';
 import { useBackHandler } from '../focus/react';
 import { pushMediaHandler, pushRawHandler } from '../focus/keys';
 import { audioLabel, fetchTracks, subtitleUrl, type MediaTracks } from '../services/tracks';
-import { streamTicket } from '../services/api';
+import { apiFetch, streamTicket } from '../services/api';
 import { useFuente } from '../hooks/useFuente';
 import { comoAbrirHls } from '../services/reproducir';
-import { soloPuntero } from '../tv/platform';
+import { plataforma, soloPuntero } from '../tv/platform';
 import { markWatched, resumePoint, setWatched } from '../tv/progress';
 import { toast } from '../tv/toast';
 import { IconPause, IconPlay } from './Icons';
@@ -176,8 +176,8 @@ export default function Player(props: Props) {
   // Lo ultimo que se sabe de las funciones que usa el efecto de abajo, para
   // que ese efecto pueda depender solo de `path` sin quedarse con versiones
   // viejas. Se actualiza en cada render, que es justo lo que hace falta.
-  const ultimas = useRef({ save, onClose, showOsd, sig });
-  ultimas.current = { save, onClose, showOsd, sig };
+  const ultimas = useRef({ save, onClose, showOsd, sig, modo: '' as string });
+  ultimas.current = { save, onClose, showOsd, sig, modo: ultimas.current.modo };
 
   const togglePlay = useCallback(() => {
     const v = videoRef.current;
@@ -269,6 +269,7 @@ export default function Player(props: Props) {
   const [audioElegido, setAudioElegido] = useState<{ path: string; n: number } | null>(null);
   const audioForzado = audioElegido?.path === path ? audioElegido.n : null;
   const fuente = useFuente(videoRef, path, ticket?.path === path ? ticket.t : null, audioForzado);
+  ultimas.current.modo = fuente.modo ?? '';
   // Un salto de idioma a medias no sobrevive a cambiar de episodio.
   useEffect(() => { cambioAudio.current = null; }, [path]);
 
@@ -477,7 +478,16 @@ export default function Player(props: Props) {
       // Sin fuente puesta todavia (espera a la entrada y a saber si va por
       // HLS) un error no dice nada del archivo.
       if (!v.error || !v.currentSrc) return;
-      toast('No se ha podido reproducir el archivo', 'error', 5000);
+      // El codigo va en el aviso y al log del servidor: en la PS4 y en las
+      // teles no hay consola donde mirarlo, y sin el no se sabe si fue la red
+      // (2), el decodificador (3) o un formato que el aparato no admite (4).
+      const { code, message } = v.error;
+      toast(`No se ha podido reproducir el archivo (error ${code})`, 'error', 8000);
+      apiFetch('/media/fallo', {
+        method: 'POST',
+        body: JSON.stringify({ path, codigo: code, mensaje: message || '', aparato: plataforma(),
+                               fuente: ultimas.current.modo }),
+      }).catch(() => {});
     };
     v.addEventListener('loadedmetadata', onMeta);
     v.addEventListener('timeupdate', onTime);

@@ -5,6 +5,7 @@ import os
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 
 from app.auth.dependencies import get_current_user, get_stream_user
 
@@ -120,3 +121,22 @@ async def reproducir(channel_id: int, message_id: int, user: Annotated[str, Depe
     r = await reproduccion.comprobar(channel_id, message_id, forzar=forzar)
     logger.info("Ver sin descargar %s:%s -> %s", channel_id, message_id, reproduccion.resumen_para_log(r))
     return r
+
+
+class FalloReproduccion(BaseModel):
+    path: str
+    codigo: int | None = None
+    mensaje: str = ""
+    aparato: str = ""
+    fuente: str = ""
+
+
+@router.post("/media/fallo")
+async def fallo_reproduccion(req: FalloReproduccion, user: Annotated[str, Depends(get_current_user)]):
+    """Lo que dijo el <video> de un aparato al no poder reproducir algo. En la
+    PS4 y en las teles no hay consola donde mirarlo, asi que se apunta aqui:
+    el codigo dice si fue la red (2), al decodificar (3) o un formato que el
+    aparato no admite (4)."""
+    logger.warning("Reproduccion fallida en %s (%s): %s | codigo=%s %s | fuente=%s",
+                   req.aparato[:20] or "?", user, req.path[:200], req.codigo, req.mensaje[:200], req.fuente[:20])
+    return {"ok": True}
