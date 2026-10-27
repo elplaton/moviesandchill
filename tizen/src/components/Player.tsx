@@ -5,6 +5,7 @@ import { pushMediaHandler, pushRawHandler } from '../focus/keys';
 import { audioLabel, fetchTracks, subtitleUrl, type MediaTracks } from '../services/tracks';
 import { streamTicket } from '../services/api';
 import { useFuente } from '../hooks/useFuente';
+import { comoAbrirHls } from '../services/reproducir';
 import { soloPuntero } from '../tv/platform';
 import { markWatched, resumePoint, setWatched } from '../tv/progress';
 import { toast } from '../tv/toast';
@@ -94,6 +95,13 @@ export default function Player(props: Props) {
   const osdTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastSeek = useRef<{ at: number; n: number }>({ at: 0, n: 0 });
   const lastSave = useRef(0);
+  /**
+   * Un cambio de idioma por la version adaptada en curso: donde iba el video y
+   * si estaba en marcha. Cambiar la pista asi es cambiar de fuente, y el
+   * <video> nuevo empieza en el 0; al llegar sus metadatos se le devuelve
+   * aqui. Mientras tanto ni se guarda la posicion ni se pinta el tiempo.
+   */
+  const cambioAudio = useRef<{ t: number; seguir: boolean } | null>(null);
   const barraRef = useRef<HTMLDivElement>(null);
   /** Motivo por el que este aparato no puede decodificar el video, si lo hay. */
   const [aviso, setAviso] = useState<string | null>(null);
@@ -107,6 +115,9 @@ export default function Player(props: Props) {
   const save = useCallback((force = false) => {
     const v = videoRef.current;
     if (!v || !v.duration) return;
+    // Cambiando de pista el <video> vuelve a empezar por el 0 hasta que se le
+    // devuelve a su sitio: guardar ahi dejaria la pelicula "por el principio".
+    if (cambioAudio.current) return;
     const now = Date.now();
     if (!force && now - lastSave.current < SAVE_EVERY_MS) return;
     lastSave.current = now;
@@ -217,6 +228,20 @@ export default function Player(props: Props) {
     showOsd();
   }, [showOsd]);
 
+  /**
+   * Que archivo se ha reanudado ya.
+   *
+   * Vive en un ref y no en el efecto porque **tiene que sobrevivir a que el
+   * efecto se vuelva a montar**, y se monta: sus dependencias incluian
+   * `onClose`, que en la ficha es `() => setPlaying(null)` —una funcion nueva
+   * en cada render del padre—. Cada render volvia a pedir el punto de
+   * reanudacion y a aplicarlo, o sea que el capitulo saltaba al minuto
+   * guardado una y otra vez, sin parar. No se veia hasta hoy porque el
+   * progreso no llegaba al servidor (`/api/api/progress`) y el punto era
+   * siempre 0, que no mueve nada.
+   */
+  const reanudado = useRef<string | null>(null);
+
   // Panel de idioma y subtitulos: se abre con la flecha arriba. No usa el
   // motor de foco porque el reproductor ya se queda con todas las teclas.
   const [tracks, setTracks] = useState<MediaTracks>({ audio: [], subtitles: [], defaultAudio: 0, video: null });
@@ -237,7 +262,15 @@ export default function Player(props: Props) {
   // Tal cual o adaptado al vuelo (HLS): lo de Telegram con audio AC-3/DTS que
   // la tele no decodifica, o un AVI, pasa por el servidor. Lo del disco va
   // siempre tal cual, que ya lo dejo compatible la conversion.
-  const fuente = useFuente(videoRef, path, ticket?.path === path ? ticket.t : null);
+  //
+  // La pista elegida a mano va con su ruta: al cambiar de episodio se olvida
+  // sola, sin esperar a un efecto (con un render de retraso se pediria el
+  // capitulo nuevo con la pista del anterior, que puede no tener tantas).
+  const [audioElegido, setAudioElegido] = useState<{ path: string; n: number } | null>(null);
+  const audioForzado = audioElegido?.path === path ? audioElegido.n : null;
+  const fuente = useFuente(videoRef, path, ticket?.path === path ? ticket.t : null, audioForzado);
+  // Un salto de idioma a medias no sobrevive a cambiar de episodio.
+  useEffect(() => { cambioAudio.current = null; }, [path]);
 
   useEffect(() => {
     let vivo = true;
@@ -270,17 +303,50 @@ export default function Player(props: Props) {
     return items;
   }, [tracks]);
 
+  /**
+   * Cambia de pista de audio o de subtitulos.
+   *
+   * El audio va por dos caminos. Con el archivo tal cual y un `audioTracks` de
+   * verdad (Samsung, LG y la PS4 segun el modelo) se cambia ahi mismo, sin
+   * cortar nada. Si no —el Fire TV, que es Chromium y no lo tiene, o la
+   * version adaptada, en la que el servidor solo mete una pista— se pide otra
+   * vez la version adaptada con esa pista (`&audio=N`) y se vuelve al mismo
+   * punto: es un corte de unos segundos, pero es la unica forma de que suene
+   * otro idioma.
+   */
   const aplicar = useCallback((op: { tipo: 'audio' | 'sub'; valor: number }) => {
     const v = videoRef.current;
     if (op.tipo === 'audio') {
-      const lista = (v as unknown as { audioTracks?: { length: number; [n: number]: { enabled: boolean } } })?.audioTracks;
-      if (lista) for (let n = 0; n < lista.length; n++) lista[n].enabled = n === op.valor;
-      setAudioActivo(op.valor);
+      if (!v) return;
+      const lista = (v as unknown as { audioTracks?: { length: number; [n: number]: { enabled: boolean } } }).audioTracks;
+      if (lista && lista.length > 1 && audioForzado === null && fuente.modo === 'directo') {
+        for (let n = 0; n < lista.length; n++) lista[n].enabled = n === op.valor;
+        setAudioActivo(op.valor);
+        return;
+      }
+      // Ya suena esa: volver a pedirla seria cortar para nada.
+      if (audioForzado === op.valor) return;
+      comoAbrirHls().then((m) => {
+        if (m === 'directo') {
+          toast('Este aparato no puede cambiar de idioma', 'error', 5000);
+          return;
+        }
+        // Donde se va, apuntado antes de soltar la fuente vieja. Si ya habia
+        // un cambio a medias se conserva su punto: el <video> esta en el 0.
+        cambioAudio.current = cambioAudio.current
+          ?? { t: v.currentTime, seguir: !v.paused };
+        // El punto de reanudacion ya no pinta nada: quien cambia de idioma
+        // esta viendo el video, y no debe saltar al minuto guardado.
+        reanudado.current = path;
+        setBuffering(true);
+        setAudioActivo(op.valor);
+        setAudioElegido({ path, n: op.valor });
+      });
     } else {
       if (v) for (let n = 0; n < v.textTracks.length; n++) v.textTracks[n].mode = n === op.valor ? 'showing' : 'disabled';
       setSubActiva(op.valor);
     }
-  }, []);
+  }, [audioForzado, fuente.modo, path]);
 
   useBackHandler(() => {
     if (panel) { setPanel(false); return true; }
@@ -339,20 +405,6 @@ export default function Player(props: Props) {
     else if (key === 'forward') seek(1);
   }), [togglePlay, seek, close, showOsd]);
 
-  /**
-   * Que archivo se ha reanudado ya.
-   *
-   * Vive en un ref y no en el efecto porque **tiene que sobrevivir a que el
-   * efecto se vuelva a montar**, y se monta: sus dependencias incluian
-   * `onClose`, que en la ficha es `() => setPlaying(null)` —una funcion nueva
-   * en cada render del padre—. Cada render volvia a pedir el punto de
-   * reanudacion y a aplicarlo, o sea que el capitulo saltaba al minuto
-   * guardado una y otra vez, sin parar. No se veia hasta hoy porque el
-   * progreso no llegaba al servidor (`/api/api/progress`) y el punto era
-   * siempre 0, que no mueve nada.
-   */
-  const reanudado = useRef<string | null>(null);
-
   useEffect(() => {
     const v = videoRef.current;
     if (!v) return;
@@ -372,9 +424,23 @@ export default function Player(props: Props) {
     }
     const onMeta = () => {
       setDuration(v.duration || 0);
+      // Viene de cambiar de idioma: la fuente nueva empieza en el 0 y se la
+      // devuelve a donde iba, en pausa si estaba en pausa (lleva `autoPlay`).
+      // El punto de reanudacion no se toca: `aplicar` ya lo dio por hecho.
+      const c = cambioAudio.current;
+      if (c) {
+        cambioAudio.current = null;
+        if (c.t > 0) v.currentTime = c.t;
+        if (c.seguir) v.play().catch(() => {});
+        else v.pause();
+        setTime(c.t);
+        return;
+      }
       aplicarInicio();
     };
     const onTime = () => {
+      // Hasta volver a su sitio el tiempo es el del 0 de la fuente nueva.
+      if (cambioAudio.current) return;
       setTime(v.currentTime);
       ultimas.current.sig.mirar(v.currentTime, v.duration);
       ultimas.current.save();
@@ -456,7 +522,7 @@ export default function Player(props: Props) {
   return (
     <Overlay>
     <div className="fixed inset-0 z-[70]" style={{ background: '#000' }}>
-      <video ref={videoRef} src={fuente} autoPlay playsInline preload="auto" className="absolute inset-0 w-full h-full"
+      <video ref={videoRef} src={fuente.src} autoPlay playsInline preload="auto" className="absolute inset-0 w-full h-full"
         style={{ backgroundColor: '#000', objectFit: 'contain' }}>
         {tracks.subtitles.map(sub => (
           <track key={sub.path} kind="subtitles" src={subtitleUrl(sub.path)}

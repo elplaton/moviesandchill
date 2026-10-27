@@ -4,6 +4,9 @@
 Tres URLs, todas con la misma entrada de reproduccion que `/api/stream`
 (`path=tg:...&token=...`): la lista, el init y cada trozo. La lista escribe esa
 consulta detras de cada URI porque el reproductor no la añade solo.
+
+`audio=N` elige la pista (0:a:N): asi se cambia de idioma en los aparatos que
+no saben hacerlo solos (Chrome, el Fire TV), tambien con lo ya descargado.
 """
 import gzip
 import logging
@@ -20,22 +23,23 @@ logger = logging.getLogger("tmd")
 router = APIRouter(prefix="/api/hls", tags=["hls"])
 
 
-async def _sesion(path: str):
+async def _sesion(path: str, audio: int | None = None):
     from app.services import hls
 
     try:
-        return await hls.sesion(path)
+        return await hls.sesion(path, audio)
     except hls.SinHls as e:
         raise HTTPException(status_code=409, detail=f"No se puede adaptar al vuelo: {e}")
 
 
 @router.get("/index.m3u8")
 async def lista(request: Request, user: Annotated[str, Depends(get_stream_user)], path: str = "",
-                token: Annotated[str | None, Query()] = None):
+                token: Annotated[str | None, Query()] = None, audio: int | None = None):
     from app.services import hls
 
-    s = await _sesion(path)
-    consulta = urlencode({"path": path, "token": token or ""})
+    s = await _sesion(path, audio)
+    consulta = urlencode({"path": path, "token": token or "",
+                          **({"audio": audio} if audio is not None else {})})
     cuerpo = hls.lista(s, consulta).encode()
     cabeceras = {"Cache-Control": "no-store"}
     # Comprimida: un trozo por fotograma clave y la entrada en cada linea dan
@@ -49,10 +53,11 @@ async def lista(request: Request, user: Annotated[str, Depends(get_stream_user)]
 
 
 @router.get("/init.mp4")
-async def init(user: Annotated[str, Depends(get_stream_user)], path: str = ""):
+async def init(user: Annotated[str, Depends(get_stream_user)], path: str = "",
+               audio: int | None = None):
     from app.services import hls
 
-    s = await _sesion(path)
+    s = await _sesion(path, audio)
     try:
         ruta = await hls.init(s)
     except hls.SinHls as e:
@@ -61,10 +66,11 @@ async def init(user: Annotated[str, Depends(get_stream_user)], path: str = ""):
 
 
 @router.get("/{n}.m4s")
-async def trozo(n: int, user: Annotated[str, Depends(get_stream_user)], path: str = ""):
+async def trozo(n: int, user: Annotated[str, Depends(get_stream_user)], path: str = "",
+                audio: int | None = None):
     from app.services import hls
 
-    s = await _sesion(path)
+    s = await _sesion(path, audio)
     try:
         ruta = await hls.trozo(s, n)
     except hls.SinHls as e:

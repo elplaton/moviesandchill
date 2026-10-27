@@ -28,6 +28,13 @@ logger = logging.getLogger("tmd")
 CLAVE_CHAT_ID = "peticiones_chat_id"
 CLAVE_CHAT_NOMBRE = "peticiones_chat_nombre"
 CLAVE_PLANTILLA = "peticiones_plantilla"
+# El tema del grupo donde se escribe. Muchos grupos de peticiones son foros:
+# dentro hay temas ("General", "Peticiones", "Avisos"...) y solo en uno se
+# pide. Sin tema el mensaje caeria en "General".
+CLAVE_TEMA_ID = "peticiones_tema_id"
+CLAVE_TEMA_NOMBRE = "peticiones_tema_nombre"
+# En Telegram el tema "General" de un foro es el 1, y ahi se escribe sin mas.
+TEMA_GENERAL = 1
 
 PLANTILLA_POR_DEFECTO = "#peticion {titulo} ({año}) · {tipo}\n{enlace}"
 # Los huecos que entiende la plantilla, con lo que se ve en la vista previa.
@@ -94,10 +101,13 @@ async def ajustes() -> dict:
 
     s = await get_app_settings()
     chat = s.get(CLAVE_CHAT_ID) or ""
+    tema = s.get(CLAVE_TEMA_ID) or ""
     plantilla = s.get(CLAVE_PLANTILLA) or PLANTILLA_POR_DEFECTO
     return {
         "chat_id": int(chat) if chat.lstrip("-").isdigit() else None,
         "chat_nombre": s.get(CLAVE_CHAT_NOMBRE) or "",
+        "tema_id": int(tema) if tema.isdigit() else None,
+        "tema_nombre": s.get(CLAVE_TEMA_NOMBRE) or "",
         "plantilla": plantilla,
         "plantilla_por_defecto": PLANTILLA_POR_DEFECTO,
         "huecos": HUECOS,
@@ -150,10 +160,14 @@ def _tipo(ent) -> str:
 
 
 async def chats() -> list[dict]:
-    """Todos los chats de la cuenta, primero donde se puede escribir. Marca
-    los que son canales del catalogo, que suelen ser los que tienen grupo de
-    peticiones al lado."""
+    """Todos los chats de la cuenta, primero donde se puede escribir.
+
+    Marca los del catalogo (`del_catalogo`): los canales que se indexan **y
+    sus grupos de conversacion**, que es donde suelen estar las peticiones (un
+    canal de difusion no deja escribir a nadie). Y si un grupo es un foro
+    (`foro`): entonces hay que elegir tambien el tema (`temas()`)."""
     from telethon import utils
+    from telethon.tl import functions, types as tl
 
     from app.database.connection import get_pool
 
@@ -163,19 +177,55 @@ async def chats() -> list[dict]:
     if pool:
         async with pool.acquire() as conn:
             catalogo = {r["channel_id"] for r in await conn.fetch("SELECT channel_id FROM channels")}
-    out = []
-    async for d in cliente.iter_dialogs(limit=800):
+    dialogos = [d async for d in cliente.iter_dialogs(limit=800)]
+
+    # El grupo de conversacion de cada canal del catalogo. Son pocos canales,
+    # asi que una consulta por canal no pesa.
+    enlazado_a: dict[int, str] = {}
+    for d in dialogos:
         ent = d.entity
+        if isinstance(ent, tl.Channel) and ent.broadcast and ent.id in catalogo:
+            try:
+                full = await cliente(functions.channels.GetFullChannelRequest(ent))
+                if full.full_chat.linked_chat_id:
+                    enlazado_a[full.full_chat.linked_chat_id] = d.name or ""
+            except Exception as e:
+                logger.debug("Peticiones: sin grupo enlazado para %s: %s", d.name, e)
+
+    out = []
+    for d in dialogos:
+        ent = d.entity
+        ident = abs(getattr(ent, "id", 0))
         out.append({
             "id": utils.get_peer_id(ent),
             "nombre": d.name or "(sin nombre)",
             "tipo": _tipo(ent),
             "usuario": getattr(ent, "username", None),
             "puede_escribir": _puede_escribir(ent),
-            "del_catalogo": abs(getattr(ent, "id", 0)) in catalogo,
+            "del_catalogo": ident in catalogo or ident in enlazado_a,
+            # A que canal del catalogo pertenece este grupo de conversacion.
+            "grupo_de": enlazado_a.get(ident),
+            "foro": bool(getattr(ent, "forum", False)),
         })
-    out.sort(key=lambda c: (not c["puede_escribir"], not c["del_catalogo"], c["nombre"].lower()))
+    out.sort(key=lambda c: (not c["del_catalogo"], not c["puede_escribir"], c["nombre"].lower()))
     return out
+
+
+async def temas(chat_id: int) -> list[dict]:
+    """Los temas de un grupo con foro, en el orden en que salen en Telegram.
+    Un tema cerrado solo deja escribir a los admins del grupo."""
+    from telethon.tl import functions, types as tl
+
+    cliente = _cliente()
+    destino = await _destino(cliente, chat_id)
+    try:
+        r = await cliente(functions.messages.GetForumTopicsRequest(
+            peer=destino, offset_date=None, offset_id=0, offset_topic=0, limit=100))
+    except Exception as e:
+        raise PeticionError(f"No se han podido leer los temas: {str(e)[:120]}", 502)
+    return [{"id": t.id, "titulo": t.title, "cerrado": bool(getattr(t, "closed", False)),
+             "general": t.id == TEMA_GENERAL}
+            for t in r.topics if isinstance(t, tl.ForumTopic)]
 
 
 async def _destino(cliente, chat_id: int):
@@ -197,7 +247,7 @@ async def _destino(cliente, chat_id: int):
 MAX_PIE = 1024
 
 
-async def _mandar(cliente, destino, texto: str, poster: str | None):
+async def _mandar(cliente, destino, texto: str, poster: str | None, tema: int | None = None):
     """El mensaje, con la caratula si la hay: la foto con el texto de pie.
 
     Va a 500 px y no a los 342 que se guardan para las tarjetas: en Telegram
@@ -205,12 +255,16 @@ async def _mandar(cliente, destino, texto: str, poster: str | None):
     acepta (pasa a veces con URLs externas), se manda el texto solo. La
     peticion no se puede perder por la foto.
     """
+    # En un foro, el mensaje va al tema elegido respondiendo a su mensaje de
+    # apertura (asi lo hace Telegram por dentro). En "General" no hace falta.
+    tema_kw = {"reply_to": tema} if tema and tema != TEMA_GENERAL else {}
     if poster and len(texto) <= MAX_PIE:
         try:
-            return await cliente.send_file(destino, poster.replace("/w342/", "/w500/"), caption=texto)
+            return await cliente.send_file(destino, poster.replace("/w342/", "/w500/"), caption=texto,
+                                           **tema_kw)
         except Exception as e:
             logger.warning("Peticion: la caratula no se pudo mandar (%s); va solo el texto", str(e)[:120])
-    return await cliente.send_message(destino, texto, link_preview=False)
+    return await cliente.send_message(destino, texto, link_preview=False, **tema_kw)
 
 
 async def pedir(user_id: int, es_admin: bool, tmdb_id: int, media_type: str, api_key: str) -> dict:
@@ -249,7 +303,7 @@ async def pedir(user_id: int, es_admin: bool, tmdb_id: int, media_type: str, api
         try:
             cliente = _cliente()
             destino = await _destino(cliente, conf["chat_id"])
-            mensaje = await _mandar(cliente, destino, texto, datos.get("poster"))
+            mensaje = await _mandar(cliente, destino, texto, datos.get("poster"), conf.get("tema_id"))
         except PeticionError as e:
             await db.guardar_fallida(datos, str(e))
             raise
@@ -258,12 +312,30 @@ async def pedir(user_id: int, es_admin: bool, tmdb_id: int, media_type: str, api
             await db.guardar_fallida(datos, str(e))
             raise PeticionError(f"Telegram no ha dejado mandar el mensaje: {str(e)[:120]}", 502)
 
-        pid = await db.guardar_enviada(datos, conf["chat_id"], conf["chat_nombre"],
-                                       getattr(mensaje, "id", None))
+        donde = conf["chat_nombre"] + (f" › {conf['tema_nombre']}" if conf.get("tema_nombre") else "")
+        pid = await db.guardar_enviada(datos, conf["chat_id"], donde, getattr(mensaje, "id", None))
         await db.sumar(pid, user_id, origen=True)
-        logger.info("Peticion mandada a %s: %s", conf["chat_nombre"] or conf["chat_id"],
-                    texto.splitlines()[0])
+        logger.info("Peticion mandada a %s: %s", donde or conf["chat_id"], texto.splitlines()[0])
         return {"estado": "enviada", "ya_pedida": False}
+
+
+async def probar(api_key: str, plantilla: str | None = None) -> str:
+    """Manda el mensaje de ejemplo (con su caratula) a los Mensajes guardados
+    de la cuenta: es la forma de ver como queda sin escribir en el grupo.
+    Devuelve el texto mandado."""
+    from app.services.tmdb import get_details
+
+    conf = await ajustes()
+    ficha = await get_details(api_key, EJEMPLO["tmdb_id"], EJEMPLO["media_type"]) if api_key else None
+    datos = {**EJEMPLO, **({"poster": ficha.get("poster")} if ficha else {})}
+    texto = rellenar(plantilla or conf["plantilla"], datos)
+    try:
+        await _mandar(_cliente(), "me", texto, datos.get("poster"))
+    except PeticionError:
+        raise
+    except Exception as e:
+        raise PeticionError(f"Telegram no ha dejado mandar la prueba: {str(e)[:120]}", 502)
+    return texto
 
 
 async def repasar() -> int:

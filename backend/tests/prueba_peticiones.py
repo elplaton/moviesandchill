@@ -92,6 +92,7 @@ class Telegram:
     def __init__(self):
         self.enviados = []
         self.fotos = []
+        self.temas = []
         self.romper = None
         self.sin_fotos = False
 
@@ -101,19 +102,21 @@ class Telegram:
     async def get_input_entity(self, chat_id):
         return f"chat{chat_id}"
 
-    async def send_message(self, destino, texto, link_preview=True):
+    async def send_message(self, destino, texto, link_preview=True, reply_to=None):
         if self.romper:
             raise RuntimeError(self.romper)
         self.enviados.append((destino, texto))
+        self.temas.append(reply_to)
         return types.SimpleNamespace(id=len(self.enviados))
 
-    async def send_file(self, destino, archivo, caption=""):
+    async def send_file(self, destino, archivo, caption="", reply_to=None):
         if self.romper:
             raise RuntimeError(self.romper)
         if self.sin_fotos:
             raise RuntimeError("WEBPAGE_MEDIA_EMPTY")
         self.fotos.append(archivo)
         self.enviados.append((destino, caption))
+        self.temas.append(reply_to)
         return types.SimpleNamespace(id=len(self.enviados))
 
 
@@ -150,6 +153,7 @@ def montar():
 
     async def ajustes():
         return {"chat_id": base.ajustes.get("chat"), "chat_nombre": "Peticiones",
+                "tema_id": base.ajustes.get("tema"), "tema_nombre": base.ajustes.get("tema_nombre", ""),
                 "plantilla": base.ajustes.get("plantilla", s.PLANTILLA_POR_DEFECTO)}
     s.ajustes = ajustes
     s._cliente = lambda: tg
@@ -207,6 +211,16 @@ comprueba("si Telegram no acepta la foto, sale el texto igualmente",
           "#peticion Titulo 62 (2024) · Película\nhttps://www.themoviedb.org/movie/62", tg.enviados[-1][1])
 comprueba("y la peticion queda enviada", "enviada", base.peticiones[(62, "movie")]["estado"])
 tg.sin_fotos = False
+
+print("\nEl tema del foro")
+comprueba("sin tema elegido, sin responder a nada (va a General)", None, tg.temas[-1])
+base.ajustes["tema"], base.ajustes["tema_nombre"] = 77, "Peticiones"
+pedir(9, 63, admin=True)
+comprueba("con tema, el mensaje va a ese tema", 77, tg.temas[-1])
+base.ajustes["tema"] = s.TEMA_GENERAL
+pedir(9, 64, admin=True)
+comprueba("el tema General no necesita responder a nada", None, tg.temas[-1])
+base.ajustes["tema"] = None
 
 print("\nEl limite")
 pedir(1, 30)

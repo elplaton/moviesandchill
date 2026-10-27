@@ -41,6 +41,9 @@ export interface Peticion {
 export interface AjustesPeticiones {
   chat_id: number | null;
   chat_nombre: string;
+  /** El tema del grupo (si es un foro) donde se escribe; null = General. */
+  tema_id: number | null;
+  tema_nombre: string;
   plantilla: string;
   plantilla_por_defecto: string;
   huecos: Record<string, string>;
@@ -54,7 +57,19 @@ export interface ChatTelegram {
   tipo: 'canal' | 'grupo' | 'bot' | 'persona';
   usuario: string | null;
   puede_escribir: boolean;
+  /** Canal que se indexa, o grupo de conversación de uno de ellos. */
   del_catalogo: boolean;
+  /** Si es el grupo de conversación de un canal del catálogo, cuál. */
+  grupo_de: string | null;
+  /** Grupo con temas: hay que elegir también en cuál se escribe. */
+  foro: boolean;
+}
+
+export interface TemaForo {
+  id: number;
+  titulo: string;
+  cerrado: boolean;
+  general: boolean;
 }
 
 /** Lo que el servidor cuenta cuando dice que no (limite, chat sin elegir…). */
@@ -98,7 +113,20 @@ export async function chatsTelegram(): Promise<ChatTelegram[]> {
   return (await json<{ chats: ChatTelegram[] }>(await apiFetch('/admin/peticiones/chats'))).chats;
 }
 
-export async function guardarAjustes(cambios: { chat_id?: number; chat_nombre?: string; plantilla?: string }): Promise<AjustesPeticiones> {
+export async function temasDe(chatId: number): Promise<TemaForo[]> {
+  return (await json<{ temas: TemaForo[] }>(await apiFetch(`/admin/peticiones/temas?chat_id=${chatId}`))).temas;
+}
+
+/** Manda el mensaje de ejemplo a los Mensajes guardados de la cuenta de Telegram. */
+export async function probarPeticion(plantilla?: string): Promise<string> {
+  return (await json<{ texto: string }>(await apiFetch('/admin/peticiones/probar', {
+    method: 'POST', body: JSON.stringify({ plantilla }),
+  }))).texto;
+}
+
+export async function guardarAjustes(cambios: {
+  chat_id?: number; chat_nombre?: string; tema_id?: number | null; tema_nombre?: string; plantilla?: string;
+}): Promise<AjustesPeticiones> {
   return json(await apiFetch('/admin/peticiones/ajustes', { method: 'POST', body: JSON.stringify(cambios) }));
 }
 

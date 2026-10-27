@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { fetchSubtitles, streamTicket, subtitleUrl, type ExternalSubtitle } from '../services/tracks';
+import { audioLabel, fetchTracks, pistasNativas, streamTicket, subtitleUrl,
+         type AudioTrack, type ExternalSubtitle } from '../services/tracks';
 import { useAirplay } from '../hooks/useAirplay';
-import { IAirplay, IClose } from './Icons';
+import { IAirplay, ICheck, IClose } from './Icons';
 import { markWatched, resumePoint, setWatched } from '../utils/progress';
 import { useSiguiente } from '../hooks/useSiguiente';
 import SiguienteEp from './SiguienteEp';
 import { useFuente } from '../hooks/useFuente';
+import { comoAbrirHls } from '../services/reproducir';
 
 interface Props {
   path: string; title: string; subtitle?: string; poster?: string; backdrop?: string;
@@ -71,6 +73,8 @@ export default function Player(props: Props) {
   const ref = useRef<HTMLVideoElement>(null);
 
   const [subs, setSubs] = useState<ExternalSubtitle[]>([]);
+  const [pistas, setPistas] = useState<{ audio: AudioTrack[]; porDefecto: number | null }>(
+    { audio: [], porDefecto: null });
   const [preparando, setPreparando] = useState(true);
   const airplay = useAirplay(ref);
 
@@ -86,12 +90,56 @@ export default function Player(props: Props) {
    */
   const [barra, setBarra] = useState(true);
   const relojBarra = useRef(0);
+  // Con el menu de idioma abierto no se arma el reloj: cada toque dentro del
+  // menu pasa por aqui, y la barra se iria con el menu a medio elegir.
+  const menuAbierto = useRef(false);
   const asomar = useCallback(() => {
     setBarra(true);
     window.clearTimeout(relojBarra.current);
+    if (menuAbierto.current) return;
     relojBarra.current = window.setTimeout(() => setBarra(false), 4000);
   }, []);
   useEffect(() => () => window.clearTimeout(relojBarra.current), []);
+
+  /**
+   * El idioma del audio, que es cosa nuestra y no del reproductor del sistema.
+   *
+   * Se confiaba en el selector nativo y no basta: Chrome no implementa
+   * `audioTracks` (suena siempre la primera pista, y el reproductor de Android
+   * no deja cambiarla), y la version adaptada (HLS) solo lleva una pista, asi
+   * que viendo sin descargar ni el iPhone tiene a cual cambiar. Donde el
+   * navegador si deja y se esta viendo el archivo tal cual, se cambia en
+   * caliente; en el resto se pide al servidor la version adaptada con esa
+   * pista (`useFuente` con `audio`) y se vuelve al mismo punto.
+   *
+   * Va atado a la ruta, como el modo de `useFuente`: al pasar al siguiente
+   * episodio se olvida solo, y ese empieza con su pista de siempre.
+   */
+  const [elegido, setElegido] = useState<{ path: string; audio: number } | null>(null);
+  const audio = elegido?.path === path ? elegido.audio : null;
+  // La pista activa cuando se ha cambiado en caliente (sin recargar nada).
+  const [enCaliente, setEnCaliente] = useState<{ path: string; audio: number } | null>(null);
+  const [menu, setMenu] = useState(false);
+  menuAbierto.current = menu;
+  // Si este aparato sabe abrir la version adaptada: sin eso, cambiar de pista
+  // solo se puede donde el navegador lo hace por si mismo.
+  const [porHls, setPorHls] = useState(false);
+  useEffect(() => {
+    let vivo = true;
+    comoAbrirHls().then(m => { if (vivo) setPorHls(m !== 'directo'); });
+    return () => { vivo = false; };
+  }, []);
+
+  /**
+   * A donde hay que volver cuando llegue la fuente con el idioma nuevo, y si
+   * estaba en marcha. Mientras esta puesto, el <video> esta recargando y su
+   * `currentTime` (cero) no es por donde va la pelicula: el guardado del
+   * progreso y la pregunta del siguiente episodio usan esto en su lugar, o
+   * cambiar de idioma dejaria «Continuar viendo» al principio.
+   */
+  const salto = useRef<{ t: number; seguir: boolean } | null>(null);
+  const rendicionIdioma = useRef(0);
+  useEffect(() => () => window.clearTimeout(rendicionIdioma.current), []);
 
   /**
    * Hemos salido de la pantalla completa nosotros, para enseñar la tarjeta.
@@ -147,7 +195,7 @@ export default function Player(props: Props) {
   // Viendo sin descargar, lo que el aparato no abre tal cual (un MKV en el
   // iPhone, el audio AC-3/DTS en cualquier navegador) se pide en la version
   // que el servidor adapta al vuelo (HLS). Lo decide `useFuente`.
-  const src = useFuente(ref, path, ticket);
+  const src = useFuente(ref, path, ticket, audio);
 
   // El selector de subtítulos lo pone el reproductor del sistema; aquí solo
   // hay que colgarle las pistas que haya.
@@ -159,8 +207,15 @@ export default function Player(props: Props) {
     // contesta 401 y el <video> suelta un error que no significa nada.
     setTicket(null);
     setSubs([]);
+    setPistas({ audio: [], porDefecto: null });
+    setMenu(false);
+    window.clearTimeout(rendicionIdioma.current);
     streamTicket(path).then(t => { if (vivo) setTicket(t); });
-    fetchSubtitles(path).then(s => { if (vivo) setSubs(s); });
+    fetchTracks(path).then(p => {
+      if (!vivo) return;
+      setSubs(p.external_subtitles);
+      setPistas({ audio: p.audio, porDefecto: p.default_audio });
+    });
     return () => { vivo = false; };
   }, [path]);
 
@@ -169,22 +224,46 @@ export default function Player(props: Props) {
     // El punto de reanudacion lo da el servidor, asi que llega tarde: puede
     // resolverse antes o despues de que el video tenga metadatos. Lo aplica el
     // que llegue el ultimo de los dos, y una sola vez.
+    //
+    // Un cambio de idioma recarga la fuente y trae otro `loadedmetadata`: ese
+    // es del salto al punto donde se estaba (`salto`), no de la reanudacion.
+    // Si la reanudacion aun no habia llegado, ya no se aplica: lo que manda
+    // es donde estaba viendo, no donde lo dejo la ultima vez.
+    salto.current = null;
     let inicio = -1;
+    let saltado = false;
     const aplicarInicio = () => {
       if (inicio <= 0 || !v.duration) return;
       v.currentTime = inicio;
       inicio = -1;
     };
-    resumePoint(path).then((s) => { inicio = s; if (v.readyState >= 1) aplicarInicio(); });
+    resumePoint(path).then((s) => {
+      if (saltado || salto.current) return;
+      inicio = s;
+      if (v.readyState >= 1) aplicarInicio();
+    });
     let last = 0;
     let closed = false;
     const close = () => { if (closed) return; closed = true; onClose(); };
 
     const entrada = () => ({ path, title, subtitle, poster, backdrop,
                              tmdb_id: tmdbId ?? null, media_type: mediaType,
-                             position: v.currentTime, duration: v.duration });
-    const onMeta = () => aplicarInicio();
+                             position: salto.current?.t ?? v.currentTime, duration: v.duration });
+    const onMeta = () => {
+      const s = salto.current;
+      if (!s) { aplicarInicio(); return; }
+      salto.current = null;
+      saltado = true;
+      inicio = -1;
+      if (s.t > 0) v.currentTime = s.t;
+      // `autoPlay` arranca la fuente nueva sola: si estaba en pausa se para.
+      if (s.seguir) v.play().catch(() => {});
+      else v.pause();
+    };
     const onTime = () => {
+      // Recargando por un cambio de idioma el tiempo es el de la fuente nueva
+      // antes del salto (cero): ni se guarda ni se pregunta nada con el.
+      if (salto.current) return;
       // Se pregunta que viene despues con tres minutos de margen, para que la
       // tarjeta aparezca sin un hueco esperando a la red.
       sig.mirar(v.currentTime, v.duration);
@@ -288,6 +367,58 @@ export default function Player(props: Props) {
 
   const cerrar = () => { history.state?.player ? history.back() : onClose(); };
 
+  // Con el menu abierto la barra no se va: se esconderia el menu con ella. Al
+  // cerrarlo vuelve a contar el reloj de siempre.
+  const abrirMenu = () => {
+    menuAbierto.current = true;
+    window.clearTimeout(relojBarra.current);
+    setBarra(true);
+    setMenu(true);
+  };
+  const cerrarMenu = () => { menuAbierto.current = false; setMenu(false); asomar(); };
+
+  const directa = !!src && src.startsWith('/api/stream');
+  const nativas = directa ? pistasNativas(ref.current) : null;
+  /** La pista que suena ahora. La elegida, si la hay; si no, la que pone el
+   *  servidor en la version adaptada o, tal cual, la que marca el navegador
+   *  (Chrome, que no las expone, toca la marcada por defecto o la primera). */
+  const activa = (() => {
+    if (audio !== null) return audio;
+    if (enCaliente?.path === path) return enCaliente.audio;
+    if (!directa) return pistas.porDefecto ?? 0;
+    if (nativas) {
+      for (let i = 0; i < nativas.length; i++) if (nativas[i].enabled) return i;
+    }
+    const marcada = pistas.audio.find(a => a.default);
+    return marcada ? marcada.order : 0;
+  })();
+  // Solo si hay entre que elegir y alguna forma de cambiar. Durante AirPlay
+  // no: quien lee el video es el Apple TV y recargar la fuente lo dejaria
+  // colgado; ademas el aviso de AirPlay tapa la pantalla.
+  const hayIdiomas = pistas.audio.length > 1 && (porHls || !!nativas) && !airplay.activo;
+
+  const elegirAudio = (order: number) => {
+    cerrarMenu();
+    const v = ref.current;
+    if (!v || order === activa) return;
+    // Viendo el archivo tal cual, donde el navegador deja (Safari), se cambia
+    // en caliente: ni recarga ni pierde un segundo.
+    if (nativas && order < nativas.length) {
+      for (let i = 0; i < nativas.length; i++) nativas[i].enabled = i === order;
+      setEnCaliente({ path, audio: order });
+      return;
+    }
+    if (!porHls) return;
+    // En el resto, otra fuente con esa pista. Se apunta por donde iba (si ya
+    // habia un salto pendiente, ese es el bueno: el <video> aun no ha llegado)
+    // y se vuelve ahi en cuanto lleguen los metadatos (ver `onMeta`).
+    salto.current = salto.current ?? { t: v.currentTime, seguir: !v.paused };
+    setPreparando(true);
+    window.clearTimeout(rendicionIdioma.current);
+    rendicionIdioma.current = window.setTimeout(() => setPreparando(false), 20000);
+    setElegido({ path, audio: order });
+  };
+
   return createPortal(
     <div className="player-shell" onTouchStart={asomar}>
       {/* preload="auto" es lo unico que se le puede pedir a iOS sobre cuanto
@@ -309,15 +440,43 @@ export default function Player(props: Props) {
       {!preparando && (
         <div className={`absolute top-0 inset-x-0 flex items-start gap-3 p-4 pt-[max(1rem,env(safe-area-inset-top))]
                         pointer-events-none bg-gradient-to-b from-black/70 to-transparent
-                        transition-opacity duration-200 ${barra ? 'opacity-100' : 'opacity-0'}`}>
+                        transition-opacity duration-200 ${barra || menu ? 'opacity-100' : 'opacity-0'}`}>
           <button onClick={cerrar} aria-label="Cerrar"
             className={`grid h-10 w-10 shrink-0 place-items-center rounded-full bg-black/50 active:bg-white/20
-                        ${barra ? 'pointer-events-auto' : ''}`}>
+                        ${barra || menu ? 'pointer-events-auto' : ''}`}>
             <span className="w-5 h-5"><IClose /></span>
           </button>
-          <div className="min-w-0 pt-1">
+          <div className="min-w-0 flex-1 pt-1">
             <p className="truncate text-[15px] font-semibold leading-tight">{title}</p>
             {subtitle && <p className="truncate text-[13px] text-nf-text2">{subtitle}</p>}
+          </div>
+          {hayIdiomas && (
+            <button onClick={() => (menu ? cerrarMenu() : abrirMenu())} aria-label="Idioma del audio"
+              aria-expanded={menu}
+              className={`h-10 shrink-0 rounded-full bg-black/50 px-4 text-[14px] font-semibold active:bg-white/20
+                          ${barra || menu ? 'pointer-events-auto' : ''}`}>
+              Idioma
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* La lista de idiomas, debajo del boton. El fondo transparente de detras
+          es para cerrarla tocando fuera sin que ese toque llegue al video (que
+          lo tomaria como pausa). */}
+      {menu && hayIdiomas && !preparando && (
+        <div className="absolute inset-0 z-20" onClick={cerrarMenu}>
+          <div onClick={e => e.stopPropagation()}
+            className="absolute right-4 top-[calc(max(1rem,env(safe-area-inset-top))+3rem)] w-64 max-w-[calc(100%-2rem)]
+                       max-h-[60%] overflow-y-auto rounded-2xl bg-black/90 py-2 backdrop-blur">
+            <p className="px-4 pb-1 pt-1 text-[11px] font-semibold uppercase tracking-wide text-nf-text3">Audio</p>
+            {pistas.audio.map(a => (
+              <button key={a.order} onClick={() => elegirAudio(a.order)}
+                className="flex w-full items-center gap-3 px-4 py-3 text-left text-[15px] active:bg-white/10">
+                <span className={`h-4 w-4 shrink-0 ${a.order === activa ? 'text-nf-red' : 'opacity-0'}`}><ICheck /></span>
+                <span className={`min-w-0 truncate ${a.order === activa ? 'font-semibold' : ''}`}>{audioLabel(a)}</span>
+              </button>
+            ))}
           </div>
         </div>
       )}

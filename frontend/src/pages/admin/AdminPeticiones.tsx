@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ESTADO_TEXTO, chatsTelegram, guardarAjustes, peticionesAdmin, vistaPrevia,
-  type AjustesPeticiones, type ChatTelegram, type Peticion,
+  ESTADO_TEXTO, chatsTelegram, guardarAjustes, peticionesAdmin, probarPeticion, temasDe, vistaPrevia,
+  type AjustesPeticiones, type ChatTelegram, type Peticion, type TemaForo,
 } from '../../services/peticiones';
 
 const CARD = 'bg-white/5 backdrop-blur-md border border-white/10 rounded-2xl p-6 shadow-xl mb-6';
@@ -28,6 +28,12 @@ export default function AdminPeticiones({ onToast }: { onToast: (m: string) => v
   const [chats, setChats] = useState<ChatTelegram[] | null>(null);
   const [cargandoChats, setCargandoChats] = useState(false);
   const [filtro, setFiltro] = useState('');
+  // Por defecto solo los canales del catálogo y sus grupos: es ahí donde se
+  // pide, y la cuenta puede estar en cientos de chats.
+  const [soloCatalogo, setSoloCatalogo] = useState(true);
+  // El grupo elegido es un foro: falta decir en qué tema se escribe.
+  const [foro, setForo] = useState<{ chat: ChatTelegram; temas: TemaForo[] | null } | null>(null);
+  const [probando, setProbando] = useState(false);
   const [plantilla, setPlantilla] = useState('');
   const [previa, setPrevia] = useState('');
   const [error, setError] = useState('');
@@ -59,12 +65,34 @@ export default function AdminPeticiones({ onToast }: { onToast: (m: string) => v
     setCargandoChats(false);
   };
 
-  const elegir = async (c: ChatTelegram) => {
+  const guardarDestino = async (c: ChatTelegram, tema?: TemaForo) => {
     try {
-      setAjustes(await guardarAjustes({ chat_id: c.id, chat_nombre: c.nombre }));
+      setAjustes(await guardarAjustes({
+        chat_id: c.id, chat_nombre: c.nombre,
+        tema_id: tema && !tema.general ? tema.id : null, tema_nombre: tema && !tema.general ? tema.titulo : '',
+      }));
       setChats(null);
-      onToast(`Las peticiones irán a «${c.nombre}»`);
+      setForo(null);
+      onToast(`Las peticiones irán a «${c.nombre}${tema && !tema.general ? ` › ${tema.titulo}` : ''}»`);
     } catch (e) { setError(e instanceof Error ? e.message : 'No se ha podido guardar'); }
+  };
+
+  const elegir = async (c: ChatTelegram) => {
+    if (!c.foro) { await guardarDestino(c); return; }
+    // Un grupo con temas: se elige el tema antes de guardar nada.
+    setForo({ chat: c, temas: null });
+    try { setForo({ chat: c, temas: await temasDe(c.id) }); }
+    catch (e) { setForo(null); setError(e instanceof Error ? e.message : 'No se han podido leer los temas'); }
+  };
+
+  const probar = async () => {
+    setProbando(true);
+    setError('');
+    try {
+      await probarPeticion(plantilla);
+      onToast('Enviada a tus Mensajes guardados de Telegram');
+    } catch (e) { setError(e instanceof Error ? e.message : 'No se ha podido mandar la prueba'); }
+    setProbando(false);
   };
 
   const guardarPlantilla = async () => {
@@ -81,8 +109,9 @@ export default function AdminPeticiones({ onToast }: { onToast: (m: string) => v
 
   const visibles = useMemo(() => {
     const f = filtro.trim().toLowerCase();
-    return (chats || []).filter(c => !f || c.nombre.toLowerCase().includes(f) || (c.usuario || '').toLowerCase().includes(f));
-  }, [chats, filtro]);
+    return (chats || []).filter(c => (!soloCatalogo || c.del_catalogo)
+      && (!f || c.nombre.toLowerCase().includes(f) || (c.usuario || '').toLowerCase().includes(f)));
+  }, [chats, filtro, soloCatalogo]);
 
   if (!ajustes) return <p className="text-nf-dim text-sm">{error || 'Cargando…'}</p>;
   const cambiada = plantilla.trim() !== ajustes.plantilla.trim();
@@ -100,7 +129,8 @@ export default function AdminPeticiones({ onToast }: { onToast: (m: string) => v
         <div className="flex flex-wrap items-center gap-3">
           <p className="text-sm">
             {ajustes.chat_id
-              ? <>Chat: <span className="font-semibold text-white">{ajustes.chat_nombre || ajustes.chat_id}</span></>
+              ? <>Chat: <span className="font-semibold text-white">{ajustes.chat_nombre || ajustes.chat_id}</span>
+                  {ajustes.tema_nombre && <span className="text-white"> › {ajustes.tema_nombre}</span>}</>
               : <span className="text-nf-red">Sin elegir: nadie puede pedir todavía</span>}
           </p>
           <button onClick={verChats} disabled={cargandoChats} className={BOTON}>
@@ -108,23 +138,56 @@ export default function AdminPeticiones({ onToast }: { onToast: (m: string) => v
           </button>
         </div>
 
-        {chats && (
+        {foro && (
           <div className="mt-5">
-            <input value={filtro} onChange={e => setFiltro(e.target.value)} placeholder="Buscar un chat"
-              className="w-full mb-3 bg-black/30 border border-white/10 rounded-xl px-4 py-2.5 text-white text-sm outline-none focus:border-white/25" />
+            <p className="mb-2 text-sm text-nf-dim">
+              «{foro.chat.nombre}» tiene temas: elige en cuál se escriben las peticiones.
+              <button onClick={() => setForo(null)} className="ml-3 text-nf-dim hover:text-white">Volver</button>
+            </p>
+            {foro.temas === null && <p className="text-sm text-nf-faint">Leyendo los temas…</p>}
+            <ul className="max-h-[420px] overflow-y-auto divide-y divide-white/5 rounded-xl border border-white/10">
+              {foro.temas?.map(t => (
+                <li key={t.id}>
+                  <button onClick={() => guardarDestino(foro.chat, t)}
+                    className={`flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm hover:bg-white/5 ${t.id === ajustes.tema_id ? 'bg-white/10' : ''}`}>
+                    <span className="min-w-0 flex-1 truncate text-white">{t.titulo}</span>
+                    {t.general && <span className="shrink-0 text-xs text-nf-faint">el general</span>}
+                    {t.cerrado && <span className="shrink-0 text-xs text-nf-faint">cerrado: solo escriben los admins</span>}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {chats && !foro && (
+          <div className="mt-5">
+            <div className="mb-3 flex flex-wrap items-center gap-3">
+              <input value={filtro} onChange={e => setFiltro(e.target.value)} placeholder="Buscar un chat"
+                className="min-w-[220px] flex-1 bg-black/30 border border-white/10 rounded-xl px-4 py-2.5 text-white text-sm outline-none focus:border-white/25" />
+              <label className="flex items-center gap-2 text-sm text-nf-dim">
+                <input type="checkbox" checked={soloCatalogo} onChange={e => setSoloCatalogo(e.target.checked)} />
+                Solo los del catálogo
+              </label>
+            </div>
             <ul className="max-h-[420px] overflow-y-auto divide-y divide-white/5 rounded-xl border border-white/10">
               {visibles.map(c => (
                 <li key={c.id}>
                   <button disabled={!c.puede_escribir} onClick={() => elegir(c)}
                     className={`flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm ${c.puede_escribir ? 'hover:bg-white/5' : 'opacity-40 cursor-not-allowed'} ${c.id === ajustes.chat_id ? 'bg-white/10' : ''}`}>
                     <span className="min-w-0 flex-1 truncate text-white">{c.nombre}{c.usuario ? <span className="text-nf-faint"> · @{c.usuario}</span> : null}</span>
-                    {c.del_catalogo && <span className="shrink-0 rounded bg-nf-red/20 px-2 py-0.5 text-xs text-nf-red">canal del catálogo</span>}
+                    {c.grupo_de
+                      ? <span className="shrink-0 rounded bg-nf-red/20 px-2 py-0.5 text-xs text-nf-red">grupo de {c.grupo_de}</span>
+                      : c.del_catalogo && <span className="shrink-0 rounded bg-nf-red/20 px-2 py-0.5 text-xs text-nf-red">canal del catálogo</span>}
+                    {c.foro && <span className="shrink-0 text-xs text-nf-faint">con temas</span>}
                     <span className="shrink-0 text-xs text-nf-faint">{TIPO[c.tipo]}</span>
                     {!c.puede_escribir && <span className="shrink-0 text-xs text-nf-faint">no deja escribir</span>}
                   </button>
                 </li>
               ))}
-              {!visibles.length && <li className="px-4 py-3 text-sm text-nf-faint">Ningún chat con ese nombre.</li>}
+              {!visibles.length && <li className="px-4 py-3 text-sm text-nf-faint">
+                {soloCatalogo ? 'Ningún chat del catálogo con ese nombre. Quita «Solo los del catálogo» para ver todos.' : 'Ningún chat con ese nombre.'}
+              </li>}
             </ul>
           </div>
         )}
@@ -149,6 +212,11 @@ export default function AdminPeticiones({ onToast }: { onToast: (m: string) => v
         <div className="mt-4 flex gap-3">
           <button onClick={guardarPlantilla} disabled={!cambiada || guardando} className={BOTON}>{guardando ? 'Guardando…' : 'Guardar'}</button>
           <button onClick={() => setPlantilla(ajustes.plantilla_por_defecto)} className="text-nf-dim hover:text-white text-sm">Restaurar la de por defecto</button>
+          {/* Lo mismo que saldría en el grupo, carátula incluida, pero a los
+              Mensajes guardados: se ve cómo queda sin escribir a nadie. */}
+          <button onClick={probar} disabled={probando} className="ml-auto text-nf-dim hover:text-white text-sm disabled:opacity-40">
+            {probando ? 'Enviando…' : 'Enviarme una prueba'}
+          </button>
         </div>
       </div>
 

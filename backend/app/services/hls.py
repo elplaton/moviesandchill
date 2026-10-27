@@ -133,7 +133,7 @@ def se_puede(pistas: dict | None) -> bool:
     return modo(pistas) is not None
 
 
-async def claves_de(v, pistas: dict | None) -> tuple[list[float], float] | None:
+async def claves_de(v, pistas: dict | None, leer_local=None) -> tuple[list[float], float] | None:
     """Donde empieza cada trozo de un archivo virtual (ver reproduccion.py).
 
     Copiando, en sus fotogramas clave: si es MKV o MP4 lo dicen sus primeros
@@ -143,6 +143,8 @@ async def claves_de(v, pistas: dict | None) -> tuple[list[float], float] | None:
     from app.services import mkv, mp4, reproduccion
 
     async def leer(desde: int, cuanto: int) -> bytes:
+        if leer_local:
+            return await leer_local(desde, cuanto)
         trozos = [t async for t in reproduccion.leer(v, desde, desde + cuanto - 1)]
         return b"".join(trozos)
 
@@ -179,20 +181,29 @@ def _url_interna(path: str) -> str:
             f"?path={quote(path)}&token={quote(token)}")
 
 
-async def sesion(path: str) -> Sesion:
-    s = _sesiones.get(path)
+def clave_sesion(path: str, audio: int | None) -> str:
+    """Una sesion por archivo **e idioma**: cambiar de idioma es otro ffmpeg
+    con otra pista, y el de antes se cierra solo al quedarse sin uso."""
+    return path if audio is None else f"{path}#a{audio}"
+
+
+async def sesion(path: str, audio: int | None = None) -> Sesion:
+    """La sesion de un archivo, con la pista de audio `audio` (la posicion
+    0:a:N; None = la que toque por idioma)."""
+    clave = clave_sesion(path, audio)
+    s = _sesiones.get(clave)
     if s:
         s.usado = time.monotonic()
         return s
-    lock = _creando.setdefault(path, asyncio.Lock())
+    lock = _creando.setdefault(clave, asyncio.Lock())
     async with lock:
-        s = _sesiones.get(path)
+        s = _sesiones.get(clave)
         if s:
             return s
-        s = await _crear(path)
-        _sesiones[path] = s
+        s = await _crear(path, audio)
+        _sesiones[clave] = s
         _arrancar_limpiador()
-        await _hacer_sitio(path)
+        await _hacer_sitio(clave)
         return s
 
 
@@ -204,28 +215,77 @@ class SinHls(Exception):
     pass
 
 
-async def _crear(path: str) -> Sesion:
+@dataclass
+class _Local:
+    """Un archivo de la biblioteca con la forma que espera `claves_de` (la de
+    un virtual de Telegram): nombre, tamaño y como leer un trozo."""
+    nombre: str
+    tamano: int
+    ruta: str
+
+    async def leer(self, desde: int, cuanto: int) -> bytes:
+        def _leer():
+            with open(self.ruta, "rb") as f:
+                f.seek(desde)
+                return f.read(cuanto)
+        return await asyncio.to_thread(_leer)
+
+
+def _ruta_local(path: str) -> str:
+    """La ruta en disco de un archivo de la biblioteca, con la misma guarda que
+    /api/stream: nada fuera de la carpeta de la biblioteca."""
+    from app.routers.download import config
+
+    base = os.path.realpath(config["extract_path"])
+    target = os.path.realpath(os.path.join(base, path))
+    if not target.startswith(base + os.sep) or not os.path.isfile(target):
+        raise SinHls("archivo no encontrado en la biblioteca")
+    return target
+
+
+async def _crear(path: str, audio_pedido: int | None = None) -> Sesion:
+    """Lo descargado tambien pasa por aqui, aunque se vea tal cual: es la unica
+    forma de cambiar de idioma en Chrome y en el Fire TV, que no implementan
+    `audioTracks` y siempre hacen sonar la primera pista del archivo."""
     from app.services import reproduccion
 
-    ids = reproduccion.leer_ruta(path)
-    if not ids:
-        raise SinHls("ruta no valida")
-    r = await reproduccion.comprobar(*ids)
-    pistas = r.get("pistas")
-    if r.get("modo") != "ver" or not se_puede(pistas):
-        raise SinHls("este archivo no se puede adaptar al vuelo")
-    v = await reproduccion.virtual(*ids)
+    if reproduccion.es_ruta(path):
+        ids = reproduccion.leer_ruta(path)
+        if not ids:
+            raise SinHls("ruta no valida")
+        r = await reproduccion.comprobar(*ids)
+        pistas = r.get("pistas")
+        if r.get("modo") != "ver" or not se_puede(pistas):
+            raise SinHls("este archivo no se puede adaptar al vuelo")
+        v = await reproduccion.virtual(*ids)
+        leer = None
+    else:
+        from app.services.tracks import leer_pistas, mejor_audio
+
+        ruta = _ruta_local(path)
+        pistas = await asyncio.to_thread(leer_pistas, ruta)
+        if pistas.get("audio"):
+            pistas["default_audio"] = mejor_audio(pistas["audio"])
+        if not se_puede(pistas):
+            raise SinHls("este archivo no se puede adaptar al vuelo")
+        v = _Local(nombre=os.path.basename(ruta), tamano=os.path.getsize(ruta), ruta=ruta)
+        leer = v.leer
     recodificar = modo(pistas) == "recodificar"
-    claves = await claves_de(v, pistas)
+    claves = await claves_de(v, pistas, leer)
     if not claves:
         raise SinHls("el archivo no trae indice de fotogramas clave")
     tiempos, duracion = claves
     if tiempos[0] > 0.5:
         tiempos = [0.0] + tiempos
-    audio = pistas.get("default_audio") if pistas.get("audio") else None
+    # La pista pedida (al cambiar de idioma) si existe; si no, la de siempre.
+    n_audio = len(pistas.get("audio") or [])
+    if audio_pedido is not None and 0 <= audio_pedido < n_audio:
+        audio = audio_pedido
+    else:
+        audio = pistas.get("default_audio") if n_audio else None
     hevc = ((pistas.get("video") or {}).get("codec") or "").lower() == "hevc"
     duracion = duracion or float(pistas.get("duration") or 0) or tiempos[-1] + 1
-    d = os.path.join(DIRECTORIO, path.replace(":", "_").replace("/", "_"))
+    d = os.path.join(DIRECTORIO, clave_sesion(path, audio_pedido).replace(":", "_").replace("/", "_"))
     shutil.rmtree(d, ignore_errors=True)
     os.makedirs(d, exist_ok=True)
     logger.info("HLS al vuelo %s: %d trozos, %.0f min, %s, audio %s",

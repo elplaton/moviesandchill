@@ -145,9 +145,22 @@ async def chats(admin: Annotated[str, Depends(get_current_admin)]):
         raise _fallo(e)
 
 
+@router.get("/admin/peticiones/temas")
+async def temas_de(chat_id: int, admin: Annotated[str, Depends(get_current_admin)]):
+    from app.services.peticiones import PeticionError, temas
+
+    try:
+        return {"temas": await temas(chat_id)}
+    except PeticionError as e:
+        raise _fallo(e)
+
+
 class Ajustes(BaseModel):
     chat_id: int | None = None
     chat_nombre: str | None = None
+    # Con el chat se manda tambien el tema; 0 o ausente = sin tema (General).
+    tema_id: int | None = None
+    tema_nombre: str | None = None
     plantilla: str | None = None
 
 
@@ -155,12 +168,16 @@ class Ajustes(BaseModel):
 async def guardar_ajustes(req: Ajustes, admin: Annotated[str, Depends(get_current_admin)]):
     from app.database.connection import set_app_settings
     from app.services.peticiones import (CLAVE_CHAT_ID, CLAVE_CHAT_NOMBRE, CLAVE_PLANTILLA,
+                                         CLAVE_TEMA_ID, CLAVE_TEMA_NOMBRE,
                                          PLANTILLA_POR_DEFECTO, ajustes)
 
     valores: dict[str, str] = {}
     if req.chat_id is not None:
         valores[CLAVE_CHAT_ID] = str(req.chat_id)
         valores[CLAVE_CHAT_NOMBRE] = (req.chat_nombre or "")[:200]
+        # El tema es de ese chat: al cambiar de chat, el de antes ya no vale.
+        valores[CLAVE_TEMA_ID] = str(req.tema_id) if req.tema_id else ""
+        valores[CLAVE_TEMA_NOMBRE] = (req.tema_nombre or "")[:200] if req.tema_id else ""
     if req.plantilla is not None:
         plantilla = req.plantilla.strip()[:1000]
         if "{titulo}" not in plantilla and "{titulo_original}" not in plantilla:
@@ -168,6 +185,21 @@ async def guardar_ajustes(req: Ajustes, admin: Annotated[str, Depends(get_curren
         valores[CLAVE_PLANTILLA] = plantilla or PLANTILLA_POR_DEFECTO
     await set_app_settings(valores)
     return await ajustes()
+
+
+class Prueba(BaseModel):
+    plantilla: str | None = None
+
+
+@router.post("/admin/peticiones/probar")
+async def probar(req: Prueba, admin: Annotated[str, Depends(get_current_admin)]):
+    """Manda el ejemplo a los Mensajes guardados de la cuenta de Telegram."""
+    from app.services.peticiones import PeticionError, probar as probar_
+
+    try:
+        return {"texto": await probar_(_api_key(), req.plantilla)}
+    except PeticionError as e:
+        raise _fallo(e)
 
 
 class Vista(BaseModel):

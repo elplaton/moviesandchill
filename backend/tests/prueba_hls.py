@@ -229,6 +229,57 @@ async def probar_avi(carpeta):
     await hls._parar(s)
 
 
+def volumen_medio(init, trozo):
+    """El volumen medio (dB) del audio de un trozo fMP4, pegado a su init."""
+    junto = trozo + ".junto.mp4"
+    with open(junto, "wb") as f:
+        f.write(open(init, "rb").read() + open(trozo, "rb").read())
+    out = subprocess.run(["ffmpeg", "-hide_banner", "-i", junto, "-map", "0:a:0", "-af", "volumedetect",
+                          "-f", "null", "-"], capture_output=True, text=True).stderr
+    for linea in out.splitlines():
+        if "mean_volume" in linea:
+            return float(linea.split("mean_volume:")[1].split("dB")[0])
+    return None
+
+
+async def probar_idiomas(carpeta):
+    """Cambiar de idioma: la sesion con `audio=N` tiene que sonar con la
+    pista N. Dos pistas que se distinguen sin oirlas: una casi en silencio y
+    otra fuerte."""
+    print("Cambiar de idioma (audio=N)")
+    peli = os.path.join(carpeta, "dos-audios.mkv")
+    subprocess.run(["ffmpeg", "-y", "-loglevel", "error",
+                    "-f", "lavfi", "-i", "testsrc2=size=320x240:rate=25:duration=20",
+                    "-f", "lavfi", "-i", "sine=frequency=440:duration=20,volume=0.01",
+                    "-f", "lavfi", "-i", "sine=frequency=880:duration=20,volume=0.9",
+                    "-map", "0:v", "-map", "1:a", "-map", "2:a",
+                    "-c:v", "libx264", "-preset", "ultrafast", "-g", "50", "-c:a", "ac3",
+                    "-metadata:s:a:0", "language=spa", "-metadata:s:a:1", "language=eng", peli],
+                   check=True)
+    datos = open(peli, "rb").read()
+
+    async def leer(d, c):
+        return datos[d:d + c]
+
+    claves, duracion = await mkv.fotogramas_clave(leer, len(datos))
+    volumenes = {}
+    for audio in (0, 1):
+        d = os.path.join(carpeta, f"hls-idioma-{audio}")
+        os.makedirs(d)
+        s = hls.Sesion(path="tg:1:9", url=peli, claves=claves, duracion=duracion,
+                       audio=audio, hevc=False, dir=d)
+        volumenes[audio] = volumen_medio(await hls.init(s), await hls.trozo(s, 1))
+        await hls._parar(s)
+    # La "fuerte" no sale a 0 dB (el generador de tonos de ffmpeg no da toda
+    # la amplitud, y pasa por AC-3 y AAC); lo que importa es la diferencia.
+    print(f"     volumen medio: pista 0 {volumenes[0]} dB, pista 1 {volumenes[1]} dB")
+    comprueba("con audio=0 suena la pista 0 y con audio=1 la pista 1", True,
+              volumenes[0] is not None and volumenes[1] is not None
+              and volumenes[1] - volumenes[0] > 25)
+    comprueba("cada idioma es su propia sesion", True,
+              hls.clave_sesion("tg:1:9", 1) != hls.clave_sesion("tg:1:9", None))
+
+
 async def _leer_de(ruta, d, c):
     with open(ruta, "rb") as f:
         f.seek(d)
@@ -240,6 +291,7 @@ if not shutil.which("ffmpeg"):
     sys.exit(0)
 with tempfile.TemporaryDirectory() as carpeta:
     asyncio.run(main(carpeta))
+    asyncio.run(probar_idiomas(carpeta))
 print()
 print(f"{len(fallos)} fallidas" if fallos else "todas correctas")
 sys.exit(1 if fallos else 0)

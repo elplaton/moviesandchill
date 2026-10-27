@@ -57,8 +57,11 @@ export async function modoDeReproduccion(path: string): Promise<Modo> {
  * el unico que viaja por AirPlay (hls.js reproduce desde un `blob:` que el
  * Apple TV no puede pedir). En el resto, hls.js antes que el HLS propio que
  * algunos Chrome empiezan a traer, que con fMP4 aun no es de fiar.
+ *
+ * `directo` quiere decir que aqui no hay forma de abrir HLS: el reproductor la
+ * usa tambien para saber si puede cambiar de idioma pidiendo otra pista.
  */
-async function comoAbrirHls(): Promise<Modo> {
+export async function comoAbrirHls(): Promise<Modo> {
   const nativo = sabeHls();
   if (nativo && (esIOS() || esSafari())) return 'hls';
   try {

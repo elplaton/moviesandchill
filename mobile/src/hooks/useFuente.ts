@@ -1,6 +1,6 @@
 import { useEffect, useState, type RefObject } from 'react';
 import type Hls from 'hls.js';
-import { modoDeReproduccion, type Modo } from '../services/reproducir';
+import { comoAbrirHls, modoDeReproduccion, type Modo } from '../services/reproducir';
 
 /**
  * De donde saca el `<video>` la imagen: el `src` que hay que ponerle, o nada
@@ -11,18 +11,32 @@ import { modoDeReproduccion, type Modo } from '../services/reproducir';
  *
  * El mismo hook vive en la web (`frontend/`): alli es donde mas se usa
  * hls.js, porque ni Chrome ni Firefox traen HLS propio.
+ *
+ * `audio` es la pista de audio elegida (0:a:N, el `order` de `/media/tracks`).
+ * Sin ella, como siempre: tal cual si el aparato lo abre, adaptada si no. Con
+ * ella se pide **siempre la version adaptada** con `&audio=N`, aunque el
+ * archivo se abriera tal cual: es la unica forma de cambiar de idioma donde el
+ * navegador no lo deja (Chrome no implementa `audioTracks`) o donde la version
+ * adaptada solo trae una pista (el iPhone viendo sin descargar). Vale tambien
+ * para lo descargado. Si este aparato no sabe abrir HLS se queda en directo.
  */
-export function useFuente(ref: RefObject<HTMLVideoElement>, path: string, ticket: string | null): string | undefined {
-  const [modo, setModo] = useState<{ path: string; modo: Modo } | null>(null);
+export function useFuente(ref: RefObject<HTMLVideoElement>, path: string, ticket: string | null,
+                          audio: number | null = null): string | undefined {
+  // El modo va atado a la ruta **y** a la pista: el de otro episodio, o el de
+  // antes de cambiar de idioma, no vale.
+  const clave = `${audio ?? ''}|${path}`;
+  const [modo, setModo] = useState<{ clave: string; modo: Modo } | null>(null);
   useEffect(() => {
     let vivo = true;
-    modoDeReproduccion(path).then(m => { if (vivo) setModo({ path, modo: m }); });
+    const pedir = audio === null ? modoDeReproduccion(path) : comoAbrirHls();
+    pedir.then(m => { if (vivo) setModo({ clave: `${audio ?? ''}|${path}`, modo: m }); });
     return () => { vivo = false; };
-  }, [path]);
+  }, [path, audio]);
 
-  // El modo de otro episodio no vale: se espera al de este.
-  const m = modo?.path === path ? modo.modo : null;
-  const consulta = ticket === null ? '' : `path=${encodeURIComponent(path)}&token=${encodeURIComponent(ticket)}`;
+  const m = modo?.clave === clave ? modo.modo : null;
+  const base = ticket === null ? '' : `path=${encodeURIComponent(path)}&token=${encodeURIComponent(ticket)}`;
+  // La pista solo la entiende la version adaptada; el archivo tal cual es uno.
+  const consulta = audio !== null && m !== 'directo' ? `${base}&audio=${audio}` : base;
   const listo = ticket !== null && m !== null;
 
   useEffect(() => {

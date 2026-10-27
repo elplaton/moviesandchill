@@ -3,8 +3,8 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { apiFetch } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import { toast } from '../utils/toast';
-import { chatsDestino, guardarAjustes, peticionesAdmin, TIPO_PETICION, vistaPrevia,
-         type AjustesPeticiones, type ChatDestino, type PeticionAdmin } from '../services/peticiones';
+import { chatsDestino, guardarAjustes, peticionesAdmin, probarPeticion, temasDe, TIPO_PETICION, vistaPrevia,
+         type AjustesPeticiones, type ChatDestino, type TemaForo, type PeticionAdmin } from '../services/peticiones';
 
 const GB = 1024 ** 3;
 const fmt = (b: number | null | undefined) => b == null ? 'Sin límite' : `${(b / GB).toFixed(b >= GB * 10 ? 0 : 1)} GB`;
@@ -448,6 +448,12 @@ function Peticiones() {
   const [chats, setChats] = useState<ChatDestino[] | null>(null);
   const [cargandoChats, setCargandoChats] = useState(false);
   const [filtro, setFiltro] = useState('');
+  // Por defecto solo los canales del catálogo y sus grupos: es ahí donde se
+  // pide, y la cuenta puede estar en cientos de chats.
+  const [soloCatalogo, setSoloCatalogo] = useState(true);
+  // El grupo elegido es un foro: falta decir en qué tema se escribe.
+  const [foro, setForo] = useState<{ chat: ChatDestino; temas: TemaForo[] | null } | null>(null);
+  const [probando, setProbando] = useState(false);
   const [plantilla, setPlantilla] = useState('');
   const [previa, setPrevia] = useState('');
   const [guardando, setGuardando] = useState(false);
@@ -477,13 +483,28 @@ function Peticiones() {
     catch (e) { setError(e instanceof Error ? e.message : 'No se han podido cargar los chats'); }
     finally { setCargandoChats(false); }
   };
+  const guardarDestino = async (c: ChatDestino, tema?: TemaForo) => {
+    const conTema = tema && !tema.general ? tema : null;
+    try {
+      setAjustes(await guardarAjustes({ chat_id: c.id, chat_nombre: c.nombre,
+                                        tema_id: conTema ? conTema.id : null, tema_nombre: conTema ? conTema.titulo : '' }));
+      setChats(null); setFiltro(''); setForo(null);
+      toast(`Las peticiones irán a ${c.nombre}${conTema ? ` › ${conTema.titulo}` : ''}`, 'ok');
+    } catch (e) { toast(e instanceof Error ? e.message : 'No se ha podido guardar', 'error', 6000); }
+  };
   const elegir = async (c: ChatDestino) => {
     if (!c.puede_escribir) return;
-    try {
-      setAjustes(await guardarAjustes({ chat_id: c.id, chat_nombre: c.nombre }));
-      setChats(null); setFiltro('');
-      toast(`Las peticiones irán a ${c.nombre}`, 'ok');
-    } catch (e) { toast(e instanceof Error ? e.message : 'No se ha podido guardar', 'error', 6000); }
+    if (!c.foro) { await guardarDestino(c); return; }
+    // Un grupo con temas: se elige el tema antes de guardar nada.
+    setForo({ chat: c, temas: null });
+    try { setForo({ chat: c, temas: await temasDe(c.id) }); }
+    catch (e) { setForo(null); toast(e instanceof Error ? e.message : 'No se han podido leer los temas', 'error', 6000); }
+  };
+  const probar = async () => {
+    setProbando(true);
+    try { await probarPeticion(plantilla); toast('Enviada a tus Mensajes guardados de Telegram', 'ok'); }
+    catch (e) { toast(e instanceof Error ? e.message : 'No se ha podido mandar la prueba', 'error', 6000); }
+    finally { setProbando(false); }
   };
   const guardarPlantilla = async () => {
     setGuardando(true);
@@ -497,7 +518,8 @@ function Peticiones() {
     const t = new Date(at);
     return Number.isNaN(t.getTime()) ? at : t.toLocaleDateString('es-ES', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
   };
-  const visibles = (chats || []).filter(c => c.nombre.toLowerCase().includes(filtro.trim().toLowerCase()));
+  const visibles = (chats || []).filter(c => (!soloCatalogo || c.del_catalogo)
+    && c.nombre.toLowerCase().includes(filtro.trim().toLowerCase()));
   const boton = 'w-full h-11 rounded-xl text-[15px] font-semibold disabled:opacity-40';
 
   if (!ajustes) return <p className="text-[14px] text-nf-text3">{error || 'Cargando…'}</p>;
@@ -505,32 +527,62 @@ function Peticiones() {
     <div>
       <section className="rounded-2xl bg-white/5 p-4 mb-4">
         <p className="text-[13px] font-semibold text-nf-text2 mb-1">Chat de destino</p>
-        <p className="text-[15px]">{ajustes.chat_id ? ajustes.chat_nombre || `Chat ${ajustes.chat_id}` : 'Sin elegir'}</p>
+        <p className="text-[15px]">
+          {ajustes.chat_id ? ajustes.chat_nombre || `Chat ${ajustes.chat_id}` : 'Sin elegir'}
+          {ajustes.chat_id && ajustes.tema_nombre ? ` › ${ajustes.tema_nombre}` : ''}
+        </p>
         <p className="text-[12px] text-nf-text3 mt-1 leading-relaxed">
           {ajustes.chat_id ? 'Cada petición se escribe ahí con la cuenta de Telegram del servidor.'
             : 'Hasta que se elija uno, nadie puede pedir nada.'}
           {` Cada cuenta puede pedir ${ajustes.limite_dia} al día.`}
         </p>
         {error && <p className="mt-3 text-[13px] text-red-300">{error}</p>}
-        {chats === null ? (
+        {foro ? (
+          <div className="mt-3">
+            <p className="text-[13px] text-nf-text2">«{foro.chat.nombre}» tiene temas: elige en cuál se escribe.</p>
+            {foro.temas === null && <p className="mt-2 text-[13px] text-nf-text3">Leyendo los temas…</p>}
+            <div className="mt-2 max-h-[50vh] overflow-y-auto rounded-xl bg-black/20 divide-y divide-white/5">
+              {foro.temas?.map(t => (
+                <button key={t.id} onClick={() => guardarDestino(foro.chat, t)}
+                  className={`w-full text-left p-3 active:bg-white/10 ${t.id === ajustes.tema_id ? 'bg-white/10' : ''}`}>
+                  <span className="block text-[14px] truncate">{t.titulo}</span>
+                  {(t.general || t.cerrado) && (
+                    <span className="block text-[12px] text-nf-text3">
+                      {t.general ? 'el general' : 'cerrado: solo escriben los admins'}
+                    </span>
+                  )}
+                </button>
+              ))}
+            </div>
+            <button onClick={() => setForo(null)} className="w-full h-10 mt-1 text-[13px] text-nf-text3">Volver a los chats</button>
+          </div>
+        ) : chats === null ? (
           <button onClick={abrirChats} disabled={cargandoChats} className={`${boton} mt-3 bg-white/10`}>
             {cargandoChats ? 'Cargando chats… (tarda unos segundos)' : ajustes.chat_id ? 'Cambiar chat' : 'Elegir chat'}
           </button>
         ) : (
           <div className="mt-3">
             <input className={input} value={filtro} onChange={e => setFiltro(e.target.value)} placeholder="Buscar por nombre" autoCapitalize="none" />
+            <label className="mt-2 flex items-center gap-2 text-[13px] text-nf-text2">
+              <input type="checkbox" checked={soloCatalogo} onChange={e => setSoloCatalogo(e.target.checked)} />
+              Solo los del catálogo
+            </label>
             <div className="mt-2 max-h-[50vh] overflow-y-auto rounded-xl bg-black/20 divide-y divide-white/5">
-              {visibles.length === 0 && <p className="p-3 text-[13px] text-nf-text3">Ningún chat con ese nombre.</p>}
+              {visibles.length === 0 && <p className="p-3 text-[13px] text-nf-text3">
+                {soloCatalogo ? 'Ningún chat del catálogo con ese nombre. Quita «Solo los del catálogo» para ver todos.' : 'Ningún chat con ese nombre.'}
+              </p>}
               {visibles.map(c => (
                 <button key={c.id} onClick={() => elegir(c)} disabled={!c.puede_escribir}
                   className={`w-full text-left flex items-center gap-2 p-3 ${c.puede_escribir ? 'active:bg-white/10' : 'opacity-40'} ${c.id === ajustes.chat_id ? 'bg-white/10' : ''}`}>
                   <span className="min-w-0 flex-1">
                     <span className="block text-[14px] truncate">{c.nombre}</span>
                     <span className="block text-[12px] text-nf-text3 truncate">
-                      {TIPO_CHAT[c.tipo] || c.tipo}{c.usuario ? ` · @${c.usuario}` : ''}{!c.puede_escribir ? ' · no se puede escribir' : ''}
+                      {TIPO_CHAT[c.tipo] || c.tipo}{c.foro ? ' con temas' : ''}{c.usuario ? ` · @${c.usuario}` : ''}{!c.puede_escribir ? ' · no se puede escribir' : ''}
                     </span>
                   </span>
-                  {c.del_catalogo && <span className="shrink-0 text-[11px] px-2 py-1 rounded-lg bg-amber-400/15 text-amber-300">canal del catálogo</span>}
+                  {c.del_catalogo && <span className="shrink-0 text-[11px] px-2 py-1 rounded-lg bg-amber-400/15 text-amber-300">
+                    {c.grupo_de ? `grupo de ${c.grupo_de}` : 'canal del catálogo'}
+                  </span>}
                 </button>
               ))}
             </div>
@@ -564,6 +616,11 @@ function Peticiones() {
         <button onClick={() => setPlantilla(ajustes.plantilla_por_defecto)} disabled={plantilla === ajustes.plantilla_por_defecto}
           className="w-full h-10 mt-1 text-[13px] text-nf-text3 disabled:opacity-40">
           Restaurar la de por defecto
+        </button>
+        {/* Lo mismo que saldría en el grupo, carátula incluida, pero a los
+            Mensajes guardados: se ve cómo queda sin escribir a nadie. */}
+        <button onClick={probar} disabled={probando} className="w-full h-10 text-[13px] text-nf-text2 disabled:opacity-40">
+          {probando ? 'Enviando…' : 'Enviarme una prueba a Telegram'}
         </button>
       </section>
 

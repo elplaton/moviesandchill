@@ -50,9 +50,19 @@ export async function modoDeReproduccion(path: string): Promise<Modo> {
  * En Safari, con su HLS: es el de verdad y el unico que viaja por AirPlay
  * (hls.js reproduce desde un `blob:` que el Apple TV no puede pedir). En el
  * resto, hls.js antes que el HLS propio que algunos Chrome empiezan a traer,
- * que con fMP4 aun no es de fiar.
+ * que con fMP4 aun no es de fiar. `directo` si no hay forma de abrir HLS.
+ *
+ * Tambien es lo que decide si se puede cambiar de idioma donde no hay
+ * `audioTracks` (Chrome, Edge, Firefox): se pide la version adaptada con otra
+ * pista. Se calcula una vez: el navegador no cambia mientras la pagina vive.
  */
-async function comoAbrirHls(): Promise<Modo> {
+let hlsDelNavegador: Promise<Modo> | null = null;
+export function comoAbrirHls(): Promise<Modo> {
+  if (!hlsDelNavegador) hlsDelNavegador = calcularHls();
+  return hlsDelNavegador;
+}
+
+async function calcularHls(): Promise<Modo> {
   const nativo = sabeHls();
   if (nativo && esSafari()) return 'hls';
   try {

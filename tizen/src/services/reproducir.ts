@@ -47,14 +47,27 @@ export async function modoDeReproduccion(path: string): Promise<Modo> {
   }
 }
 
-/** hls.js antes que el HLS propio: en las teles el propio, si lo hay, es el de
- *  un reproductor de hace años, y con fMP4 no es de fiar. */
-async function comoAbrirHls(): Promise<Modo> {
-  try {
-    const { default: Hls } = await import('hls.js');
-    if (Hls.isSupported()) return 'hlsjs';
-  } catch { /* sin hls.js se intenta lo siguiente */ }
-  return sabe('application/vnd.apple.mpegurl') ? 'hls' : 'directo';
+/**
+ * Como abre este aparato la versión adaptada: hls.js antes que el HLS propio,
+ * porque en las teles el propio, si lo hay, es el de un reproductor de hace
+ * años, y con fMP4 no es de fiar. `directo` quiere decir que no puede.
+ *
+ * Es del aparato y no del archivo, así que se pregunta una vez: lo usan
+ * también el reproductor (antes de cambiar de idioma por HLS, para saber si
+ * puede) y `useFuente`, y los dos tienen que llegar a la misma respuesta.
+ */
+let abrirHls: Promise<Modo> | null = null;
+export function comoAbrirHls(): Promise<Modo> {
+  if (!abrirHls) {
+    abrirHls = (async (): Promise<Modo> => {
+      try {
+        const { default: Hls } = await import('hls.js');
+        if (Hls.isSupported()) return 'hlsjs';
+      } catch { /* sin hls.js se intenta lo siguiente */ }
+      return sabe('application/vnd.apple.mpegurl') ? 'hls' : 'directo';
+    })();
+  }
+  return abrirHls;
 }
 
 function sabe(tipo: string): boolean {
