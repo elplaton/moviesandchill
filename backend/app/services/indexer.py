@@ -45,7 +45,18 @@ def seguidor_para(downloader):
         return bool(nombre) and downloader._is_downloadable(nombre) and downloader._get_file_size(m) > 0
 
     return Seguidor(es_foto=lambda m: isinstance(getattr(m, "media", None), MessageMediaPhoto),
-                    es_sticker=_es_sticker, es_archivo=es_archivo)
+                    es_sticker=_es_sticker, es_archivo=es_archivo,
+                    nombre_de=downloader._get_file_name)
+
+
+def ver(seguidor, msg):
+    """El contexto de un mensaje, sin que un fallo al leerlo pare nada: si
+    algo sale mal el archivo se indexa como antes, solo con su nombre."""
+    try:
+        return seguidor.ver(msg)
+    except Exception as e:
+        logger.warning("Contexto del mensaje %s no leido: %s", getattr(msg, "id", "?"), e)
+        return None
 
 
 def _contexto_a_item(ctx) -> dict:
@@ -146,6 +157,15 @@ async def lookup_con_pistas(api_key: str, parsed: ParsedName, pistas: dict) -> d
     for titulo in dict.fromkeys(t for t in (pistas.get("titulo"), pistas.get("original")) if t):
         result = await tmdb_search(api_key, titulo, tmdb_type, año if tmdb_type == "movie" else None)
         if result:
+            if tmdb_type_matches(parsed.media_type, result["media_type"]):
+                return result
+            # La ficha lleva a algo del otro tipo (una serie para un archivo de
+            # pelicula): si el nombre del archivo, como antes, da algo que si
+            # cuadra, manda el nombre. Asi la ficha nunca empeora lo que ya
+            # se encontraba.
+            por_nombre = await lookup_tmdb(api_key, parsed)
+            if por_nombre and tmdb_type_matches(parsed.media_type, por_nombre["media_type"]):
+                return por_nombre
             return result
     return await lookup_tmdb(api_key, parsed)
 
@@ -340,7 +360,7 @@ async def _scan_channel(downloader, channel_id, channel_name, broadcast, total_e
             async for msg in downloader.client.iter_messages(entity, **kwargs):
                 msg_count += 1
                 last_id = msg.id
-                ctx = seguidor.ver(msg)
+                ctx = ver(seguidor, msg)
                 if not msg.media:
                     continue
                 file_name = downloader._get_file_name(msg)
@@ -645,7 +665,7 @@ async def reindexar_temas(downloader, channel_id: int, temas: list[int], api_key
         seguidor = seguidor_para(downloader)
         lote: list[dict] = []
         async for msg in downloader.client.iter_messages(entidad, reply_to=tema, reverse=True):
-            ctx = seguidor.ver(msg)
+            ctx = ver(seguidor, msg)
             if not ctx:
                 continue
             nombre_archivo = downloader._get_file_name(msg)
@@ -683,7 +703,7 @@ async def index_live_message(downloader, channel_id: int, msg, api_key: str = ""
     seguidor = _seguidores_vivo.get(channel_id)
     if seguidor is None:
         seguidor = _seguidores_vivo[channel_id] = seguidor_para(downloader)
-    ctx = seguidor.ver(msg)
+    ctx = ver(seguidor, msg)
 
     if ctx and ctx.tema in (await temas_ignorados()).get(channel_id, set()):
         reason = "tema ignorado"

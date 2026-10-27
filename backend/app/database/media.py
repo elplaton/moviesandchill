@@ -59,7 +59,9 @@ async def guardar_contexto(filas: list[tuple]) -> None:
     episode).
 
     Lo que no tenia ficha valida vuelve a buscarse en TMDB, ahora con mejores
-    pistas; lo que ya estaba bien emparejado no se toca."""
+    pistas; lo que ya estaba bien emparejado no se toca, salvo que el limpiador
+    de ahora le cambie el tipo ("Clarksons Farm 4x1" emparejado con una
+    pelicula): eso se vuelve a buscar."""
     pool = get_pool()
     if not pool or not filas:
         return
@@ -67,13 +69,26 @@ async def guardar_contexto(filas: list[tuple]) -> None:
         await conn.executemany("""
             UPDATE media_items
                SET pie = $1, ficha = $2, tema_id = $3, pistas = $4::jsonb, contexto_leido = TRUE,
-                   clean_title = $7, media_type = $8, season = $9, episode = $10,
-                   tmdb_searched = CASE WHEN tmdb_valid IS TRUE THEN tmdb_searched ELSE FALSE END,
-                   tmdb_id = CASE WHEN tmdb_valid IS TRUE THEN tmdb_id ELSE NULL END,
-                   tmdb_type = CASE WHEN tmdb_valid IS TRUE THEN tmdb_type ELSE NULL END,
-                   tmdb_valid = CASE WHEN tmdb_valid IS TRUE THEN tmdb_valid ELSE NULL END
+                   clean_title = $7, media_type = $8::text, season = $9, episode = $10,
+                   tmdb_searched = CASE WHEN tmdb_valid IS TRUE AND media_type = $8::text THEN tmdb_searched ELSE FALSE END,
+                   tmdb_id = CASE WHEN tmdb_valid IS TRUE AND media_type = $8::text THEN tmdb_id ELSE NULL END,
+                   tmdb_type = CASE WHEN tmdb_valid IS TRUE AND media_type = $8::text THEN tmdb_type ELSE NULL END,
+                   tmdb_valid = CASE WHEN tmdb_valid IS TRUE AND media_type = $8::text THEN tmdb_valid ELSE NULL END
              WHERE channel_id = $5 AND message_id = $6
         """, filas)
+
+
+async def olvidar_contexto() -> int:
+    """Marca todo como sin releer, para que la relectura lo vuelva a pasar
+    con las reglas de ahora (cuando cambia `contexto.VERSION`)."""
+    pool = get_pool()
+    if not pool:
+        return 0
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            res = await conn.execute("UPDATE media_items SET contexto_leido = FALSE WHERE contexto_leido")
+            await conn.execute("DELETE FROM app_settings WHERE key LIKE 'relectura\\_%'")
+    return int(res.split()[-1]) if res else 0
 
 
 async def borrar_de_temas(channel_id: int, temas: list[int]) -> int:

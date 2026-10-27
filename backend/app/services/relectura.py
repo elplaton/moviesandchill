@@ -46,7 +46,7 @@ async def releer_canal(downloader, channel_id: int, nombre: str, api_key: str = 
     """Relee un canal. Devuelve cuantos archivos han recibido contexto."""
     from app.database.connection import get_app_settings, set_app_settings
     from app.database.media import borrar_de_temas, guardar_contexto, temas_ignorados
-    from app.services.indexer import _contexto_a_item, ensure_enrich_worker, seguidor_para
+    from app.services.indexer import _contexto_a_item, ensure_enrich_worker, seguidor_para, ver
     from app.services.title_parser import parse_filename
 
     pendientes = await _pendientes(channel_id)
@@ -83,7 +83,7 @@ async def releer_canal(downloader, channel_id: int, nombre: str, api_key: str = 
 
     async for msg in downloader.client.iter_messages(entidad, reverse=True, offset_id=desde):
         ultimo = msg.id
-        ctx = seguidor.ver(msg)
+        ctx = ver(seguidor, msg)
         if ctx and msg.id in pendientes:
             if ctx.tema in ignorados:
                 a_borrar.add(ctx.tema)
@@ -123,11 +123,27 @@ async def releer_todo(downloader, api_key: str = "") -> int:
     return total
 
 
+async def _al_dia_con_las_reglas() -> None:
+    """Si las fichas se leian de otra forma la ultima vez (`contexto.VERSION`),
+    lo releido se vuelve a releer: lo guardado se saco con las reglas viejas."""
+    from app.database.connection import get_app_settings, set_app_settings
+    from app.database.media import olvidar_contexto
+    from app.services.contexto import VERSION
+
+    if (await get_app_settings()).get("contexto_version") == str(VERSION):
+        return
+    n = await olvidar_contexto()
+    await set_app_settings({"contexto_version": str(VERSION)})
+    logger.info("Relectura: las fichas se leen de otra forma (version %d), se vuelven a leer %d archivos",
+                VERSION, n)
+
+
 async def relectura_de_fondo(downloader, api_key: str = "") -> None:
     """Al arrancar, con margen para que acabe de conectar y de escanear lo
     nuevo. Si queda algo (un reinicio a medias, un canal recien añadido que se
     indexo antes de esto), se reintenta cada pocas horas."""
     await asyncio.sleep(300)
+    await _al_dia_con_las_reglas()
     while True:
         if downloader.client and downloader.client.is_connected():
             try:
