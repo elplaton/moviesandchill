@@ -45,6 +45,9 @@ const TopCard = memo(function TopCard({ item, puesto, onOpen }: {
   item: BrowseItem; puesto: number; onOpen: (item: BrowseItem) => void;
 }) {
   const tenemos = item.en_catalogo !== false;
+  // Un puesto que TMDB no conoce: se enseña para que el top tenga todos sus
+  // puestos, pero no hay ficha que abrir ni nada que pedir.
+  const sinFicha = !!item.sin_ficha;
   const [broken, setBroken] = useState(false);
   // Sin ratón no hay hover: pulsar la carátula de algo que no tenemos saca
   // el botón de pedir, en vez de abrir una ficha vacía.
@@ -97,7 +100,7 @@ const TopCard = memo(function TopCard({ item, puesto, onOpen }: {
       <div className="card relative ml-auto" style={{ width: 'var(--card-w)' }}
         onMouseLeave={() => setAbierto(false)}>
         <button
-          onClick={() => (tenemos ? onOpen(item) : setAbierto(true))}
+          onClick={() => { if (sinFicha) return; if (tenemos) onOpen(item); else setAbierto(true); }}
           aria-label={tenemos ? `${puesto}. ${item.title}` : `${puesto}. ${item.title}: no la tenemos`}
           className="card-media relative block w-full aspect-[2/3] rounded-card overflow-hidden bg-nf-surface shadow-card text-left"
         >
@@ -112,12 +115,12 @@ const TopCard = memo(function TopCard({ item, puesto, onOpen }: {
           )}
           {!tenemos && (
             <span className="absolute top-2 right-2 rounded bg-black/80 px-1.5 py-0.5 text-micro font-semibold text-white">
-              No la tenemos
+              {sinFicha ? 'Sin ficha' : 'No la tenemos'}
             </span>
           )}
         </button>
 
-        <div className={`card-info absolute inset-x-0 top-0 aspect-[2/3] flex flex-col items-center justify-center gap-2 rounded-card bg-black/55 ${abierto ? 'card-info-on' : ''}`}>
+        {!sinFicha && <div className={`card-info absolute inset-x-0 top-0 aspect-[2/3] flex flex-col items-center justify-center gap-2 rounded-card bg-black/55 ${abierto ? 'card-info-on' : ''}`}>
           {tenemos ? (
             <Button variant="light" size="sm" icon={<IconInfo />} onClick={() => onOpen(item)}>
               {item.media_type === 'series' ? 'Ver episodios' : 'Ver detalles'}
@@ -127,7 +130,7 @@ const TopCard = memo(function TopCard({ item, puesto, onOpen }: {
               {mia ? 'Pedida' : ocupado ? 'Pidiendo…' : deOtro ? 'Avisarme' : 'Pedir'}
             </Button>
           )}
-        </div>
+        </div>}
 
         <p className="mt-2 text-base font-medium leading-snug line-clamp-2">{item.title}</p>
         {meta && <p className="text-xs text-nf-faint truncate">{meta}</p>}

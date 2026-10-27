@@ -183,6 +183,8 @@ export interface BrowseItem {
   en_catalogo?: boolean;
   /** Solo en las filas de top: si alguien lo ha pedido ya, y si fui yo. */
   peticion?: { estado: 'enviada' | 'conseguida' | 'fallida'; mia: boolean } | null;
+  /** Puesto de un top que TMDB no conoce: solo hay nombre; ni ficha ni «Pedir». */
+  sin_ficha?: boolean;
 }
 
 /** A qué plataforma pertenece una fila de la pestaña Plataformas. */

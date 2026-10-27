@@ -147,36 +147,66 @@ async def _relleno(api_key: str, ids: set[int], tipo: str, ya: set[int], faltan:
     return out
 
 
-async def _netflix_oficial(api_key: str) -> dict[str, list[dict]]:
-    """El top 10 oficial de Netflix en España de la ultima semana publicada,
-    ya emparejado con TMDB: {"movie": [...], "tv": [...]}. Vacio si no se
-    puede bajar o leer (entonces Netflix usa las tendencias, como el resto)."""
+async def _bajar_netflix() -> tuple[str | None, list[dict]]:
+    """La ultima semana publicada para España y sus filas, sin emparejar.
+    (None, []) si no se puede bajar o leer."""
     import aiohttp
 
-    try:
-        async with aiohttp.ClientSession() as s:
-            async with s.get(NETFLIX_TSV, timeout=aiohttp.ClientTimeout(total=120)) as resp:
-                if resp.status != 200:
-                    logger.warning("Top de Netflix: el archivo contesto %d", resp.status)
-                    return {}
-                texto = await resp.text()
-    except Exception as e:
-        logger.warning("Top de Netflix: no se pudo bajar: %s", e)
-        return {}
-
+    texto = None
+    # Son unos 30 MB y a veces el primer intento se corta: uno mas, con pausa.
+    for intento in (1, 2):
+        try:
+            async with aiohttp.ClientSession(headers={"User-Agent": "Mozilla/5.0 (MoviesAndChill)"}) as s:
+                async with s.get(NETFLIX_TSV, timeout=aiohttp.ClientTimeout(total=300)) as resp:
+                    if resp.status != 200:
+                        logger.warning("Top de Netflix: el archivo contesto %d", resp.status)
+                        return None, []
+                    texto = await resp.text()
+                    break
+        except Exception as e:
+            # Un TimeoutError no trae mensaje: sin el tipo, el log diria solo
+            # "no se pudo bajar:" y nada mas.
+            logger.warning("Top de Netflix: no se pudo bajar (intento %d): %s %s",
+                           intento, type(e).__name__, e)
+            if intento == 1:
+                await asyncio.sleep(30)
+    if texto is None:
+        return None, []
     filas = [f for f in csv.DictReader(io.StringIO(texto), delimiter="\t")
              if f.get("country_name") == PAIS_NETFLIX]
     if not filas:
-        return {}
+        return None, []
     semana = max(f["week"] for f in filas)
+    return semana, sorted((f for f in filas if f["week"] == semana), key=lambda f: int(f["weekly_rank"]))
+
+
+async def _netflix_oficial(api_key: str, semana_guardada: str | None = None
+                           ) -> tuple[str | None, dict[str, list[dict]]]:
+    """El top 10 oficial de Netflix en España de la ultima semana publicada,
+    ya emparejado con TMDB: (semana, {"movie": [...], "tv": [...]}). Si la
+    semana no es mas nueva que `semana_guardada` no se empareja nada (es lo
+    caro) y se devuelve vacio. Vacio tambien si no se puede bajar o leer."""
+    semana, filas = await _bajar_netflix()
+    if not semana or (semana_guardada and semana <= semana_guardada):
+        return semana, {}
     out: dict[str, list[dict]] = {"movie": [], "tv": []}
-    for f in sorted((f for f in filas if f["week"] == semana), key=lambda f: int(f["weekly_rank"])):
+    for f in filas:
         tipo = "movie" if f["category"] == "Films" else "tv"
-        r = await _emparejar_netflix(api_key, f["show_title"], tipo)
-        if not r:
+        r, tipo_real = await _emparejar_netflix(api_key, f["show_title"], tipo)
+        if r:
+            item = {"tmdb_id": r["id"], "semana": semana, **_item(r, tipo_real)}
+            if tipo_real != tipo:
+                # Netflix y TMDB no siempre coinciden en que es serie y que
+                # pelicula ("Instadocs" es serie para Netflix y peliculas en
+                # TMDB): el puesto es de la lista de Netflix, pero la ficha y
+                # el "Pedir" tienen que usar el tipo de TMDB.
+                item["tipo"] = tipo_real
+        else:
+            # Sin pareja: se enseña igual con su nombre, sin caratula. Un top
+            # de Netflix con un hueco no se parece al de Netflix.
             logger.info("Top de Netflix: sin pareja en TMDB para «%s»", f["show_title"])
-            continue
-        item = {"tmdb_id": r["id"], **_item(r, tipo)}
+            item = {"tmdb_id": 0, "semana": semana, "titulo": f["show_title"], "poster": None,
+                    "backdrop": None, "year": None, "rating": None, "overview": ""}
         temporada = (f.get("season_title") or "").split(": ")[-1]
         if tipo == "tv" and temporada and temporada != "N/A":
             item["subtitulo"] = (temporada.replace("Season", "Temporada")
@@ -184,25 +214,33 @@ async def _netflix_oficial(api_key: str) -> dict[str, list[dict]]:
         out[tipo].append(item)
     logger.info("Top de Netflix (semana del %s): %d peliculas, %d series",
                 semana, len(out["movie"]), len(out["tv"]))
-    return out
+    return semana, out
 
 
-async def _emparejar_netflix(api_key: str, titulo: str, tipo: str) -> dict | None:
+async def _emparejar_netflix(api_key: str, titulo: str, tipo: str) -> tuple[dict | None, str]:
     """El resultado de TMDB que corresponde a un titulo del top de Netflix: de
-    los primeros, el que este en Netflix en España; si ninguno, el primero."""
+    los primeros, el que este en Netflix en España; si ninguno, el primero.
+    Si buscando con su tipo no sale nada, se busca en todo TMDB: hay titulos
+    que Netflix cuenta como serie y TMDB como pelicula. Devuelve tambien el
+    tipo que tiene en TMDB."""
     from app.services.plataformas import POR_CLAVE
     from app.services.tmdb import _get
 
     data = await _get(f"/search/{tipo}", {"api_key": api_key, "query": titulo,
                                           "language": "es-ES", "include_adult": "false"})
-    candidatos = (data or {}).get("results", [])[:5]
+    candidatos = [(c, tipo) for c in (data or {}).get("results", [])[:5]]
     if not candidatos:
-        return None
+        data = await _get("/search/multi", {"api_key": api_key, "query": titulo,
+                                            "language": "es-ES", "include_adult": "false"})
+        candidatos = [(c, c["media_type"]) for c in (data or {}).get("results", [])
+                      if c.get("media_type") in ("movie", "tv")][:5]
+    if not candidatos:
+        return None, tipo
     netflix = set(POR_CLAVE["netflix"]["ids"])
-    prov = await _proveedores(api_key, [(c["id"], tipo) for c in candidatos])
-    for c in candidatos:
-        if prov.get((c["id"], tipo), set()) & netflix:
-            return c
+    prov = await _proveedores(api_key, [(c["id"], t) for c, t in candidatos])
+    for c, t in candidatos:
+        if prov.get((c["id"], t), set()) & netflix:
+            return c, t
     return candidatos[0]
 
 
@@ -226,7 +264,7 @@ async def foto(api_key: str) -> int:
                                            TOP - len(elegidos))
             listas[(ambito, tipo)] = ("tmdb", elegidos)
 
-    oficial = await _netflix_oficial(api_key)
+    _, oficial = await _netflix_oficial(api_key)
     for tipo, items in oficial.items():
         if items:
             listas[("netflix", tipo)] = ("netflix", items)
@@ -287,6 +325,43 @@ async def ultimo(ambito: str, tipo: str) -> tuple[str | None, str, list[dict]]:
     return filas[0]["fecha"].isoformat(), filas[0]["fuente"], items
 
 
+async def _semana_guardada() -> str | None:
+    """La semana de Netflix que tiene la ultima foto."""
+    from app.database.connection import get_pool
+
+    pool = get_pool()
+    if not pool:
+        return None
+    async with pool.acquire() as conn:
+        return await conn.fetchval("""
+            SELECT MAX(datos->>'semana') FROM tops
+            WHERE ambito = 'netflix' AND fuente = 'netflix'
+              AND fecha = (SELECT MAX(fecha) FROM tops WHERE ambito = 'netflix')
+        """)
+
+
+async def actualizar_netflix(api_key: str) -> bool:
+    """Si Netflix ha publicado una semana nueva, la pone ya en la foto de hoy
+    sin esperar a la de mañana. Devuelve si habia semana nueva."""
+    semana, oficial = await _netflix_oficial(api_key, await _semana_guardada())
+    if not any(oficial.values()):
+        return False
+    for tipo, items in oficial.items():
+        if items:
+            await _guardar("netflix", tipo, "netflix", items)
+    from app.services import cache
+    cache.olvidar("plataformas", "portada")
+    logger.info("Top de Netflix: semana nueva (%s) puesta en la foto de hoy", semana)
+    return True
+
+
+# Netflix publica la semana los martes (a lo largo del dia, hora de EEUU):
+# martes y miercoles se mira cada tantas horas hasta que aparezca. El archivo
+# pesa unos 30 MB, asi que el resto de la semana basta con la foto diaria.
+DIAS_DE_PUBLICACION = (1, 2)  # martes y miercoles (lunes = 0)
+HORAS_ENTRE_MIRADAS = 3
+
+
 async def hay_foto_de_hoy() -> bool:
     from app.database.connection import get_pool
 
@@ -300,11 +375,19 @@ async def hay_foto_de_hoy() -> bool:
 async def fotografo(api_key: str) -> None:
     """Una foto al dia. Mira cada hora si la de hoy ya esta: asi un reinicio
     no la repite y un servidor que estuvo apagado la saca al volver."""
+    import time
+
     await asyncio.sleep(150)
+    ultima_mirada = time.time()
     while True:
         try:
             if not await hay_foto_de_hoy():
                 await foto(api_key)
+                ultima_mirada = time.time()
+            elif (date.today().weekday() in DIAS_DE_PUBLICACION
+                  and time.time() - ultima_mirada > HORAS_ENTRE_MIRADAS * 3600):
+                ultima_mirada = time.time()
+                await actualizar_netflix(api_key)
         except Exception as e:
             logger.error("Tops: la foto del dia fallo: %s", e)
         await asyncio.sleep(3600)

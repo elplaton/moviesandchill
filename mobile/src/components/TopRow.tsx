@@ -157,6 +157,10 @@ export default function TopRow({ carril, scrollX, onScrollX, onPedida }: Props) 
               </Link>,
             );
           }
+          // Un puesto que TMDB no conoce: solo el nombre, sin ficha ni pedir.
+          if (i.sin_ficha) {
+            return tarjeta(<div><Caratula i={i} apagada etiqueta="Sin ficha" />{pie}</div>);
+          }
           return tarjeta(
             <button onClick={() => setAbierta(i.id)} className="block w-full text-left active:opacity-70"
               aria-label={`${i.title}: no la tenemos, pedirla`}>

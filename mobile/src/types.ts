@@ -197,6 +197,8 @@ export interface BrowseItem {
   en_catalogo?: boolean;
   /** Si alguien lo ha pedido ya (y si he sido yo). */
   peticion?: null | { estado: 'enviada' | 'conseguida' | 'fallida'; mia: boolean };
+  /** Puesto de un top que TMDB no conoce: solo hay nombre; ni ficha ni «Pedir». */
+  sin_ficha?: boolean;
 }
 
 /** De que plataforma es una fila de la pestaña Plataformas. */

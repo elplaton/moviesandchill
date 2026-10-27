@@ -192,6 +192,8 @@ export interface BrowseItem {
   en_catalogo?: boolean;
   /** Top: si alguien ya lo ha pedido, y si ese alguien es esta cuenta. */
   peticion?: Peticion | null;
+  /** Puesto de un top que TMDB no conoce: solo hay nombre; ni ficha ni «Pedir». */
+  sin_ficha?: boolean;
 }
 
 export interface Peticion {

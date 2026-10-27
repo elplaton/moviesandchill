@@ -31,6 +31,7 @@ const NOTA_TOP: Record<BrowseTop['fuente'], string> = {
 /** La etiqueta de una tarjeta de top que no está en el catálogo. */
 function avisoDe(item: BrowseItem): string | undefined {
   if (item.en_catalogo !== false) return undefined;
+  if (item.sin_ficha) return 'Sin ficha';
   return item.peticion?.estado === 'enviada' ? 'Pedida' : 'No la tenemos';
 }
 
@@ -251,7 +252,11 @@ export default function Catalog({ filter, heading, fuente = 'portada' }: Props) 
               ? items.map(({ item, f }, i) => (
                   <PosterCard key={f.key} index={i} item={f} autoFocus={ri === 0 && i === 0 && !hasResume}
                     puesto={row.top ? item.puesto ?? i + 1 : undefined} aviso={avisoDe(item)}
-                    onSelect={() => (item.en_catalogo === false ? setPidiendo(item) : openItem(item, f))} />
+                    onSelect={() => {
+                      // Un puesto que TMDB no conoce no tiene ficha ni se puede pedir.
+                      if (item.sin_ficha) { toast('TMDB no conoce este título: no hay ficha ni se puede pedir'); return; }
+                      if (item.en_catalogo === false) setPidiendo(item); else openItem(item, f);
+                    }} />
                 ))
               : null}
           </Row>

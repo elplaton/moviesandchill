@@ -427,16 +427,21 @@ async def fila_top(nombre: str, ambito: str, tipo: str, user_id: int | None) -> 
     fecha, fuente, items = await ultimo(ambito, tipo)
     if not items:
         return None
-    claves = [(i["tmdb_id"], tipo) for i in items]
+    # Cada titulo con su tipo de TMDB, que no siempre es el de la lista (ver
+    # `_netflix_oficial`).
+    claves = [(i["tmdb_id"], i.get("tipo") or tipo) for i in items if i["tmdb_id"]]
     tenemos = await pet.en_catalogo(claves)
     pedidas = await pet.de_titulos(claves, user_id or 0)
-    es_serie = tipo == "tv"
     tarjetas = []
     for i in items:
-        clave = (i["tmdb_id"], tipo)
+        t = i.get("tipo") or tipo
+        es_serie = t == "tv"
+        clave = (i["tmdb_id"], t)
         p = pedidas.get(clave)
         tarjetas.append({
-            "id": f"{'s' if es_serie else 'm'}{i['tmdb_id']}",
+            # Sin pareja en TMDB (tmdb_id 0) el id no puede ser "s0": habria
+            # dos iguales si faltan dos.
+            "id": f"{'s' if es_serie else 'm'}{i['tmdb_id']}" if i["tmdb_id"] else f"x{i['puesto']}",
             "tmdb_id": i["tmdb_id"],
             "title": i.get("titulo") or "",
             "poster": i.get("poster"),
@@ -451,9 +456,11 @@ async def fila_top(nombre: str, ambito: str, tipo: str, user_id: int | None) -> 
             "subtitulo": i.get("subtitulo"),
             "en_catalogo": clave in tenemos,
             "peticion": {"estado": p["estado"], "mia": p["mia"]} if p else None,
+            # Ni ficha ni "Pedir": TMDB no lo conoce. Solo se enseña el puesto.
+            "sin_ficha": not i["tmdb_id"],
         })
     return {"genre": nombre, "items": tarjetas, "total": len(tarjetas), "key": None,
-            "top": {"fuente": fuente, "fecha": fecha, "media_type": "series" if es_serie else "movie"}}
+            "top": {"fuente": fuente, "fecha": fecha, "media_type": "series" if tipo == "tv" else "movie"}}
 
 
 # Menos que esto no se enseña como top.
