@@ -238,8 +238,28 @@ async def _emparejar_netflix(api_key: str, titulo: str, tipo: str) -> tuple[dict
         return None, tipo
     netflix = set(POR_CLAVE["netflix"]["ids"])
     prov = await _proveedores(api_key, [(c["id"], t) for c, t in candidatos])
+
+    def exacto(c: dict) -> bool:
+        buscado = titulo.strip().lower()
+        return any((c.get(k) or "").strip().lower() == buscado
+                   for k in ("title", "original_title", "name", "original_name"))
+
+    def en_netflix(c: dict, t: str) -> bool:
+        return bool(prov.get((c["id"], t), set()) & netflix)
+
+    def año(c: dict) -> str:
+        return (c.get("release_date") or c.get("first_air_date") or "")[:4]
+
+    # Primero lo que se llama exactamente asi; entre eso, lo que esta en
+    # Netflix y, si no, lo mas reciente (el top es de estrenos). Solo sin
+    # ninguno exacto vale "lo primero que este en Netflix": con eso a secas,
+    # "The Storm" se emparejaba con "La tormenta perfecta" (2000) porque esa
+    # si esta en Netflix y la nueva aun no tenia plataformas en TMDB.
+    exactos = [(c, t) for c, t in candidatos if exacto(c)]
+    if exactos:
+        return max(exactos, key=lambda ct: (en_netflix(*ct), año(ct[0])))
     for c, t in candidatos:
-        if prov.get((c["id"], t), set()) & netflix:
+        if en_netflix(c, t):
             return c, t
     return candidatos[0]
 
