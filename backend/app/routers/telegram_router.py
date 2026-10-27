@@ -440,3 +440,87 @@ async def _reset_client(downloader) -> None:
             logger.info("Sesion anterior apartada en %s", os.path.basename(backup))
         except OSError as e:
             logger.warning("No se pudo apartar la sesion anterior: %s", e)
+
+
+# --- Diagnostico: ver los mensajes de un canal tal cual -------------------------
+
+def _peer_de(channel_id: int) -> int:
+    """Los canales se guardan con su id positivo; Telethon quiere el marcado
+    (-100...)."""
+    return channel_id if channel_id < 0 else int(f"-100{channel_id}")
+
+
+def _resumen(m) -> dict:
+    """Lo que interesa de un mensaje para entender como publica un canal: el
+    texto, que lleva adjunto, a que responde y los enlaces. Solo lectura."""
+    from telethon.tl import types as tl
+
+    medio = None
+    doc = getattr(m, "document", None)
+    if getattr(m, "photo", None):
+        medio = {"tipo": "foto"}
+    elif doc is not None:
+        medio = {"tipo": "documento", "mime": getattr(doc, "mime_type", None),
+                 "tamano": getattr(doc, "size", None)}
+        for a in getattr(doc, "attributes", []) or []:
+            if isinstance(a, tl.DocumentAttributeFilename):
+                medio["nombre"] = a.file_name
+            elif isinstance(a, tl.DocumentAttributeVideo):
+                medio.update(tipo="video", duracion=a.duration, ancho=a.w, alto=a.h,
+                             streaming=bool(getattr(a, "supports_streaming", False)))
+    elif isinstance(getattr(m, "media", None), tl.MessageMediaWebPage):
+        wp = m.media.webpage
+        medio = {"tipo": "web", "url": getattr(wp, "url", None), "titulo": getattr(wp, "title", None)}
+
+    enlaces = []
+    for ent, texto in (m.get_entities_text() if m.message else []):
+        url = getattr(ent, "url", None) or (texto if isinstance(ent, tl.MessageEntityUrl) else None)
+        if url:
+            enlaces.append(url)
+    botones = []
+    for fila in (getattr(getattr(m, "reply_markup", None), "rows", None) or []):
+        for b in fila.buttons:
+            if getattr(b, "url", None):
+                botones.append({"texto": b.text, "url": b.url})
+
+    r = getattr(m, "reply_to", None)
+    return {
+        "id": m.id,
+        "fecha": m.date.isoformat() if m.date else None,
+        "texto": (m.message or "")[:800],
+        "medio": medio,
+        "album": m.grouped_id,
+        "responde_a": getattr(r, "reply_to_msg_id", None),
+        "tema": getattr(r, "reply_to_top_id", None) or (getattr(r, "reply_to_msg_id", None)
+                                                        if getattr(r, "forum_topic", False) else None),
+        "enlaces": enlaces,
+        "botones": botones,
+    }
+
+
+@router.get("/mensajes")
+async def mensajes_de_canal(user: Annotated[str, Depends(get_current_admin)], channel_id: int,
+                            limite: int = 40, tema: int | None = None, antes_de: int = 0):
+    """Los ultimos mensajes de un canal (o de un tema suyo), resumidos. Es para
+    entender como publica cada canal (que va en el texto, que en el archivo,
+    como se relacionan) y afinar el indexado. **Solo lee**."""
+    downloader, config = _ctx()
+    cliente, _ = await _ensure_client(downloader, config)
+    if not await cliente.is_user_authorized():
+        raise HTTPException(status_code=409, detail="Telegram no tiene sesion")
+    entidad = await cliente.get_input_entity(_peer_de(channel_id))
+    kw = {"limit": max(1, min(limite, 200)), "offset_id": antes_de}
+    if tema:
+        kw["reply_to"] = tema
+    return {"mensajes": [_resumen(m) async for m in cliente.iter_messages(entidad, **kw)]}
+
+
+@router.get("/temas")
+async def temas_de_canal(user: Annotated[str, Depends(get_current_admin)], channel_id: int):
+    """Los temas de un canal con foro (para encontrar el de "Peliculas")."""
+    from app.services.peticiones import PeticionError, temas
+
+    try:
+        return {"temas": await temas(_peer_de(channel_id))}
+    except PeticionError as e:
+        raise HTTPException(status_code=e.codigo, detail=str(e))
