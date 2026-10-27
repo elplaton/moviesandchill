@@ -33,6 +33,34 @@ class SearchRequest(BaseModel):
 FORMA_RESULTADO = 3
 
 
+def _de_la_ficha(r: dict) -> dict:
+    """Lo que dice la ficha del canal (services/contexto.py) de un archivo que
+    TMDB no ha encontrado: mejor su titulo, su año y su caratula que el nombre
+    del archivo y un hueco gris. Vacio si TMDB si lo encontro o no hay ficha."""
+    import json
+
+    if r.get("tmdb_poster") or r.get("tmdb_title"):
+        return {}
+    p = r.get("pistas")
+    if isinstance(p, str):
+        try:
+            p = json.loads(p)
+        except ValueError:
+            p = None
+    if not isinstance(p, dict) or not p.get("titulo"):
+        return {}
+    titulo = p["titulo"]
+    # "LA SILLA" en la ficha; en la tarjeta, "La Silla".
+    if titulo.isupper():
+        titulo = titulo.title()
+    # La sinopsis es lo que va detras de la primera linea de la ficha, sin
+    # las lineas de la ficha tecnica ("📅 Estreno: ...").
+    resto = [l.strip() for l in (r.get("ficha") or "").splitlines()[1:] if l.strip()]
+    sinopsis = " ".join(l for l in resto if ":" not in l[:25] and not l.startswith("http"))[:600]
+    return {"tmdb_title": titulo, "tmdb_year": p.get("año"), "tmdb_poster": p.get("poster"),
+            "tmdb_overview": sinopsis or None, "de_ficha": True}
+
+
 def _row_to_result(r: dict, existing: set, done: dict | None = None, me: dict | None = None) -> dict:
     # Lo descargado se sabe por la tabla de descargas (ruta final, dueño), no
     # adivinando por el nombre del archivo.
@@ -63,6 +91,9 @@ def _row_to_result(r: dict, existing: set, done: dict | None = None, me: dict | 
         # "Ver" en vez de "Descargar", por la extension: un video suelto o
         # partes sin comprimir (.mkv.001...). Zip, rar y 7z se descargan.
         "streamable": reproduccion.se_puede_intentar(r.get("file_name")),
+        # Sin ficha de TMDB, lo que dice la ficha del canal (titulo, año,
+        # caratula, sinopsis). `de_ficha` lo marca.
+        **_de_la_ficha(r),
     }
 
 

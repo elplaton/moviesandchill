@@ -21,18 +21,70 @@ async def insert_media_items(items: list[dict]):
     pool = get_pool()
     if not pool or not items:
         return
+    import json
+
     rows = [(
         i.get("channel_id"), i.get("channel_name"), i.get("message_id"),
         i.get("file_name"), i.get("file_size"), i.get("size_str"),
         i.get("clean_title"), i.get("media_type"), i.get("season"), i.get("episode"),
+        i.get("pie"), i.get("ficha"), i.get("tema_id"),
+        json.dumps(i["pistas"], ensure_ascii=False) if i.get("pistas") else None,
     ) for i in items]
     async with pool.acquire() as conn:
+        # Lo que entra ya con su contexto (pie, ficha, tema) no hay que
+        # releerlo de Telegram: `contexto_leido` va a TRUE.
         await conn.executemany("""
             INSERT INTO media_items (channel_id, channel_name, message_id, file_name,
-                file_size, size_str, clean_title, media_type, season, episode)
-            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+                file_size, size_str, clean_title, media_type, season, episode,
+                pie, ficha, tema_id, pistas, contexto_leido)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14::jsonb,TRUE)
             ON CONFLICT (channel_id, message_id) DO NOTHING
         """, rows)
+
+
+async def temas_ignorados() -> dict[int, set[int]]:
+    """Los temas que no se indexan, por canal."""
+    pool = get_pool()
+    if not pool:
+        return {}
+    async with pool.acquire() as conn:
+        filas = await conn.fetch("SELECT channel_id, temas_ignorados FROM channels")
+    return {f["channel_id"]: set(f["temas_ignorados"] or []) for f in filas}
+
+
+async def guardar_contexto(filas: list[tuple]) -> None:
+    """Pone el contexto releido de Telegram a lo ya indexado, y de paso lo que
+    saca del nombre el limpiador actual. filas: (pie, ficha, tema_id,
+    pistas_json, channel_id, message_id, clean_title, media_type, season,
+    episode).
+
+    Lo que no tenia ficha valida vuelve a buscarse en TMDB, ahora con mejores
+    pistas; lo que ya estaba bien emparejado no se toca."""
+    pool = get_pool()
+    if not pool or not filas:
+        return
+    async with pool.acquire() as conn:
+        await conn.executemany("""
+            UPDATE media_items
+               SET pie = $1, ficha = $2, tema_id = $3, pistas = $4::jsonb, contexto_leido = TRUE,
+                   clean_title = $7, media_type = $8, season = $9, episode = $10,
+                   tmdb_searched = CASE WHEN tmdb_valid IS TRUE THEN tmdb_searched ELSE FALSE END,
+                   tmdb_id = CASE WHEN tmdb_valid IS TRUE THEN tmdb_id ELSE NULL END,
+                   tmdb_type = CASE WHEN tmdb_valid IS TRUE THEN tmdb_type ELSE NULL END,
+                   tmdb_valid = CASE WHEN tmdb_valid IS TRUE THEN tmdb_valid ELSE NULL END
+             WHERE channel_id = $5 AND message_id = $6
+        """, filas)
+
+
+async def borrar_de_temas(channel_id: int, temas: list[int]) -> int:
+    """Quita del catalogo lo indexado de unos temas (los que se ignoran)."""
+    pool = get_pool()
+    if not pool or not temas:
+        return 0
+    async with pool.acquire() as conn:
+        res = await conn.execute(
+            "DELETE FROM media_items WHERE channel_id = $1 AND tema_id = ANY($2::int[])", channel_id, temas)
+    return int(res.split()[-1]) if res else 0
 
 
 async def update_media_tmdb(channel_id: int, message_id: int, tmdb_id: int, tmdb_valid: bool, tmdb_type: str):

@@ -225,6 +225,20 @@ async def _ensure_tables():
         # lo de una version vieja se vuelve a mirar.
         await conn.execute(
             "ALTER TABLE tmdb_plataformas ADD COLUMN IF NOT EXISTS version SMALLINT NOT NULL DEFAULT 1")
+        # Lo que dicen los mensajes de alrededor de cada archivo (ver
+        # services/contexto.py): su pie de texto, la ficha que va encima, su
+        # tema (en un grupo con foro) y lo que se saca de ellos para buscar en
+        # TMDB (titulo, año, original, enlaces, caratula). `contexto_leido`
+        # marca lo indexado antes de esto que ya se ha releido de Telegram.
+        await conn.execute("ALTER TABLE media_items ADD COLUMN IF NOT EXISTS pie TEXT")
+        await conn.execute("ALTER TABLE media_items ADD COLUMN IF NOT EXISTS ficha TEXT")
+        await conn.execute("ALTER TABLE media_items ADD COLUMN IF NOT EXISTS tema_id INTEGER")
+        await conn.execute("ALTER TABLE media_items ADD COLUMN IF NOT EXISTS pistas JSONB")
+        await conn.execute(
+            "ALTER TABLE media_items ADD COLUMN IF NOT EXISTS contexto_leido BOOLEAN NOT NULL DEFAULT FALSE")
+        # Temas de un canal con foro que no se indexan (Deportes, Libros...).
+        await conn.execute(
+            "ALTER TABLE channels ADD COLUMN IF NOT EXISTS temas_ignorados INTEGER[] NOT NULL DEFAULT '{}'")
         # Los tops (services/tops.py): una foto al dia de cada lista, asi que
         # queda el historico. `ambito` es la clave de la plataforma o "todas";
         # `datos` lleva lo justo para pintar el titulo aunque no lo tengamos.

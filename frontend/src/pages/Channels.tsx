@@ -26,6 +26,185 @@ interface ChannelProgress {
   phase?: string;
 }
 
+interface Tema {
+  id: number;
+  titulo: string;
+  cerrado: boolean;
+  general: boolean;
+  ignorado: boolean;
+  indexados: number;
+}
+
+interface TemasRespuesta {
+  foro: boolean;
+  sin_leer: number;
+  temas: Tema[];
+}
+
+// Lo que no es 2xx no lanza en apiFetch: hay que sacar el motivo a mano.
+// FastAPI lo pone en `detail` y el resto de la API en `error`.
+async function motivoDe(res: Response): Promise<string> {
+  try {
+    const data = await res.json();
+    if (typeof data?.detail === 'string') return data.detail;
+    if (typeof data?.error === 'string') return data.error;
+  } catch {}
+  return `Error ${res.status}`;
+}
+
+// Temas de un grupo con foro: elegir cuáles NO se indexan. Existe porque en
+// un mismo grupo conviven «Películas» y «Series» con «Deportes», «Libros» o
+// «APKs», y lo de esos otros temas entraba en el catálogo como si fueran
+// películas. La lista se pide al abrir y no antes: pregunta a Telegram y
+// tarda unos segundos, así que pedirla por cada canal de la lista sería
+// esperar por lo que nadie ha abierto.
+function TemasCanal({ channelId }: { channelId: number }) {
+  const [datos, setDatos] = useState<TemasRespuesta | null>(null);
+  const [cargando, setCargando] = useState(true);
+  const [error, setError] = useState('');
+  // Ids ignorados tal y como los va dejando la persona, sin guardar todavía.
+  const [ignorados, setIgnorados] = useState<Set<number>>(new Set());
+  // Títulos que van a dejar de indexarse: mientras no sea null se está
+  // pidiendo confirmación, porque guardar borra del catálogo lo ya indexado.
+  const [confirmar, setConfirmar] = useState<string[] | null>(null);
+  const [guardando, setGuardando] = useState(false);
+  const [resultado, setResultado] = useState('');
+
+  const cargar = async () => {
+    setCargando(true);
+    setError('');
+    try {
+      const res = await apiFetch(`/channels/${channelId}/temas`);
+      if (!res.ok) { setError(await motivoDe(res)); return; }
+      const data: TemasRespuesta = await res.json();
+      setDatos(data);
+      setIgnorados(new Set((data.temas || []).filter(t => t.ignorado).map(t => t.id)));
+    } catch {
+      setError('Error de conexión');
+    } finally {
+      setCargando(false);
+    }
+  };
+
+  useEffect(() => { cargar(); }, [channelId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const temas = datos?.temas || [];
+  const nuevosIgnorados = temas.filter(t => ignorados.has(t.id) && !t.ignorado);
+  const hayCambios = temas.some(t => ignorados.has(t.id) !== t.ignorado);
+
+  const alternar = (id: number) => {
+    setResultado('');
+    setConfirmar(null);
+    setIgnorados(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
+
+  const guardar = async () => {
+    setGuardando(true);
+    setError('');
+    try {
+      const res = await apiFetch(`/channels/${channelId}/temas-ignorados`, {
+        method: 'POST',
+        body: JSON.stringify({ temas: [...ignorados] }),
+      });
+      if (!res.ok) { setError(await motivoDe(res)); return; }
+      const data: { ok: boolean; quitados: number; reindexando: number[] } = await res.json();
+      // Los ids se traducen con la lista de antes de recargar: es la que
+      // tiene los títulos de lo que se acaba de cambiar.
+      const titulos = (data.reindexando || []).map(id => temas.find(t => t.id === id)?.titulo || `#${id}`);
+      const partes = [`Quitados ${(data.quitados || 0).toLocaleString()} archivos.`];
+      if (titulos.length > 0) partes.push(`Volviendo a indexar: ${titulos.join(', ')}.`);
+      setResultado(partes.join(' '));
+      setConfirmar(null);
+      await cargar();
+    } catch {
+      setError('Error de conexión');
+    } finally {
+      setGuardando(false);
+    }
+  };
+
+  const pulsarGuardar = () => {
+    if (nuevosIgnorados.length > 0) setConfirmar(nuevosIgnorados.map(t => t.titulo));
+    else guardar();
+  };
+
+  if (cargando && !datos) {
+    return <p className="text-nf-dim text-xs px-1 py-2">Cargando temas… (pregunta a Telegram, tarda unos segundos)</p>;
+  }
+
+  return (
+    <div className="bg-black/20 rounded-xl px-4 py-3 space-y-3">
+      {error && <p className="text-red-400 text-xs">{error}</p>}
+
+      {datos && !datos.foro && (
+        <p className="text-nf-dim text-xs">Este canal no tiene temas</p>
+      )}
+
+      {datos?.foro && (
+        <>
+          {datos.sin_leer > 0 && (
+            <p className="text-yellow-400/90 text-[11px]">
+              Hay {datos.sin_leer.toLocaleString()} archivos de los que aún no se sabe el tema; se irán leyendo solos
+            </p>
+          )}
+
+          <div className="space-y-1">
+            {temas.map(t => {
+              const indexar = !ignorados.has(t.id);
+              return (
+                <label key={t.id}
+                  className="flex items-center gap-3 rounded-lg px-2 py-1.5 hover:bg-white/5 cursor-pointer">
+                  <input type="checkbox" checked={indexar} onChange={() => alternar(t.id)}
+                    className="accent-nf-red w-4 h-4 shrink-0" />
+                  <span className="text-nf-faint text-[10px] w-11 shrink-0">Indexar</span>
+                  <span className={`text-sm truncate ${indexar ? 'text-white' : 'text-nf-dim line-through'}`}>{t.titulo}</span>
+                  {t.general && <span className="text-[10px] px-2 py-0.5 rounded-full bg-white/10 text-nf-dim shrink-0">General</span>}
+                  {t.cerrado && <span className="text-[10px] px-2 py-0.5 rounded-full bg-gray-500/20 text-nf-dim shrink-0">Cerrado</span>}
+                  <span className="text-nf-faint text-[11px] shrink-0 ml-auto">{t.indexados.toLocaleString()} indexados</span>
+                </label>
+              );
+            })}
+          </div>
+
+          {confirmar && (
+            <div className="bg-nf-red/10 border border-nf-red/30 rounded-xl px-4 py-3">
+              <p className="text-white text-xs mb-3">
+                Se quitarán del catálogo los archivos ya indexados de: {confirmar.join(', ')}
+              </p>
+              <div className="flex gap-2">
+                <button onClick={guardar} disabled={guardando}
+                  className="text-xs bg-nf-red hover:bg-nf-red-dark disabled:opacity-50 text-white px-4 py-2 rounded-lg transition-all font-medium">
+                  {guardando ? 'Guardando…' : 'Sí, quitar y guardar'}
+                </button>
+                <button onClick={() => setConfirmar(null)} disabled={guardando}
+                  className="text-xs bg-white/10 hover:bg-white/20 text-white px-4 py-2 rounded-lg transition-all font-medium">
+                  Cancelar
+                </button>
+              </div>
+            </div>
+          )}
+
+          {!confirmar && (
+            <div className="flex items-center gap-3">
+              <button onClick={pulsarGuardar} disabled={!hayCambios || guardando}
+                className="text-xs bg-nf-red hover:bg-nf-red-dark disabled:opacity-40 disabled:hover:bg-nf-red text-white px-4 py-2 rounded-lg transition-all font-medium">
+                {guardando ? 'Guardando…' : 'Guardar'}
+              </button>
+              {cargando && <span className="text-nf-dim text-[11px]">Recargando temas…</span>}
+            </div>
+          )}
+
+          {resultado && <p className="text-green-400 text-xs">{resultado}</p>}
+        </>
+      )}
+    </div>
+  );
+}
+
 export default function Channels({ embedded = false }: { embedded?: boolean } = {}) {
   const Wrap = embedded ? Embedded : Shell;
   const { isAdmin } = useAuth();
@@ -41,6 +220,16 @@ export default function Channels({ embedded = false }: { embedded?: boolean } = 
   const [polling, setPolling] = useState(true);
   const [tmdbEnabled, setTmdbEnabled] = useState(false);
   const [tmdbRunning, setTmdbRunning] = useState(false);
+  // Canales con la lista de temas desplegada.
+  const [temasAbiertos, setTemasAbiertos] = useState<Set<number>>(new Set());
+
+  const alternarTemas = (id: number) => {
+    setTemasAbiertos(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
 
   const loadChannels = async () => {
     try {
@@ -341,13 +530,28 @@ export default function Channels({ embedded = false }: { embedded?: boolean } = 
           <div className="bg-white/5 backdrop-blur-md border border-white/10 rounded-2xl p-6 mb-6 shadow-xl">
             <h2 className="text-white text-lg font-medium mb-4">Activos ({active.length})</h2>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
-              {active.map(c => (
-                <button key={c.id} onClick={() => toggle(c.id)}
-                  className="flex items-center gap-3 bg-nf-red/10 border border-nf-red/20 rounded-xl px-4 py-3 hover:bg-nf-red/15 transition-all text-left">
-                  <span className="text-white text-sm truncate font-medium">{c.name}</span>
-                  <span className="text-nf-dim text-[10px] shrink-0 ml-auto">{c.id}</span>
-                </button>
-              ))}
+              {/* La tarjeta ya no es un botón entero: dentro va «Temas», y un
+                  botón no puede ir dentro de otro. Con los temas abiertos ocupa
+                  las dos columnas, que en media no caben títulos y contadores. */}
+              {active.map(c => {
+                const abierto = temasAbiertos.has(c.id);
+                return (
+                  <div key={c.id} className={abierto ? 'md:col-span-2 space-y-2' : ''}>
+                    <div className="flex items-center gap-2 bg-nf-red/10 border border-nf-red/20 rounded-xl pl-4 pr-2 py-2 hover:bg-nf-red/15 transition-all">
+                      <button onClick={() => toggle(c.id)} title="Desactivar canal"
+                        className="flex items-center gap-3 flex-1 min-w-0 py-1 text-left">
+                        <span className="text-white text-sm truncate font-medium">{c.name}</span>
+                        <span className="text-nf-dim text-[10px] shrink-0 ml-auto">{c.id}</span>
+                      </button>
+                      <button onClick={() => alternarTemas(c.id)}
+                        className={`text-[11px] px-3 py-1.5 rounded-lg transition-all font-medium shrink-0 ${abierto ? 'bg-white/20 text-white' : 'bg-white/10 hover:bg-white/20 text-white'}`}>
+                        Temas
+                      </button>
+                    </div>
+                    {abierto && <TemasCanal channelId={c.id} />}
+                  </div>
+                );
+              })}
             </div>
           </div>
         )}

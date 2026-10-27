@@ -24,6 +24,45 @@ _active_scans = 0
 _enrich_running = False
 
 
+def _es_sticker(msg) -> bool:
+    from telethon.tl.types import DocumentAttributeSticker
+
+    doc = getattr(msg, "document", None)
+    return bool(doc) and any(isinstance(a, DocumentAttributeSticker) for a in (doc.attributes or []))
+
+
+def seguidor_para(downloader):
+    """Un `Seguidor` (services/contexto.py) que reconoce fotos, pegatinas y
+    archivos con las mismas reglas que el indexador."""
+    from telethon.tl.types import MessageMediaPhoto
+
+    from app.services.contexto import Seguidor
+
+    def es_archivo(m) -> bool:
+        if not getattr(m, "media", None):
+            return False
+        nombre = downloader._get_file_name(m)
+        return bool(nombre) and downloader._is_downloadable(nombre) and downloader._get_file_size(m) > 0
+
+    return Seguidor(es_foto=lambda m: isinstance(getattr(m, "media", None), MessageMediaPhoto),
+                    es_sticker=_es_sticker, es_archivo=es_archivo)
+
+
+def _contexto_a_item(ctx) -> dict:
+    """Lo que se guarda del contexto de un archivo en `media_items`."""
+    from dataclasses import asdict
+
+    if not ctx:
+        return {}
+    return {"pie": (ctx.pie or "")[:2000] or None, "ficha": ctx.ficha, "tema_id": ctx.tema,
+            "pistas": asdict(ctx.pistas) if ctx.pistas else None}
+
+
+# El seguidor de cada canal para lo que llega en vivo: recuerda la ultima
+# ficha de cada tema entre un mensaje y el siguiente.
+_seguidores_vivo: dict[int, object] = {}
+
+
 def ensure_enrich_worker(api_key: str, broadcast=None):
     """Arranca el bucle de enriquecimiento si no hay uno ya en marcha."""
     if not api_key or _enrich_running:
@@ -67,6 +106,48 @@ def tmdb_type_matches(detected: str, tmdb_type: str) -> bool:
 
 def validate_media_type(filename: str, tmdb_type: str) -> bool:
     return tmdb_type_matches(parse_filename(filename).media_type, tmdb_type)
+
+
+def _pistas(item: dict) -> dict | None:
+    """Las pistas guardadas de un archivo (asyncpg devuelve el JSONB como texto)."""
+    import json
+
+    p = item.get("pistas")
+    if isinstance(p, str):
+        try:
+            p = json.loads(p)
+        except ValueError:
+            return None
+    return p if isinstance(p, dict) and p.get("titulo") else None
+
+
+async def lookup_con_pistas(api_key: str, parsed: ParsedName, pistas: dict) -> dict | None:
+    """Busca en TMDB con lo que dicen el pie y la ficha del archivo, que es mas
+    fiable que su nombre: primero el enlace a TMDB o IMDb si lo hay, luego el
+    titulo y el año de la ficha, luego el titulo original. Si nada de eso
+    encuentra nada, lo de siempre (el nombre del archivo)."""
+    from app.services.tmdb import _get, get_details as tmdb_details, search as tmdb_search
+
+    if pistas.get("tmdb_id") and pistas.get("tmdb_tipo") in ("movie", "tv"):
+        d = await tmdb_details(api_key, int(pistas["tmdb_id"]), pistas["tmdb_tipo"])
+        if d:
+            return {"tmdb_id": d["tmdb_id"], "media_type": pistas["tmdb_tipo"], "title": d["title"],
+                    "por_enlace": True}
+    if pistas.get("imdb_id"):
+        data = await _get(f"/find/{pistas['imdb_id']}", {"api_key": api_key, "external_source": "imdb_id"})
+        for clave, tipo in (("movie_results", "movie"), ("tv_results", "tv")):
+            r = ((data or {}).get(clave) or [None])[0]
+            if r and r.get("id"):
+                return {"tmdb_id": r["id"], "media_type": tipo, "title": r.get("title") or r.get("name") or "",
+                        "por_enlace": True}
+
+    tmdb_type = "tv" if parsed.media_type == "series" else "movie"
+    año = pistas.get("año") or parsed.year
+    for titulo in dict.fromkeys(t for t in (pistas.get("titulo"), pistas.get("original")) if t):
+        result = await tmdb_search(api_key, titulo, tmdb_type, año if tmdb_type == "movie" else None)
+        if result:
+            return result
+    return await lookup_tmdb(api_key, parsed)
 
 
 async def lookup_tmdb(api_key: str, parsed: ParsedName) -> dict | None:
@@ -121,13 +202,19 @@ async def _enrich_batch(api_key: str, items: list[dict]):
     groups: dict[tuple, dict] = {}
     for item in items:
         parsed = parse_filename(item["file_name"])
+        pistas = _pistas(item)
         if parsed.tmdb_id_hint:
             key = ("hint", parsed.tmdb_id_hint)
+        elif pistas:
+            # Lo que trae ficha se agrupa por lo que dice la ficha: las dos
+            # calidades de "La silla" hacen una sola consulta.
+            key = ("pista", parsed.media_type, pistas.get("tmdb_id") or pistas.get("imdb_id")
+                   or pistas["titulo"].lower(), pistas.get("año") or parsed.year)
         elif parsed.title and len(parsed.title) >= 2:
             key = (parsed.media_type, parsed.title.lower(), parsed.year if parsed.media_type == "movie" else None)
         else:
             continue
-        grp = groups.setdefault(key, {"parsed": parsed, "items": []})
+        grp = groups.setdefault(key, {"parsed": parsed, "pistas": pistas, "items": []})
         grp["items"].append(item)
 
     sem = asyncio.Semaphore(TMDB_CONCURRENCY)
@@ -137,16 +224,20 @@ async def _enrich_batch(api_key: str, items: list[dict]):
     async def _enrich_group(grp):
         nonlocal enriched
         parsed: ParsedName = grp["parsed"]
+        pistas = grp.get("pistas")
         async with sem:
             t0 = time.time()
             try:
-                result = await lookup_tmdb(api_key, parsed)
+                result = (await lookup_con_pistas(api_key, parsed, pistas) if pistas
+                          else await lookup_tmdb(api_key, parsed))
                 if not result:
                     return
                 details = await tmdb_details(api_key, result["tmdb_id"], result["media_type"])
                 if details:
                     await upsert_tmdb_cache(details)
-                valid = tmdb_type_matches(parsed.media_type, result["media_type"])
+                # Un enlace a TMDB o IMDb en la ficha dice el tipo mejor que el
+                # nombre del archivo ("Peli.mkv" de una miniserie).
+                valid = result.get("por_enlace") or tmdb_type_matches(parsed.media_type, result["media_type"])
                 await update_media_tmdb_many([
                     (result["tmdb_id"], result["media_type"], valid, it["channel_id"], it["message_id"])
                     for it in grp["items"]
@@ -165,7 +256,7 @@ async def _enrich_batch(api_key: str, items: list[dict]):
     return enriched
 
 
-def _item_from_message(downloader, channel_id, channel_name, msg, file_name, size):
+def _item_from_message(downloader, channel_id, channel_name, msg, file_name, size, ctx=None):
     parsed = parse_filename(file_name)
     return {
         "channel_id": channel_id, "channel_name": channel_name,
@@ -173,6 +264,7 @@ def _item_from_message(downloader, channel_id, channel_name, msg, file_name, siz
         "file_size": size, "size_str": downloader._format_size(size),
         "clean_title": parsed.clean_title[:300], "media_type": parsed.media_type,
         "season": parsed.season, "episode": parsed.episode,
+        **_contexto_a_item(ctx),
     }
 
 
@@ -223,6 +315,13 @@ async def _scan_channel(downloader, channel_id, channel_name, broadcast, total_e
     logger.info("Escaneando canal %s desde offset=%d (ya indexados: %d, total: %d)",
                 channel_name, offset, total_indexed, total_estimate)
 
+    from app.database.media import temas_ignorados
+
+    # Ve todos los mensajes en orden (fichas y pegatinas incluidas) para
+    # pegarle a cada archivo su pie, su ficha y su tema.
+    seguidor = seguidor_para(downloader)
+    ignorados = (await temas_ignorados()).get(channel_id, set())
+
     had_error = False
     while True:
         if stop_flag and stop_flag.is_set():
@@ -241,6 +340,7 @@ async def _scan_channel(downloader, channel_id, channel_name, broadcast, total_e
             async for msg in downloader.client.iter_messages(entity, **kwargs):
                 msg_count += 1
                 last_id = msg.id
+                ctx = seguidor.ver(msg)
                 if not msg.media:
                     continue
                 file_name = downloader._get_file_name(msg)
@@ -249,7 +349,10 @@ async def _scan_channel(downloader, channel_id, channel_name, broadcast, total_e
                 size = downloader._get_file_size(msg)
                 if size == 0:
                     continue
-                batch_items.append(_item_from_message(downloader, channel_id, channel_name, msg, file_name, size))
+                if ctx and ctx.tema in ignorados:
+                    continue
+                batch_items.append(_item_from_message(downloader, channel_id, channel_name, msg,
+                                                      file_name, size, ctx))
         except Exception as e:
             logger.error("Error escaneando canal %d: %s", channel_id, e)
             had_error = True
@@ -529,6 +632,39 @@ async def refresh_missing_cache(api_key: str) -> int:
     return done
 
 
+async def reindexar_temas(downloader, channel_id: int, temas: list[int], api_key: str = "") -> int:
+    """Vuelve a indexar unos temas de un canal (los que han dejado de
+    ignorarse): solo sus mensajes, con su contexto. Lo que ya estaba indexado
+    no se duplica (ON CONFLICT)."""
+    entidad = downloader.channels.get(channel_id, {}).get("entity")
+    if not entidad:
+        return 0
+    nombre = downloader.channel_name(channel_id)
+    total = 0
+    for tema in temas:
+        seguidor = seguidor_para(downloader)
+        lote: list[dict] = []
+        async for msg in downloader.client.iter_messages(entidad, reply_to=tema, reverse=True):
+            ctx = seguidor.ver(msg)
+            if not ctx:
+                continue
+            nombre_archivo = downloader._get_file_name(msg)
+            lote.append(_item_from_message(downloader, channel_id, nombre, msg, nombre_archivo,
+                                           downloader._get_file_size(msg), ctx))
+            if len(lote) >= 500:
+                await insert_media_items(lote)
+                total += len(lote)
+                lote = []
+                await asyncio.sleep(1)
+        if lote:
+            await insert_media_items(lote)
+            total += len(lote)
+    logger.info("Temas %s de %s indexados de nuevo: %d archivos", temas, nombre, total)
+    if api_key and total:
+        ensure_enrich_worker(api_key)
+    return total
+
+
 async def index_live_message(downloader, channel_id: int, msg, api_key: str = "", broadcast=None):
     """Indexa un mensaje recien publicado en un canal (evento de Telethon).
 
@@ -538,12 +674,20 @@ async def index_live_message(downloader, channel_id: int, msg, api_key: str = ""
     """
     from app.database.connection import bump_index_progress, log_novedad
 
+    from app.database.media import temas_ignorados
+
     name = downloader.channel_name(channel_id)
     indexed = False
     reason = ""
     item = None
+    seguidor = _seguidores_vivo.get(channel_id)
+    if seguidor is None:
+        seguidor = _seguidores_vivo[channel_id] = seguidor_para(downloader)
+    ctx = seguidor.ver(msg)
 
-    if not msg.media:
+    if ctx and ctx.tema in (await temas_ignorados()).get(channel_id, set()):
+        reason = "tema ignorado"
+    elif not msg.media:
         reason = "mensaje sin archivo"
     else:
         file_name = downloader._get_file_name(msg)
@@ -556,7 +700,7 @@ async def index_live_message(downloader, channel_id: int, msg, api_key: str = ""
             if not size:
                 reason = "archivo sin tamaño"
             else:
-                item = _item_from_message(downloader, channel_id, name, msg, file_name, size)
+                item = _item_from_message(downloader, channel_id, name, msg, file_name, size, ctx)
                 await insert_media_items([item])
                 indexed = True
                 logger.info("Nuevo en %s: %s (%s)", name, file_name[:80],

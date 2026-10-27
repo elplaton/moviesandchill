@@ -8,6 +8,7 @@ tenia su propia regex y no coincidian entre si: el indexador solo reconocia
 mandaba el titulo con el nombre del episodio pegado ("Suits La vida util").
 """
 import re
+import unicodedata
 from dataclasses import dataclass
 
 VIDEO_EXTS = (".mkv", ".mp4", ".avi", ".mov", ".wmv", ".flv", ".webm", ".m4v", ".ts")
@@ -32,8 +33,9 @@ _NOISE_RE = re.compile(r"\b\d{3,4}x\d{3,4}\b|\b\d?x26[45]\b", re.IGNORECASE)
 
 # Marcadores de episodio con temporada, del mas fiable al mas ambiguo.
 _EP_PATTERNS = [
-    # 1x01, 01x05, #02x11, 3x23-24
-    re.compile(r"(?<![\dx])(\d{1,2})x(\d{2,3})(?:-\d{2,3})?(?!\d)", re.IGNORECASE),
+    # 1x01, 01x05, #02x11, 3x23-24, y con el episodio de una cifra: 1x5, 4x1
+    # (lo que parece una resolucion o un codec ya lo ha quitado _NOISE_RE).
+    re.compile(r"(?<![\dx])(\d{1,2})x(\d{1,3})(?:-\d{1,3})?(?!\d)", re.IGNORECASE),
     # S01E01, S01E009, S01 E01, T01E10, [S05.E06], [S 1 E 3]
     re.compile(r"(?<![A-Za-z])[sStT]\s*(\d{1,2})\s*[.\s]?\s*[eE]\s*(\d{1,3})(?!\d)"),
     # Temporada 2 Episodio 17 / Season 2 Episode 3 / Temporada 3 [HDTV][Cap.303]
@@ -123,8 +125,38 @@ def _extract_year(text: str) -> int | None:
     return None
 
 
+def _sin_simbolos(text: str) -> str:
+    """Quita lo que no es texto: emojis y pegatinas (🏁, ❕), y "ª"/"º", que en
+    algunos canales van pegados al titulo ("La silla (2026) ª[HD 1080P]") y
+    acababan en lo que se le mandaba a TMDB ("La silla ª")."""
+    return "".join(" " if ch in "ªº" or unicodedata.category(ch) in ("So", "Sk", "Cf", "Co") else ch
+                   for ch in text)
+
+
+# Un año que puede cerrar el titulo de una pelicula: entre parentesis o
+# corchetes, o suelto con algo que no sea una cifra delante y detras. Detras
+# puede ir una letra: "La_voz_dormida_2011DRAMA_Spanish..." pega el genero.
+_AÑO_CORTE_RE = re.compile(r"[\(\[]\s*((?:19|20)\d{2})\s*[\)\]]|(?<![\w])((?:19|20)\d{2})(?!\d)")
+
+
+def _corte_en_año(norm: str) -> tuple[str, int] | None:
+    """En una pelicula, lo que va antes del primer año es el titulo: todo lo
+    de detras es calidad, idioma, firma del que la sube... ("Magallanes_2025_
+    ªBluray_Rip_X264...", "Kraken (2026) 1080p Es-No+s-kowalski&xusman"). Solo
+    si hay algo delante: "1917 (2019)" es la pelicula de 1917, y solo años
+    creibles: "Blade Runner 2049" no se corta."""
+    for m in _AÑO_CORTE_RE.finditer(norm):
+        año = int(m.group(1) or m.group(2))
+        if not 1900 <= año <= 2035 or m.start() == 0:
+            continue
+        titulo = _clean(norm[:m.start()])
+        if titulo:
+            return titulo, año
+    return None
+
+
 def parse_filename(filename: str) -> ParsedName:
-    base = strip_extension(filename or "")
+    base = _sin_simbolos(strip_extension(filename or ""))
     # "@La_Comunidad" hay que quitarlo entero antes de convertir "_" en espacio;
     # si no, sobrevive "Comunidad" y "Billions Comunidad" no existe en TMDB.
     base = re.sub(r"@[\w.]+", " ", base)
@@ -133,8 +165,13 @@ def parse_filename(filename: str) -> ParsedName:
     year = _extract_year(base)
 
     # Los guiones bajos son espacios; se limpia lo que tiene forma de episodio
-    # pero no lo es antes de buscar marcadores.
-    norm = _NOISE_RE.sub(" ", base.replace("_", " "))
+    # pero no lo es antes de buscar marcadores. Y en los nombres de "escena"
+    # ("Billy.Bathgate.1991.HDrip.XviD"), sin un espacio y con varios puntos,
+    # los puntos tambien lo son: si no, a TMDB le llega "Billy.Bathgate".
+    sin_guiones = base.replace("_", " ")
+    if " " not in sin_guiones.strip() and sin_guiones.count(".") >= 2:
+        sin_guiones = sin_guiones.replace(".", " ")
+    norm = _NOISE_RE.sub(" ", sin_guiones)
 
     season = episode = None
     head = norm
@@ -194,6 +231,10 @@ def parse_filename(filename: str) -> ParsedName:
         episode = episode % 100
 
     is_series = season is not None or episode is not None
+    if title is None and not is_series:
+        corte = _corte_en_año(norm)
+        if corte:
+            title, year = corte
     if title is None:
         title = _clean(head)
     if title and year:

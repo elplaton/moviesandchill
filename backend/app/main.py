@@ -199,6 +199,11 @@ async def startup():
         from app.services.tops import fotografo
         _spawn(fotografo(api_key_tmdb), "fotografo_tops")
 
+    # Releer lo ya indexado para ponerle pie, ficha y tema (y volver a buscar
+    # en TMDB lo que no tenia ficha). Una vez; luego solo lo que quede.
+    from app.services.relectura import relectura_de_fondo
+    _spawn(relectura_de_fondo(downloader, api_key_tmdb), "relectura_contexto")
+
     # Lo pedido que ya ha llegado: se marca y se avisa a quien lo esperaba.
     from app.services.peticiones import vigilante as vigilante_peticiones
     _spawn(vigilante_peticiones(), "vigilante_peticiones")

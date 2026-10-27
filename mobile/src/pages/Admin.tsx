@@ -118,7 +118,127 @@ function DownloadsAll() {
   );
 }
 
+interface TemaCanal { id: number; titulo: string; cerrado: boolean; general: boolean; ignorado: boolean; indexados: number }
+interface TemasDeCanal { foro: boolean; sin_leer: number; temas: TemaCanal[] }
+
+/**
+ * Qué temas de un grupo con foro se indexan.
+ *
+ * Existe porque en los grupos con temas («Películas», «Series», «Deportes»,
+ * «Libros», «APKs»…) todo se indexaba como si fueran películas. Se edita un
+ * borrador y se guarda la lista entera de ignorados de una vez: el servidor la
+ * recibe completa, y así lo que se ve en pantalla es exactamente lo que queda.
+ */
+function TemasCanal({ channelId }: { channelId: number }) {
+  const [datos, setDatos] = useState<TemasDeCanal | null>(null);
+  const [cargando, setCargando] = useState(false);
+  const [error, setError] = useState('');
+  // Ids que el borrador da por ignorados (no se indexan).
+  const [ignorados, setIgnorados] = useState<Set<number>>(new Set());
+  // Nombres de los temas que van a pasar a ignorarse: mientras no sea null se
+  // está pidiendo confirmación, porque guardar borra del catálogo lo suyo.
+  const [aviso, setAviso] = useState<string[] | null>(null);
+  const [guardando, setGuardando] = useState(false);
+
+  const cargar = async () => {
+    setCargando(true); setError('');
+    try {
+      const r = await apiFetch(`/channels/${channelId}/temas`);
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.detail || d.error || 'No se han podido leer los temas');
+      setDatos(d);
+      setIgnorados(new Set((d.temas || []).filter((t: TemaCanal) => t.ignorado).map((t: TemaCanal) => t.id)));
+      setAviso(null);
+    } catch (e) { setError(e instanceof Error ? e.message : 'No se han podido leer los temas'); }
+    finally { setCargando(false); }
+  };
+  useEffect(() => { cargar(); }, [channelId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const temas = datos?.temas || [];
+  const nuevosIgnorados = temas.filter(t => !t.ignorado && ignorados.has(t.id));
+  const cambiado = temas.some(t => t.ignorado !== ignorados.has(t.id));
+
+  const alternar = (id: number) => {
+    const s = new Set(ignorados);
+    if (s.has(id)) s.delete(id); else s.add(id);
+    setIgnorados(s); setAviso(null);
+  };
+
+  const enviar = async () => {
+    setGuardando(true);
+    try {
+      const r = await apiFetch(`/channels/${channelId}/temas-ignorados`, { method: 'POST', body: JSON.stringify({ temas: [...ignorados] }) });
+      const d = await r.json();
+      if (!r.ok || d.ok === false) throw new Error(d.detail || d.error || 'No se ha podido guardar');
+      const partes = ['Temas guardados'];
+      if (d.quitados) partes.push(`${Number(d.quitados).toLocaleString('es-ES')} archivos quitados del catálogo`);
+      if (d.reindexando?.length) partes.push(`${d.reindexando.length === 1 ? 'se vuelve a indexar 1 tema' : `se vuelven a indexar ${d.reindexando.length} temas`}`);
+      toast(partes.join(' · '), 'ok', 5000);
+      await cargar();
+    } catch (e) { toast(e instanceof Error ? e.message : 'No se ha podido guardar', 'error', 6000); }
+    finally { setGuardando(false); setAviso(null); }
+  };
+
+  // Si algo pasa a ignorarse se pregunta antes; si solo se reactivan temas no
+  // se pierde nada y se guarda directamente.
+  const guardar = () => {
+    if (nuevosIgnorados.length && !aviso) { setAviso(nuevosIgnorados.map(t => t.titulo)); return; }
+    enviar();
+  };
+
+  if (cargando && !datos) return <p className="text-[13px] text-nf-text3 mt-3">Leyendo los temas del canal…</p>;
+  if (error) return (
+    <div className="mt-3">
+      <p className="text-[13px] text-nf-red">{error}</p>
+      <button onClick={cargar} className="tap mt-2 h-9 px-3 rounded-full bg-white/10 text-[13px]">Reintentar</button>
+    </div>
+  );
+  if (!datos) return null;
+  if (!datos.foro) return <p className="text-[13px] text-nf-text3 mt-3">Este canal no tiene temas</p>;
+
+  return (
+    <div className="mt-3 border-t border-white/5 pt-1">
+      {datos.sin_leer > 0 && (
+        <p className="text-[12px] text-nf-text3 py-2">Hay {datos.sin_leer.toLocaleString('es-ES')} archivos de los que aún no se sabe el tema; se irán leyendo solos.</p>
+      )}
+      {temas.length === 0 && <p className="text-[13px] text-nf-text3 py-2">No hay temas.</p>}
+      {temas.map(t => {
+        const indexar = !ignorados.has(t.id);
+        return (
+          <button key={t.id} onClick={() => alternar(t.id)} role="switch" aria-checked={indexar}
+            className="w-full flex items-center justify-between py-3 border-b border-white/5 text-left">
+            <div className="min-w-0 pr-3">
+              <p className={`text-[15px] truncate ${indexar ? '' : 'text-nf-text3'}`}>{t.titulo}</p>
+              <p className="text-[12px] text-nf-text3">
+                {t.indexados.toLocaleString('es-ES')} indexados{t.general ? ' · General' : ''}{t.cerrado ? ' · cerrado' : ''} · {indexar ? 'Indexar' : 'No se indexa'}
+              </p>
+            </div>
+            <span className={`w-12 h-7 rounded-full relative shrink-0 ${indexar ? 'bg-nf-red' : 'bg-white/15'}`}><span className={`absolute top-0.5 w-6 h-6 rounded-full bg-white transition-transform ${indexar ? 'translate-x-[22px]' : 'translate-x-0.5'}`} /></span>
+          </button>
+        );
+      })}
+      {aviso ? (
+        <div className="mt-3 rounded-xl bg-nf-red/15 p-3">
+          <p className="text-[13px]">Se quitarán del catálogo los archivos ya indexados de: {aviso.join(', ')}</p>
+          <div className="flex mt-3 space-x-2">
+            <button onClick={() => setAviso(null)} disabled={guardando} className="flex-1 h-11 rounded-xl bg-white/10 text-[15px] font-medium disabled:opacity-40">Cancelar</button>
+            <button onClick={guardar} disabled={guardando} className="flex-1 h-11 rounded-xl bg-nf-red text-[15px] font-semibold disabled:opacity-40">{guardando ? 'Guardando…' : 'Quitar y guardar'}</button>
+          </div>
+        </div>
+      ) : (
+        temas.length > 0 && (
+          <button onClick={guardar} disabled={!cambiado || guardando || cargando} className="mt-3 w-full h-11 rounded-xl bg-nf-red disabled:opacity-40 text-[15px] font-semibold">
+            {guardando ? 'Guardando…' : cargando ? 'Actualizando…' : 'Guardar'}
+          </button>
+        )
+      )}
+    </div>
+  );
+}
+
 function Channels() {
+  // Canal con los temas desplegados (uno a la vez: la lista puede ser larga).
+  const [temasDe, setTemasDe] = useState<number | null>(null);
   const [channels, setChannels] = useState<{ id: number; name: string }[]>([]);
   const [url, setUrl] = useState(''); const [msg, setMsg] = useState('');
   const [progress, setProgress] = useState<any[]>([]);
@@ -181,8 +301,15 @@ function Channels() {
         const pct = p?.total_estimate ? Math.round((p.total_scanned / p.total_estimate) * 100) : 0;
         return (
           <div key={c.id} className="rounded-2xl bg-white/5 p-4 mb-2">
-            <div className="flex items-center justify-between"><p className="text-[15px] font-semibold truncate">{c.name}</p><button onClick={() => rescan(c.id)} className="tap h-9 px-3 rounded-full bg-white/10 text-[13px] shrink-0">Reescanear</button></div>
+            <div className="flex items-center justify-between">
+              <p className="text-[15px] font-semibold truncate">{c.name}</p>
+              <div className="flex shrink-0 space-x-2 ml-2">
+                <button onClick={() => setTemasDe(temasDe === c.id ? null : c.id)} aria-expanded={temasDe === c.id} className={`tap h-9 px-3 rounded-full text-[13px] ${temasDe === c.id ? 'bg-white text-black' : 'bg-white/10'}`}>Temas</button>
+                <button onClick={() => rescan(c.id)} className="tap h-9 px-3 rounded-full bg-white/10 text-[13px]">Reescanear</button>
+              </div>
+            </div>
             {p && <><p className="text-[12px] text-nf-text3 mt-1">{p.total_indexed?.toLocaleString()} archivos · {p.status === 'done' ? 'completado' : `${pct} %`}</p><div className="mt-1 h-1.5 rounded-full bg-white/10 overflow-hidden"><div className={`h-full ${p.status === 'done' ? 'bg-nf-ok' : 'bg-nf-red'}`} style={{ width: `${p.status === 'done' ? 100 : pct}%` }} /></div></>}
+            {temasDe === c.id && <TemasCanal channelId={c.id} />}
           </div>
         );
       })}
