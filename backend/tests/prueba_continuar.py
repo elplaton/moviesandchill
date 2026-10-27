@@ -117,6 +117,34 @@ r = continuar_viendo([fila("Suits/Temporada 3/3x07.mp4", 2399, 2400, 1, tmdb_id=
 comprueba("lo marcado de otra serie no estorba",
           ["Suits/Temporada 3/3x08.mp4"], [t["path"] for t in r])
 
+print("\nUna tarjeta por serie, la del capitulo mas avanzado")
+# Lo visto sin descargar no tiene carpeta: cada capitulo es su propio "grupo".
+# El catalogo les pone ficha, temporada y episodio (lo hace el servidor al
+# guardar y al leer); con eso tienen que juntarse en una sola tarjeta.
+tg = dict(tmdb_id=1396, tmdb_type="tv", title="Breaking Bad")
+r = continuar_viendo([fila("tg:5:101", 600, 2700, 1, season=1, episode=2, **tg),
+                      fila("tg:5:103", 900, 2700, 5, season=1, episode=4, **tg),
+                      fila("tg:5:102", 300, 2700, 9, season=1, episode=3, **tg)])
+comprueba("tres capitulos sin descargar de la misma serie, una tarjeta", 1, len(r))
+comprueba("y es la del capitulo mas avanzado, aunque no sea lo ultimo que se toco",
+          "tg:5:103", r[0]["path"] if r else None)
+
+r = continuar_viendo([fila("Suits/Temporada 3/3x07.mp4", 600, 2400, 1, tmdb_id=37680, tmdb_type="tv"),
+                      fila("tg:7:44", 900, 2400, 3, tmdb_id=37680, tmdb_type="tv", season=4, episode=1)])
+comprueba("lo descargado y lo visto sin descargar de la misma serie se juntan", 1, len(r))
+comprueba("y manda el mas avanzado (4x01 sin descargar sobre 3x07 en disco)",
+          "tg:7:44", r[0]["path"] if r else None)
+
+r = continuar_viendo([fila("tg:5:109", 10, 2700, 1, season=2, episode=1, **tg),
+                      fila("tg:5:103", 900, 2700, 5, season=1, episode=4, **tg)])
+comprueba("un capitulo mas alto abierto diez segundos no tapa al que se esta viendo",
+          "tg:5:103", r[0]["path"] if r else None)
+
+r = continuar_viendo([fila("tg:5:101", 600, 2700, 1, season=1, episode=2, **tg),
+                      fila("Dune (2021)/Dune (2021) - 1080p.mp4", 1200, 9000, 2, tmdb_id=438631, tmdb_type="movie")])
+comprueba("las tarjetas siguen en el orden de lo ultimo que se toco de cada titulo",
+          ["tg:5:101", "Dune (2021)/Dune (2021) - 1080p.mp4"], [t["path"] for t in r])
+
 print()
-print(f"{9 + 9 + 3 - len(fallos)} correctas, {len(fallos)} fallidas")
+print(f"{9 + 9 + 3 + 6 - len(fallos)} correctas, {len(fallos)} fallidas")
 sys.exit(1 if fallos else 0)

@@ -85,11 +85,26 @@ _HISTORIAL = r"""
            COALESCE(p.poster, tc.poster, por_carpeta.poster) AS poster,
            COALESCE(p.backdrop, tc.backdrop, por_carpeta.backdrop,
                     p.poster, tc.poster, por_carpeta.poster) AS backdrop,
-           p.tmdb_id, p.tmdb_type, p.season, p.episode,
+           COALESCE(p.tmdb_id, cat.tmdb_id) AS tmdb_id,
+           COALESCE(p.tmdb_type, cat.tmdb_type) AS tmdb_type,
+           COALESCE(p.season, cat.season) AS season,
+           COALESCE(p.episode, cat.episode) AS episode,
            p.position, p.duration, p.updated_at
     FROM playback_progress p
+    -- Lo visto sin descargar (`tg:<canal>:<mensaje>`) no lleva "3x05" en la
+    -- ruta, asi que sin esto no se sabe de que serie ni de que capitulo es y
+    -- cada capitulo salia como una tarjeta distinta. El catalogo si lo sabe.
+    -- El CASE no es adorno: dentro de un AND Postgres puede convertir antes de
+    -- comprobar el formato, y una ruta rara seria un error y no un NULL.
+    LEFT JOIN media_items cat
+           ON cat.channel_id = CASE WHEN p.path ~ '^tg:-?[0-9]+:[0-9]+$'
+                                    THEN split_part(p.path, ':', 2)::bigint END
+          AND cat.message_id = CASE WHEN p.path ~ '^tg:-?[0-9]+:[0-9]+$'
+                                    THEN split_part(p.path, ':', 3)::int END
+          AND cat.tmdb_valid IS TRUE
     LEFT JOIN tmdb_cache tc
-           ON tc.tmdb_id = p.tmdb_id AND tc.media_type = p.tmdb_type
+           ON tc.tmdb_id = COALESCE(p.tmdb_id, cat.tmdb_id)
+          AND tc.media_type = COALESCE(p.tmdb_type, cat.tmdb_type)
     -- Sin `tmdb_id` no hay por donde juntar, pero si hay un nombre: la carpeta
     -- del titulo la puso layout.py con el titulo de TMDB, asi que "Dune (2021)"
     -- encuentra su ficha quitandole el año. Va en LATERAL con LIMIT 1 porque
@@ -98,7 +113,7 @@ _HISTORIAL = r"""
     LEFT JOIN LATERAL (
         SELECT c.title, c.poster, c.backdrop
         FROM tmdb_cache c
-        WHERE p.tmdb_id IS NULL
+        WHERE p.tmdb_id IS NULL AND cat.tmdb_id IS NULL
           AND c.poster IS NOT NULL
           AND c.title = regexp_replace(p.grupo, '\s*\((19|20)[0-9]{2}\)\s*$', '')
         ORDER BY COALESCE(c.vote_count, 0) DESC
@@ -117,6 +132,34 @@ async def list_progress(user_id: int, limit: int = MAX_FILAS) -> list[dict]:
         return []
     async with pool.acquire() as conn:
         return [dict(r) for r in await conn.fetch(_HISTORIAL, user_id, limit)]
+
+
+async def delete_paths(user_id: int, paths: list[str]) -> int:
+    """Olvida varios archivos de golpe: todos los capitulos de un titulo, vistos
+    descargados o sin descargar (ver `progress_router.borrar`)."""
+    pool = get_pool()
+    if not pool or not paths:
+        return 0
+    async with pool.acquire() as conn:
+        res = await conn.execute(
+            "DELETE FROM playback_progress WHERE user_id = $1 AND path = ANY($2::text[])", user_id, paths)
+    return int(res.split()[-1]) if res else 0
+
+
+async def ficha_de_tg(channel_id: int, message_id: int) -> dict | None:
+    """Temporada, episodio y ficha de un mensaje del catalogo (para guardar lo
+    visto sin descargar con lo mismo que lo descargado)."""
+    pool = get_pool()
+    if not pool:
+        return None
+    async with pool.acquire() as conn:
+        fila = await conn.fetchrow("""
+            SELECT season, episode,
+                   CASE WHEN tmdb_valid THEN tmdb_id END AS tmdb_id,
+                   CASE WHEN tmdb_valid THEN tmdb_type END AS tmdb_type
+            FROM media_items WHERE channel_id = $1 AND message_id = $2
+        """, channel_id, message_id)
+    return dict(fila) if fila else None
 
 
 async def delete_progress(user_id: int, path: str | None = None, grupo: str | None = None,

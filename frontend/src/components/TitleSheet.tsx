@@ -120,6 +120,12 @@ export default function TitleSheet({ input, onClose }: Props) {
   const seasons = useMemo(() => [...new Set(episodes.map(e => e.season))].sort((a, b) => (a ?? 999) - (b ?? 999)), [episodes]);
   const active = season === undefined ? seasons[0] : season;
   const shown = useMemo(() => episodes.filter(e => e.season === active), [episodes, active]);
+  // Los capítulos que conoce la ficha, como [temporada, episodio]: el visto por
+  // temporada los marca de golpe, y quitar uno de una serie marcada entera
+  // necesita saber cuáles son "los demás" para dejarlos vistos.
+  const todosCaps = useMemo(() => episodes.filter(e => e.episode != null)
+    .map(e => [e.season, e.episode as number] as [number | null, number]), [episodes]);
+  const capsTemporada = useMemo(() => todosCaps.filter(([s]) => s === active), [todosCaps, active]);
 
   // Nombres de episodio de TMDB para la temporada abierta.
   useEffect(() => {
@@ -290,6 +296,14 @@ export default function TitleSheet({ input, onClose }: Props) {
               </div>
             )}
             {isSeries && seasons.length === 1 && <h2 className="mb-2 text-md font-semibold">{seasonLabel(seasons[0])}</h2>}
+            {isSeries && input.tmdbId && capsTemporada.length > 0 && (
+              <button onClick={() => visto.alternarTemporada(capsTemporada, todosCaps)}
+                className={`mb-3 inline-flex items-center gap-2 rounded px-3 py-1.5 text-sm font-medium transition-colors ${
+                  visto.temporadaVista(capsTemporada) ? 'bg-nf-ok/20 text-nf-ok' : 'bg-white/10 text-nf-dim hover:bg-white/20'}`}>
+                <span className="h-4 w-4"><IconCheck /></span>
+                {visto.temporadaVista(capsTemporada) ? `${seasonLabel(active)} vista` : `Marcar ${seasonLabel(active).toLowerCase()} como vista`}
+              </button>
+            )}
             {!isSeries && versions.length > 0 && <h2 className="mb-2 text-md font-semibold">Versiones disponibles</h2>}
 
             <div className="-mx-3 max-h-[46vh] overflow-y-auto pr-1">
@@ -304,7 +318,7 @@ export default function TitleSheet({ input, onClose }: Props) {
                     st={st} onEnter={() => onEpisode(e)}
                     onVer={alVueloEp ? () => ver(alVueloEp, `${episodeLabel(e)}${names.get(`${e.season}:${e.episode}`) ? ` · ${names.get(`${e.season}:${e.episode}`)}` : ''}`) : undefined}
                     marcado={visto.esVisto(e.season, e.episode ?? 0)}
-                    onMarcar={input.tmdbId ? () => visto.alternarEpisodio(e.season, e.episode ?? 0) : undefined}
+                    onMarcar={input.tmdbId ? () => visto.alternarEpisodio(e.season, e.episode ?? 0, todosCaps) : undefined}
                     onDelete={st.s === 'ready' ? () => del(st.f, `${episodeLabel(e)} · ${name}`) : undefined} />
                 );
               })}

@@ -196,7 +196,7 @@ export interface BrowseItem {
    *  no hay ficha a la que llevar, se ofrece pedirlo. */
   en_catalogo?: boolean;
   /** Si alguien lo ha pedido ya (y si he sido yo). */
-  peticion?: null | { estado: 'enviada' | 'conseguida' | 'fallida'; mia: boolean };
+  peticion?: null | { estado: 'en_cola' | 'enviada' | 'conseguida' | 'fallida' | 'descartada'; mia: boolean };
   /** Puesto de un top que TMDB no conoce: solo hay nombre; ni ficha ni «Pedir». */
   sin_ficha?: boolean;
 }

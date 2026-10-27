@@ -8,7 +8,8 @@ import { activarAvisos, desactivarAvisos, estadoAvisos, probarAvisos,
          type EstadoAvisos } from '../services/push';
 import { IBell } from '../components/Icons';
 import { toast } from '../utils/toast';
-import { dejarDeEsperar, misPeticiones, TIPO_PETICION, type MiPeticion } from '../services/peticiones';
+import { dejarDeEsperar, enCuanto, misPeticiones, segundosHastaPuesto, TIPO_PETICION,
+         type MiPeticion } from '../services/peticiones';
 
 const gb = (b: number) => `${(b / 1024 ** 3).toFixed(1)} GB`;
 
@@ -16,11 +17,21 @@ const gb = (b: number) => `${(b / 1024 ** 3).toFixed(1)} GB`;
 function MisPeticiones() {
   const [lista, setLista] = useState<MiPeticion[] | null>(null);
   const [quedan, setQuedan] = useState<number | null>(null);
+  // Como va la cola, para decir cuando sale cada una de las mias.
+  const [cola, setCola] = useState<{ segundos: number; minutos: number } | null>(null);
   const [quitando, setQuitando] = useState<number | null>(null);
   useEffect(() => {
-    misPeticiones().then(d => { setLista(d.peticiones || []); setQuedan(d.quedan_hoy); })
-      .catch(() => setLista([]));
+    misPeticiones().then(d => {
+      setLista(d.peticiones || []); setQuedan(d.quedan_hoy);
+      setCola({ segundos: d.segundos_para_siguiente, minutos: d.minutos_entre_envios });
+    }).catch(() => setLista([]));
   }, []);
+  /** «En cola · puesto 3 · sale en unas 2 h». Sin ritmo de la cola, el puesto. */
+  const textoCola = (p: MiPeticion) => {
+    if (!p.puesto) return 'En cola';
+    const sale = cola && cola.minutos ? ` · sale ${enCuanto(segundosHastaPuesto(p.puesto, cola.segundos, cola.minutos))}` : '';
+    return `En cola · puesto ${p.puesto}${sale}`;
+  };
   const quitar = async (p: MiPeticion) => {
     setQuitando(p.id);
     try { await dejarDeEsperar(p.id); setLista(l => (l || []).filter(x => x.id !== p.id)); toast('Ya no la esperas', 'ok'); }
@@ -45,14 +56,21 @@ function MisPeticiones() {
                 <div className="min-w-0 flex-1">
                   <p className="text-[14px] truncate">{p.titulo}</p>
                   <p className="text-[12px] text-nf-text3 truncate">{TIPO_PETICION[p.media_type]}{p.year ? ` · ${p.year}` : ''}</p>
+                  {/* Debajo del titulo y no en una pastilla: «puesto 3 · sale
+                      en unas 2 h» no cabe al lado del ×. */}
+                  {p.estado === 'en_cola' && <p className="text-[12px] text-amber-300 truncate">{textoCola(p)}</p>}
                 </div>
                 {p.estado === 'conseguida' ? (
                   <Link to={`/t/${p.media_type}/${p.tmdb_id}`} className="shrink-0 text-[12px] px-3 py-1.5 rounded-lg bg-nf-ok/15 text-green-300">Ya está ›</Link>
                 ) : p.estado === 'fallida' ? (
                   <span className="shrink-0 text-[11px] px-2 py-1 rounded-lg bg-nf-red/15 text-red-300">No se pudo enviar</span>
+                ) : p.estado === 'descartada' ? (
+                  <span className="shrink-0 text-[11px] px-2 py-1 rounded-lg bg-white/10 text-nf-text3">Descartada</span>
                 ) : (
+                  // En la cola o ya mandada: se puede dejar de esperar igual.
+                  // La de la cola no lleva pastilla: ya lo dice su linea.
                   <>
-                    <span className="shrink-0 text-[11px] px-2 py-1 rounded-lg bg-white/10 text-nf-text3">Pedida</span>
+                    {p.estado !== 'en_cola' && <span className="shrink-0 text-[11px] px-2 py-1 rounded-lg bg-white/10 text-nf-text3">Pedida</span>}
                     <button onClick={() => quitar(p)} disabled={quitando === p.id}
                       aria-label={`Dejar de esperar ${p.titulo}`}
                       className="shrink-0 w-9 h-9 rounded-full bg-white/10 text-nf-text3 text-[18px] leading-none flex items-center justify-center active:bg-nf-red/40 disabled:opacity-40">

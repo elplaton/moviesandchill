@@ -261,6 +261,12 @@ async def _ensure_tables():
                 UNIQUE (tmdb_id, media_type)
             )
         """)
+        # La cola: las peticiones salen de una en una, como mucho una cada
+        # hora (services/peticiones.py). `orden` es su puesto (lo mueve el
+        # admin) e `intento_en` cuando se intento mandar por ultima vez, que
+        # es lo que marca cuando puede salir la siguiente.
+        await conn.execute("ALTER TABLE peticiones ADD COLUMN IF NOT EXISTS orden DOUBLE PRECISION")
+        await conn.execute("ALTER TABLE peticiones ADD COLUMN IF NOT EXISTS intento_en TIMESTAMP")
         # Quien espera cada peticion. `origen` es quien la mando de verdad (lo
         # que cuenta para el limite diario); sumarse a una ya mandada no
         # escribe nada en Telegram y por eso no cuenta.

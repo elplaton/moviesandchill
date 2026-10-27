@@ -197,7 +197,8 @@ export interface BrowseItem {
 }
 
 export interface Peticion {
-  estado: 'enviada' | 'conseguida' | 'fallida';
+  /** `en_cola`: pedida, esperando su turno (sale una a la hora); cuenta como pedida. */
+  estado: 'en_cola' | 'enviada' | 'conseguida' | 'fallida' | 'descartada';
   mia: boolean;
 }
 

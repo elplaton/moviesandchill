@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import Button from './ui/Button';
-import { buscarEnTmdb, pedir, type ResultadoTmdb } from '../services/peticiones';
+import { avisoAlPedir, buscarEnTmdb, estaPedida, pedir, type ResultadoTmdb } from '../services/peticiones';
 
 /**
  * Pedir lo que no está, desde el buscador.
@@ -39,9 +39,11 @@ export default function PedirTmdb({ termino, sinResultados }: { termino: string;
     const k = clave(r);
     setOcupado(k);
     try {
-      const { ya_pedida } = await pedir(r);
-      setEstado(e => ({ ...e, [k]: ya_pedida ? 'Ya estaba pedida: te avisaremos también a ti' : 'Pedida: te avisaremos cuando esté' }));
-      setItems(lista => (lista || []).map(x => clave(x) === k ? { ...x, peticion: { estado: 'enviada', mia: true } } : x));
+      const res = await pedir(r);
+      // El botón pasa a «Pedida» ya; el texto con el puesto llega después.
+      setItems(lista => (lista || []).map(x => clave(x) === k ? { ...x, peticion: { estado: res.estado, mia: true } } : x));
+      const texto = await avisoAlPedir(res);
+      setEstado(e => ({ ...e, [k]: texto }));
     } catch (e) {
       setEstado(s => ({ ...s, [k]: e instanceof Error ? e.message : 'No se ha podido pedir' }));
     } finally {
@@ -55,7 +57,7 @@ export default function PedirTmdb({ termino, sinResultados }: { termino: string;
     return sinResultados ? (
       <div className="mb-10">
         <Button variant="light" onClick={buscar}>Pedir «{t}»</Button>
-        <p className="mt-2 text-sm text-nf-faint">Se busca en TMDB con ese nombre, eliges cuál y se pide por Telegram. Te llega un aviso cuando esté.</p>
+        <p className="mt-2 text-sm text-nf-faint">Se busca en TMDB con ese nombre, eliges cuál y entra en la cola de Telegram. Te llega un aviso cuando esté.</p>
       </div>
     ) : (
       <p className="mb-10 text-sm text-nf-faint">
@@ -67,15 +69,15 @@ export default function PedirTmdb({ termino, sinResultados }: { termino: string;
   return (
     <section className="mb-10">
       <h2 className="mb-1 text-lg font-semibold">Pedir «{abierto}»</h2>
-      <p className="mb-4 text-sm text-nf-faint">Elige cuál. Se avisa en Telegram y te llega un aviso cuando esté.</p>
+      <p className="mb-4 text-sm text-nf-faint">Elige cuál. Entra en la cola de Telegram (sale una cada hora) y te llega un aviso cuando esté.</p>
       {items === null && <p className="text-base text-nf-faint">Buscando en TMDB…</p>}
       {items?.length === 0 && <p className="text-base text-nf-faint">TMDB no conoce nada con ese nombre que no tengamos ya.</p>}
       <div className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(300px,1fr))]">
         {items?.map(r => {
           const k = clave(r);
           const p = r.peticion;
-          const mia = p?.estado === 'enviada' && p.mia;
-          const deOtro = p?.estado === 'enviada' && !p.mia;
+          const mia = estaPedida(p?.estado) && !!p?.mia;
+          const deOtro = estaPedida(p?.estado) && !p?.mia;
           return (
             <div key={k} className="flex gap-3 rounded-lg border border-nf-line bg-nf-surface p-3">
               <div className="h-[108px] w-[72px] shrink-0 overflow-hidden rounded bg-white/5">

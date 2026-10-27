@@ -98,6 +98,12 @@ export default function Title() {
   const seasons = useMemo(() => [...new Set(episodes.map(e => e.season))].sort((a, b) => (a ?? 999) - (b ?? 999)), [episodes]);
   const active = season === undefined ? seasons[0] : season;
   const shown = episodes.filter(e => e.season === active);
+  // Los capítulos que conoce la ficha, como [temporada, episodio]: el visto por
+  // temporada los marca de golpe, y quitar uno de una serie marcada entera
+  // necesita saber cuáles son "los demás" para dejarlos vistos.
+  const todosCaps = useMemo(() => episodes.filter(e => e.episode != null)
+    .map(e => [e.season, e.episode as number] as [number | null, number]), [episodes]);
+  const capsTemporada = todosCaps.filter(([s]) => s === active);
 
   useEffect(() => {
     if (!isSeries || !tmdbId || active == null || names.has(`${active}:_`)) return;
@@ -227,6 +233,16 @@ export default function Title() {
           </div>
         )}
         {isSeries && seasons.length === 1 && <h2 className="px-4 mb-2 text-[17px] font-semibold">{seasonLabel(seasons[0])}</h2>}
+        {isSeries && tmdbId && capsTemporada.length > 0 ? (
+          <div className="px-4 mb-2">
+            <button onClick={() => visto.alternarTemporada(capsTemporada, todosCaps)}
+              className={`h-9 px-4 rounded-full text-[13px] font-semibold inline-flex items-center gap-2 ${
+                visto.temporadaVista(capsTemporada) ? 'bg-nf-ok/20 text-nf-ok' : 'bg-white/10 text-nf-text2'}`}>
+              <span className="w-4 h-4"><ICheck /></span>
+              {visto.temporadaVista(capsTemporada) ? `${seasonLabel(active)} vista` : `Marcar ${seasonLabel(active).toLowerCase()} como vista`}
+            </button>
+          </div>
+        ) : null}
         {!isSeries && versions.length > 0 && <h2 className="px-4 mb-2 text-[17px] font-semibold">Versiones</h2>}
 
         {isSeries && shown.map(e => {
@@ -245,7 +261,7 @@ export default function Title() {
                 <p className="text-[12px] text-nf-text3 truncate">{best.quality} · {best.sizeStr}{e.variants.length > 1 ? ` · ${e.variants.length} versiones` : ''}</p>
               </div>
               {tmdbId ? (
-                <button onClick={() => visto.alternarEpisodio(e.season, e.episode ?? 0)}
+                <button onClick={() => visto.alternarEpisodio(e.season, e.episode ?? 0, todosCaps)}
                   aria-label={marcado ? 'Marcar como no visto' : 'Marcar como visto'}
                   className={`w-9 h-9 shrink-0 rounded-full border flex items-center justify-center ${
                     marcado ? 'border-nf-ok/60 bg-nf-ok/20 text-nf-ok' : 'border-white/20 text-nf-text3'}`}>

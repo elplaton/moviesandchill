@@ -5,7 +5,7 @@ import Row from './Row';
 import { IClose } from './Icons';
 import type { Carril } from '../hooks/useCarriles';
 import type { BrowseItem } from '../types';
-import { pedir, TIPO_PETICION } from '../services/peticiones';
+import { estaPedida, pedir, textoAlPedir, TIPO_PETICION } from '../services/peticiones';
 import { fondoDeTitulo } from '../utils/text';
 import { toast } from '../utils/toast';
 
@@ -30,11 +30,12 @@ const FUENTE = {
 const meta = (i: BrowseItem) => i.subtitulo || (i.year ? String(i.year) : undefined);
 
 /** Que dice el boton de pedir. Una pedida que fallo se puede volver a pedir, y
- *  una que pidio otro tambien: es el mismo POST, el servidor la suma. */
+ *  una que pidio otro tambien: es el mismo POST, el servidor la suma. En la
+ *  cola o ya mandada da igual: las dos estan pedidas. */
 function estadoPedir(i: BrowseItem) {
   const p = i.peticion;
-  const mia = p?.estado === 'enviada' && p.mia;
-  const deOtro = p?.estado === 'enviada' && !p.mia;
+  const mia = estaPedida(p?.estado) && !!p?.mia;
+  const deOtro = estaPedida(p?.estado) && !p?.mia;
   return { mia, texto: mia ? 'Pedida' : deOtro ? 'Avisarme' : 'Pedir' };
 }
 
@@ -81,7 +82,7 @@ function HojaPedir({ i, onCerrar, onPedida }: { i: BrowseItem; onCerrar: () => v
     try {
       const d = await pedir(i.tmdb_id, i.media_type);
       onPedida(i.tmdb_id, i.media_type);
-      toast(d.ya_pedida ? 'Ya estaba pedida: te avisaremos también a ti' : 'Pedida: te avisaremos cuando esté', 'ok', 4000);
+      toast(await textoAlPedir(d), 'ok', 5000);
     } catch (e) {
       toast(e instanceof Error ? e.message : 'No se ha podido pedir', 'error', 6000);
     } finally { setEnviando(false); }

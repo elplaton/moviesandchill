@@ -2,7 +2,7 @@ import { memo, useState } from 'react';
 import Rail from './Rail';
 import Button from './ui/Button';
 import { IconInfo } from './ui/Icon';
-import { pedir } from '../services/peticiones';
+import { avisoAlPedir, estaPedida, pedir } from '../services/peticiones';
 import { fondoDeTitulo } from '../utils/text';
 import type { BrowseItem, BrowseTop } from '../types';
 
@@ -59,16 +59,16 @@ const TopCard = memo(function TopCard({ item, puesto, onOpen }: {
   const [aviso, setAviso] = useState<string | null>(null);
 
   const p = item.peticion;
-  const mia = pedidaPorMi || (p?.estado === 'enviada' && p.mia);
-  const deOtro = !mia && p?.estado === 'enviada' && !p.mia;
+  const mia = pedidaPorMi || (estaPedida(p?.estado) && !!p?.mia);
+  const deOtro = !mia && estaPedida(p?.estado) && !p?.mia;
 
   const enviar = async () => {
     setOcupado(true);
     setAviso(null);
     try {
-      const { ya_pedida } = await pedir(item);
+      const res = await pedir(item);
       setPedidaPorMi(true);
-      setAviso(ya_pedida ? 'Ya estaba pedida: te avisaremos también a ti' : 'Te avisaremos cuando esté');
+      setAviso(await avisoAlPedir(res));
     } catch (e) {
       setAviso(e instanceof Error ? e.message : 'No se ha podido pedir');
     } finally {

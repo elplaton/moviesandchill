@@ -6,7 +6,7 @@ import { groupSearchResults } from '../utils/search';
 import { cleanTitle } from '../utils/text';
 import { ISearch } from '../components/Icons';
 import type { SearchResult } from '../types';
-import { buscarParaPedir, pedir, TIPO_PETICION, type ResultadoPeticion } from '../services/peticiones';
+import { buscarParaPedir, estaPedida, pedir, textoAlPedir, TIPO_PETICION, type ResultadoPeticion } from '../services/peticiones';
 import { toast } from '../utils/toast';
 
 function Result({ to, poster, title, meta }: { to: string; poster?: string; title: string; meta: string }) {
@@ -19,19 +19,20 @@ function Result({ to, poster, title, meta }: { to: string; poster?: string; titl
 }
 
 /** Un título de TMDB que no tenemos, con su botón de pedirlo. */
-function Pedible({ r, onPedida }: { r: ResultadoPeticion; onPedida: () => void }) {
+function Pedible({ r, onPedida }: { r: ResultadoPeticion; onPedida: (estado: 'en_cola' | 'enviada') => void }) {
   const [enviando, setEnviando] = useState(false);
   const p = r.peticion;
-  // Una pedida que fallo se puede volver a pedir; una enviada por otro se
-  // puede "esperar" tambien (mismo POST: el servidor la suma sin mandar nada).
-  const pedidaPorMi = p?.estado === 'enviada' && p.mia;
-  const deOtro = p?.estado === 'enviada' && !p.mia;
+  // Una pedida que fallo se puede volver a pedir; una pedida por otro (en la
+  // cola o ya mandada) se puede "esperar" tambien: mismo POST, el servidor la
+  // suma sin mandar nada.
+  const pedidaPorMi = estaPedida(p?.estado) && !!p?.mia;
+  const deOtro = estaPedida(p?.estado) && !p?.mia;
   const accion = async () => {
     setEnviando(true);
     try {
       const d = await pedir(r.tmdb_id, r.media_type);
-      onPedida();
-      toast(d.ya_pedida ? 'Ya estaba pedida: te avisaremos también a ti' : 'Pedida: te avisaremos cuando esté', 'ok', 4000);
+      onPedida(d.estado);
+      toast(await textoAlPedir(d), 'ok', 5000);
     } catch (e) {
       toast(e instanceof Error ? e.message : 'No se ha podido pedir', 'error', 6000);
     } finally { setEnviando(false); }
@@ -113,8 +114,8 @@ export default function Search() {
   };
 
   // Tras pedir, el botón pasa a «Pedida» sin volver a buscar.
-  const marcarPedida = (r: ResultadoPeticion) => setFuera(p => p && { ...p, items: p.items.map(x =>
-    x.tmdb_id === r.tmdb_id && x.media_type === r.media_type ? { ...x, peticion: { estado: 'enviada', mia: true } } : x) });
+  const marcarPedida = (r: ResultadoPeticion, estado: 'en_cola' | 'enviada') => setFuera(p => p && { ...p, items: p.items.map(x =>
+    x.tmdb_id === r.tmdb_id && x.media_type === r.media_type ? { ...x, peticion: { estado, mia: true } } : x) });
 
   const g = useMemo(() => groupSearchResults(results), [results]);
   const seriesItems = g.groups.map(s => {
@@ -163,7 +164,7 @@ export default function Search() {
           {fuera.estado === 'buscando' && <p className="px-4 pt-2 text-nf-text3 text-[14px]">Buscando en TMDB…</p>}
           {fuera.estado === 'error' && <p className="px-4 pt-2 text-nf-text3 text-[14px]">No se ha podido buscar en TMDB. <button onClick={buscarEnTmdb} className="underline">Reintentar</button></p>}
           {fuera.estado === 'listo' && fuera.items.length === 0 && <p className="px-4 pt-2 text-nf-text3 text-[14px]">TMDB no conoce nada con ese nombre que no tengamos ya.</p>}
-          {fuera.items.map(r => <Pedible key={`${r.media_type}:${r.tmdb_id}`} r={r} onPedida={() => marcarPedida(r)} />)}
+          {fuera.items.map(r => <Pedible key={`${r.media_type}:${r.tmdb_id}`} r={r} onPedida={estado => marcarPedida(r, estado)} />)}
         </>
       )}
     </div>

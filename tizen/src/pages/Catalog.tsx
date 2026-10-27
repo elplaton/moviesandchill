@@ -28,11 +28,16 @@ const NOTA_TOP: Record<BrowseTop['fuente'], string> = {
   tmdb: 'Según las tendencias de la semana en TMDB',
 };
 
+/** Pedida y esperando: en la cola o ya escrita en Telegram. */
+function estaPedida(estado: string | undefined): boolean {
+  return estado === 'en_cola' || estado === 'enviada';
+}
+
 /** La etiqueta de una tarjeta de top que no está en el catálogo. */
 function avisoDe(item: BrowseItem): string | undefined {
   if (item.en_catalogo !== false) return undefined;
   if (item.sin_ficha) return 'Sin ficha';
-  return item.peticion?.estado === 'enviada' ? 'Pedida' : 'No la tenemos';
+  return estaPedida(item.peticion?.estado) ? 'Pedida' : 'No la tenemos';
 }
 
 function toFeatured(item: BrowseItem, rowKey: string): Featured {
@@ -78,10 +83,10 @@ function CabeceraSeccion({ seccion, primera }: { seccion: BrowseSeccion; primera
 function cuadroPedir(item: BrowseItem, pedir: () => void, cerrar: () => void): { text: string; actions: DialogAction[] } {
   const datos = [item.year ? String(item.year) : '', item.media_type === 'series' ? 'Serie' : 'Película'].filter(Boolean).join(' · ');
   const p = item.peticion;
-  if (p?.estado === 'enviada' && p.mia) {
+  if (estaPedida(p?.estado) && p?.mia) {
     return { text: `${datos}. Ya la has pedido: te avisaremos cuando esté.`, actions: [{ label: 'Cerrar', onSelect: cerrar, primary: true }] };
   }
-  if (p?.estado === 'enviada') {
+  if (estaPedida(p?.estado)) {
     // La ha pedido otra cuenta: pedirla otra vez no manda nada nuevo a
     // Telegram, solo apunta a esta cuenta en la lista de avisos.
     return {
@@ -194,7 +199,11 @@ export default function Catalog({ filter, heading, fuente = 'portada' }: Props) 
         toast(typeof data.detail === 'string' ? data.detail : 'No se ha podido pedir', 'error', 5000);
         return;
       }
-      toast(data.ya_pedida ? 'Ya estaba pedida: te avisaremos también a ti' : 'Pedida: te avisaremos cuando esté', 'ok', 4000);
+      // Pedir ya no escribe en Telegram: entra en una cola que sale de una en
+      // una cada hora, y el puesto es lo que dice cuánto falta.
+      toast(data.ya_pedida ? 'Ya estaba pedida: te avisaremos también a ti'
+        : data.puesto ? `En cola (puesto ${data.puesto}): te avisaremos cuando esté`
+        : 'Pedida: te avisaremos cuando esté', 'ok', 5000);
       marcarPedida(item, data.estado || 'enviada');
     } catch {
       toast('No se ha podido pedir: el servidor no contesta', 'error', 5000);

@@ -3,8 +3,9 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { apiFetch } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import { toast } from '../utils/toast';
-import { chatsDestino, guardarAjustes, peticionesAdmin, probarPeticion, temasDe, TIPO_PETICION, vistaPrevia,
-         type AjustesPeticiones, type ChatDestino, type TemaForo, type PeticionAdmin } from '../services/peticiones';
+import { chatsDestino, enCuanto, enviarYa, ESTADO_TEXTO, guardarAjustes, moverEnCola, peticionesAdmin, probarPeticion,
+         quitarDeCola, ritmo, segundosHastaPuesto, temasDe, TIPO_PETICION, vistaPrevia, volverALaCola,
+         type AjustesPeticiones, type ChatDestino, type EstadoCola, type TemaForo, type PeticionAdmin } from '../services/peticiones';
 
 const GB = 1024 ** 3;
 const fmt = (b: number | null | undefined) => b == null ? 'Sin límite' : `${(b / GB).toFixed(b >= GB * 10 ? 0 : 1)} GB`;
@@ -432,16 +433,24 @@ function Novedades() {
 }
 
 const TIPO_CHAT: Record<ChatDestino['tipo'], string> = { canal: 'Canal', grupo: 'Grupo', bot: 'Bot', persona: 'Persona' };
-const ESTADO_PETICION: Record<PeticionAdmin['estado'], [string, string]> = {
-  enviada: ['Pedida', 'bg-white/10 text-nf-text3'],
-  conseguida: ['Ya está', 'bg-nf-ok/15 text-green-300'],
-  fallida: ['Falló', 'bg-nf-red/15 text-red-300'],
+const CLASE_ESTADO: Record<PeticionAdmin['estado'], string> = {
+  en_cola: 'bg-amber-400/15 text-amber-300',
+  enviada: 'bg-white/10 text-nf-text3',
+  conseguida: 'bg-nf-ok/15 text-green-300',
+  fallida: 'bg-nf-red/15 text-red-300',
+  descartada: 'bg-white/10 text-nf-text3',
 };
 
 /** A qué chat de Telegram van las peticiones, con qué texto, y todo lo pedido. */
 function Peticiones() {
   const [ajustes, setAjustes] = useState<AjustesPeticiones | null>(null);
   const [lista, setLista] = useState<PeticionAdmin[]>([]);
+  const [cola, setCola] = useState<EstadoCola | null>(null);
+  // Una accion de la cola en vuelo: mientras tanto se apagan **todos** los
+  // botones de la cola, no solo los de esa fila, porque mover una cambia el
+  // puesto de las demas y dos movimientos cruzados darian un orden que nadie
+  // ha pedido.
+  const [enCurso, setEnCurso] = useState<number | null>(null);
   const [error, setError] = useState('');
   // Chats: se cargan solo al pulsar, porque el servidor recorre todos los
   // dialogos de la cuenta de Telegram y tarda unos segundos.
@@ -461,10 +470,40 @@ function Peticiones() {
 
   useEffect(() => {
     peticionesAdmin().then(d => {
-      setLista(d.peticiones || []);
+      setLista(d.peticiones || []); setCola(d.cola);
       setAjustes(d.ajustes); setPlantilla(d.ajustes.plantilla);
     }).catch(e => setError(e instanceof Error ? e.message : 'No se han podido cargar las peticiones'));
   }, []);
+
+  // Tras tocar la cola se vuelve a pedir la lista entera: el orden y los
+  // puestos los decide el servidor. Los ajustes no se tocan, o se perderia una
+  // plantilla a medio escribir.
+  const recargar = async () => {
+    const d = await peticionesAdmin();
+    setLista(d.peticiones || []); setCola(d.cola);
+  };
+  const enCola = async (p: PeticionAdmin, hacer: () => Promise<string | null>) => {
+    setEnCurso(p.id);
+    try {
+      const ok = await hacer();
+      if (ok) toast(ok, 'ok');
+    } catch (e) { toast(e instanceof Error ? e.message : 'No se ha podido', 'error', 6000); }
+    finally {
+      try { await recargar(); } catch {}
+      setEnCurso(null);
+    }
+  };
+  const mover = (p: PeticionAdmin, como: 'arriba' | 'abajo' | 'primera') =>
+    enCola(p, async () => { await moverEnCola(p.id, como); return null; });
+  const enviarAhora = (p: PeticionAdmin) => enCola(p, async () => {
+    const r = await enviarYa(p.id);
+    // Que Telegram no la deje salir no es un fallo de la peticion HTTP: viene
+    // como `fallida` con su motivo, y eso es lo que hay que enseñar.
+    if (r.estado === 'fallida') { toast(r.error || 'Telegram no la ha dejado salir', 'error', 8000); return null; }
+    return `«${p.titulo}» enviada`;
+  });
+  const quitar = (p: PeticionAdmin) => enCola(p, async () => { await quitarDeCola(p.id); return 'Quitada de la cola'; });
+  const reencolar = (p: PeticionAdmin) => enCola(p, async () => { await volverALaCola(p.id); return 'De vuelta en la cola'; });
 
   // Vista previa con retardo, y solo la última respuesta cuenta.
   useEffect(() => {
@@ -522,9 +561,77 @@ function Peticiones() {
     && c.nombre.toLowerCase().includes(filtro.trim().toLowerCase()));
   const boton = 'w-full h-11 rounded-xl text-[15px] font-semibold disabled:opacity-40';
 
+  // El servidor ya las manda en orden, pero se ordena por puesto por si acaso:
+  // el orden de esta lista es justo lo que se esta editando.
+  const enLaCola = lista.filter(p => p.estado === 'en_cola').sort((a, b) => (a.puesto ?? 1e9) - (b.puesto ?? 1e9));
+  const resto = lista.filter(p => p.estado !== 'en_cola');
+  const minutos = cola?.minutos_entre_envios || 60;
+  const salePuesto = (n: number) => enCuanto(segundosHastaPuesto(n, cola?.segundos_para_siguiente ?? 0, minutos));
+  const muchas = !!cola && enLaCola.length >= cola.aviso_a_partir_de;
+  const botonCola = 'h-11 rounded-xl bg-white/10 text-[13px] font-semibold active:bg-white/20 disabled:opacity-30';
+
   if (!ajustes) return <p className="text-[14px] text-nf-text3">{error || 'Cargando…'}</p>;
   return (
     <div>
+      <section className="rounded-2xl bg-white/5 p-4 mb-4">
+        <p className="text-[13px] font-semibold text-nf-text2 mb-1">Cola</p>
+        {/* Una a la hora en total, no por cuenta: escribir mas seguido en el
+            grupo con la cuenta del servidor es lo que hace que la echen. */}
+        <p className="text-[15px]">
+          {enLaCola.length === 0 ? `Sale ${ritmo(minutos)} · no hay nada esperando`
+            : `Sale ${ritmo(minutos)} · la siguiente ${salePuesto(1)}`}
+        </p>
+        {muchas && (
+          <p className="mt-3 rounded-xl bg-amber-400/15 p-3 text-[13px] text-amber-200 leading-relaxed">
+            Hay {enLaCola.length} esperando: la última saldría {salePuesto(enLaCola.length)}. Sube las importantes,
+            manda alguna ya o quita las que sobren.
+          </p>
+        )}
+        {enLaCola.length > 0 && (
+          <ul className="mt-3 divide-y divide-white/5">
+            {enLaCola.map((p, n) => {
+              const puesto = p.puesto ?? n + 1;
+              const primera = n === 0;
+              const ultima = n === enLaCola.length - 1;
+              const ocupado = enCurso !== null;
+              return (
+                <li key={p.id} className="py-3">
+                  <div className="flex items-start gap-3">
+                    <span className="w-6 shrink-0 pt-0.5 text-center text-[17px] font-bold text-nf-text2">{puesto}</span>
+                    <div className="w-9 h-[54px] shrink-0 rounded-md overflow-hidden bg-white/5">
+                      {p.poster && <img src={p.poster} alt="" loading="lazy" className="w-full h-full object-cover" />}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[14px] truncate">{p.titulo}</p>
+                      <p className="text-[12px] text-nf-text3 truncate">
+                        {TIPO_PETICION[p.media_type]}{p.year ? ` · ${p.year}` : ''} · sale {salePuesto(puesto)}
+                      </p>
+                      <p className="text-[12px] text-nf-text3 truncate">
+                        {p.usuarios?.length ? `La esperan: ${p.usuarios.join(', ')}` : 'Ya no la espera nadie'}
+                      </p>
+                    </div>
+                  </div>
+                  {/* Botones grandes: se usan con el pulgar, y un «Enviar ya»
+                      pulsado sin querer escribe en el grupo. */}
+                  <div className="mt-2 flex items-center gap-2">
+                    <button onClick={() => mover(p, 'arriba')} disabled={ocupado || primera}
+                      aria-label={`Subir ${p.titulo}`} className={`${botonCola} w-11 shrink-0 text-[17px]`}>↑</button>
+                    <button onClick={() => mover(p, 'abajo')} disabled={ocupado || ultima}
+                      aria-label={`Bajar ${p.titulo}`} className={`${botonCola} w-11 shrink-0 text-[17px]`}>↓</button>
+                    <button onClick={() => mover(p, 'primera')} disabled={ocupado || primera}
+                      className={`${botonCola} flex-1 px-1`}>Primera</button>
+                    <button onClick={() => enviarAhora(p)} disabled={ocupado}
+                      className={`${botonCola} flex-1 px-1 !bg-nf-red`}>{enCurso === p.id ? '…' : 'Enviar ya'}</button>
+                    <button onClick={() => quitar(p)} disabled={ocupado}
+                      className={`${botonCola} flex-1 px-1 text-red-300`}>Quitar</button>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </section>
+
       <section className="rounded-2xl bg-white/5 p-4 mb-4">
         <p className="text-[13px] font-semibold text-nf-text2 mb-1">Chat de destino</p>
         <p className="text-[15px]">
@@ -624,13 +731,20 @@ function Peticiones() {
         </button>
       </section>
 
-      <p className="text-[13px] font-semibold text-nf-text2 mb-2">{lista.length} {lista.length === 1 ? 'petición' : 'peticiones'}</p>
-      {lista.length === 0 ? (
-        <p className="text-[14px] text-nf-text3 leading-relaxed">Nadie ha pedido nada todavía.</p>
+      {/* Lo que ya no esta en la cola: lo de la cola ya sale arriba, en orden. */}
+      <p className="text-[13px] font-semibold text-nf-text2 mb-2">
+        {resto.length} {resto.length === 1 ? 'petición' : 'peticiones'}{enLaCola.length ? ' fuera de la cola' : ''}
+      </p>
+      {resto.length === 0 ? (
+        <p className="text-[14px] text-nf-text3 leading-relaxed">
+          {enLaCola.length ? 'Todo lo pedido está esperando en la cola.' : 'Nadie ha pedido nada todavía.'}
+        </p>
       ) : (
         <div className="rounded-2xl bg-white/5 divide-y divide-white/5">
-          {lista.map(p => {
-            const [etiqueta, clase] = ESTADO_PETICION[p.estado] || [p.estado, 'bg-white/10 text-nf-text3'];
+          {resto.map(p => {
+            const etiqueta = ESTADO_TEXTO[p.estado] || p.estado;
+            const clase = CLASE_ESTADO[p.estado] || 'bg-white/10 text-nf-text3';
+            const reencolable = p.estado === 'fallida' || p.estado === 'descartada';
             return (
               <div key={p.id} className="flex items-start gap-3 p-3">
                 <div className="w-9 h-[54px] shrink-0 rounded-md overflow-hidden bg-white/5">
@@ -644,7 +758,17 @@ function Peticiones() {
                   <p className="text-[12px] text-nf-text3 truncate">
                     {p.usuarios?.length ? `La esperan: ${p.usuarios.join(', ')}` : 'Ya no la espera nadie'}
                   </p>
-                  {p.estado === 'fallida' && p.error && <p className="text-[12px] text-red-300 mt-0.5 break-words">{p.error}</p>}
+                  {p.estado === 'fallida' && p.error && (
+                    <p className="text-[12px] text-red-300 mt-0.5 break-words">
+                      {p.error}{p.intento_en ? ` (${cuando(p.intento_en)})` : ''}
+                    </p>
+                  )}
+                  {reencolable && (
+                    <button onClick={() => reencolar(p)} disabled={enCurso !== null}
+                      className="mt-2 h-10 px-4 rounded-xl bg-white/10 text-[13px] font-semibold active:bg-white/20 disabled:opacity-40">
+                      {enCurso === p.id ? 'Volviendo…' : 'Volver a la cola'}
+                    </button>
+                  )}
                 </div>
                 <span className={`shrink-0 text-[11px] px-2 py-1 rounded-lg ${clase}`}>{etiqueta}</span>
               </div>

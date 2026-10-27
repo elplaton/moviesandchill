@@ -72,10 +72,24 @@ async def _guardar(uid: int, req: ProgressRequest) -> bool:
     if rel is None:
         return False
     temporada, episodio = temporada_y_episodio(rel)
+    tmdb_id, tmdb_type = req.tmdb_id, _tipo_tmdb(req.media_type)
+    # Lo visto sin descargar no lleva "3x05" en la ruta: el capitulo y la
+    # ficha se sacan del catalogo, que es lo que permite juntarlo con el resto
+    # de la serie en "Continuar viendo" y saber cual va mas avanzado.
+    from app.services import reproduccion
+    ids = reproduccion.leer_ruta(rel)
+    if ids:
+        from app.database.progress import ficha_de_tg
+        cat = await ficha_de_tg(*ids)
+        if cat:
+            temporada = temporada if temporada is not None else cat.get("season")
+            episodio = episodio if episodio is not None else cat.get("episode")
+            if not tmdb_id and cat.get("tmdb_id"):
+                tmdb_id, tmdb_type = cat["tmdb_id"], cat["tmdb_type"]
     await save_progress(
         uid, rel, grupo_de(rel), req.position, req.duration,
         title=req.title, subtitle=req.subtitle, poster=req.poster, backdrop=req.backdrop,
-        tmdb_id=req.tmdb_id, tmdb_type=_tipo_tmdb(req.media_type),
+        tmdb_id=tmdb_id, tmdb_type=tmdb_type,
         season=temporada, episode=episodio,
     )
     await _seguir_si_toca(uid, req, episodio)
@@ -149,11 +163,20 @@ async def delete_progress_entry(user: Annotated[str, Depends(get_current_user)],
         return {"deleted": 0}
     if todo:
         return {"deleted": await delete_progress(uid, todo=True)}
-    if grupo:
-        return {"deleted": await delete_progress(uid, grupo=grupo)}
-    rel = ruta_relativa(path)
-    if rel is None:
+    rel = ruta_relativa(path) if path else None
+    if not grupo and rel is None:
         return {"deleted": 0}
-    # Quitar una pelicula de la fila es olvidar su titulo, no solo ese archivo:
-    # si no, la otra calidad la haria volver.
-    return {"deleted": await delete_progress(uid, grupo=grupo_de(rel))}
+    # Quitar una tarjeta es olvidar su titulo entero, no solo ese archivo: si
+    # no, la otra calidad de la pelicula, o el capitulo anterior, la harian
+    # volver. Y el titulo es el de la fila (`clave_titulo`): su ficha si la
+    # tiene, que es lo que junta lo visto descargado con lo visto sin
+    # descargar (una ruta `tg:` no tiene carpeta).
+    from app.database.progress import delete_paths, list_progress
+    from app.services.continuar import clave_titulo
+
+    carpeta = grupo or grupo_de(rel)
+    filas = await list_progress(uid)
+    propias = [f for f in filas if f["path"] == rel or f.get("grupo") == carpeta]
+    claves = {clave_titulo(f) for f in propias} | {("grupo", carpeta)}
+    caminos = [f["path"] for f in filas if clave_titulo(f) in claves or f.get("grupo") == carpeta]
+    return {"deleted": await delete_paths(uid, caminos)}

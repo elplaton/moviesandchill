@@ -42,7 +42,7 @@ def _fallo(e) -> HTTPException:
 def _salida(p: dict) -> dict:
     from app.services.peticiones import tipo_cliente
 
-    fechas = ("creada_en", "conseguida_en", "pedida_en")
+    fechas = ("creada_en", "conseguida_en", "pedida_en", "intento_en")
     return {**{k: v for k, v in p.items() if k not in fechas and k != "media_type"},
             "media_type": tipo_cliente(p["media_type"]),
             **{k: p[k].isoformat() if p.get(k) else None for k in fechas if k in p}}
@@ -108,10 +108,16 @@ async def mias(user: Annotated[str, Depends(get_current_user)]):
     from app.database import peticiones as db
     from app.services.peticiones import LIMITE_DIA
 
+    from app.services.peticiones import MINUTOS_ENTRE_ENVIOS, segundos_para_siguiente
+
     cuenta = await _cuenta(user)
     hoy = await db.mandadas_hoy(cuenta["id"])
     return {"peticiones": [_salida(p) for p in await db.de_usuario(cuenta["id"])],
-            "quedan_hoy": None if cuenta.get("role") == "admin" else max(0, LIMITE_DIA - hoy)}
+            "quedan_hoy": None if cuenta.get("role") == "admin" else max(0, LIMITE_DIA - hoy),
+            # Para decir "sale en unos 40 min": la del puesto N sale cuando
+            # falte esto mas (N - 1) huecos de MINUTOS_ENTRE_ENVIOS.
+            "segundos_para_siguiente": await segundos_para_siguiente(),
+            "minutos_entre_envios": MINUTOS_ENTRE_ENVIOS}
 
 
 @router.delete("/peticiones/{peticion_id}")
@@ -130,9 +136,65 @@ async def dejar(peticion_id: int, user: Annotated[str, Depends(get_current_user)
 @router.get("/admin/peticiones")
 async def todas(admin: Annotated[str, Depends(get_current_admin)]):
     from app.database import peticiones as db
-    from app.services.peticiones import ajustes
+    from app.services.peticiones import AVISO_COLA, MINUTOS_ENTRE_ENVIOS, ajustes, segundos_para_siguiente
 
-    return {"peticiones": [_salida(p) for p in await db.todas()], "ajustes": await ajustes()}
+    return {"peticiones": [_salida(p) for p in await db.todas()], "ajustes": await ajustes(),
+            "cola": {"segundos_para_siguiente": await segundos_para_siguiente(),
+                     "minutos_entre_envios": MINUTOS_ENTRE_ENVIOS, "aviso_a_partir_de": AVISO_COLA + 1}}
+
+
+class Mover(BaseModel):
+    como: str  # 'arriba', 'abajo' o 'primera'
+
+
+@router.post("/admin/peticiones/{peticion_id}/mover")
+async def mover(peticion_id: int, req: Mover, admin: Annotated[str, Depends(get_current_admin)]):
+    from app.database import peticiones as db
+
+    if req.como not in ("arriba", "abajo", "primera"):
+        raise HTTPException(400, "Movimiento desconocido")
+    return {"ok": await db.mover(peticion_id, req.como)}
+
+
+@router.post("/admin/peticiones/{peticion_id}/enviar")
+async def enviar_ya(peticion_id: int, admin: Annotated[str, Depends(get_current_admin)]):
+    """Manda una de la cola sin esperar su turno (cuenta como el envio de esta
+    hora). Si Telegram no la deja salir, queda fallida con el motivo."""
+    from app.database import peticiones as db
+    from app.services.peticiones import PeticionError, enviar_ya as enviar_ya_
+
+    try:
+        await enviar_ya_(peticion_id)
+    except PeticionError as e:
+        raise _fallo(e)
+    p = await db.por_id(peticion_id)
+    return {"estado": p["estado"] if p else None, "error": p.get("error") if p else None}
+
+
+@router.post("/admin/peticiones/{peticion_id}/quitar")
+async def quitar_de_la_cola(peticion_id: int, admin: Annotated[str, Depends(get_current_admin)]):
+    """La saca de la cola sin mandarla."""
+    from app.database import peticiones as db
+    from app.services.peticiones import avisar_cola
+
+    await db.descartar(peticion_id)
+    await avisar_cola()
+    return {"ok": True}
+
+
+@router.post("/admin/peticiones/{peticion_id}/a-la-cola")
+async def volver_a_la_cola(peticion_id: int, admin: Annotated[str, Depends(get_current_admin)]):
+    """Vuelve a poner al final de la cola una que fallo o se descarto."""
+    from app.database import peticiones as db
+    from app.services.peticiones import avisar_cola
+
+    p = await db.por_id(peticion_id)
+    if not p or p["estado"] not in ("fallida", "descartada"):
+        raise HTTPException(409, "Solo se puede volver a encolar una petición fallida o descartada")
+    await db.encolar({"tmdb_id": p["tmdb_id"], "media_type": p["media_type"], "titulo": p["titulo"],
+                      "year": p.get("year"), "poster": p.get("poster")})
+    await avisar_cola()
+    return {"ok": True}
 
 
 @router.get("/admin/peticiones/chats")

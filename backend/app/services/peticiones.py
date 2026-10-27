@@ -47,6 +47,15 @@ HUECOS = {
 }
 LIMITE_DIA = 3
 MINUTOS_VIGILANTE = 5
+# Como mucho una peticion a la hora en total, para no inundar el grupo: lo
+# pedido entra en una cola que sale de una en una. El admin la puede
+# reordenar, vaciar o mandar algo ya.
+MINUTOS_ENTRE_ENVIOS = 60
+# Con mas de esto en cola se avisa al admin (una vez cada vez que se pasa).
+AVISO_COLA = 5
+CLAVE_AVISO_COLA = "peticiones_aviso_cola"
+# Estados en los que una peticion sigue viva (hay quien la espera).
+PENDIENTES = ("en_cola", "enviada")
 
 # Un solo envio a la vez: dos personas pidiendo lo mismo en el mismo segundo
 # mandarian dos mensajes, porque ninguna veria aun la fila de la otra.
@@ -284,10 +293,12 @@ async def pedir(user_id: int, es_admin: bool, tmdb_id: int, media_type: str, api
 
     async with _envio:
         existente = await db.de_titulo(tmdb_id, tipo)
-        if existente and existente["estado"] == "enviada":
-            # Ya pedida: no se escribe otra vez, se espera con los demas.
+        if existente and existente["estado"] in PENDIENTES:
+            # Ya pedida (en cola o mandada): no entra otra vez, se espera con
+            # los demas.
             await db.sumar(existente["id"], user_id, origen=False)
-            return {"estado": "enviada", "ya_pedida": True}
+            return {"estado": existente["estado"], "ya_pedida": True,
+                    "puesto": await db.puesto(existente["id"])}
 
         if not es_admin and await db.mandadas_hoy(user_id) >= LIMITE_DIA:
             raise PeticionError(f"Ya has hecho {LIMITE_DIA} peticiones hoy; vuelve mañana", 429)
@@ -298,25 +309,110 @@ async def pedir(user_id: int, es_admin: bool, tmdb_id: int, media_type: str, api
         datos = {"tmdb_id": tmdb_id, "media_type": tipo, "titulo": ficha.get("title") or "",
                  "titulo_original": ficha.get("original_title"), "year": ficha.get("year"),
                  "poster": ficha.get("poster")}
-        texto = rellenar(conf["plantilla"], datos)
-
-        try:
-            cliente = _cliente()
-            destino = await _destino(cliente, conf["chat_id"])
-            mensaje = await _mandar(cliente, destino, texto, datos.get("poster"), conf.get("tema_id"))
-        except PeticionError as e:
-            await db.guardar_fallida(datos, str(e))
-            raise
-        except Exception as e:
-            logger.warning("Peticion de %s/%d no se pudo mandar: %s", tipo, tmdb_id, e)
-            await db.guardar_fallida(datos, str(e))
-            raise PeticionError(f"Telegram no ha dejado mandar el mensaje: {str(e)[:120]}", 502)
-
-        donde = conf["chat_nombre"] + (f" › {conf['tema_nombre']}" if conf.get("tema_nombre") else "")
-        pid = await db.guardar_enviada(datos, conf["chat_id"], donde, getattr(mensaje, "id", None))
+        pid = await db.encolar(datos)
         await db.sumar(pid, user_id, origen=True)
-        logger.info("Peticion mandada a %s: %s", donde or conf["chat_id"], texto.splitlines()[0])
-        return {"estado": "enviada", "ya_pedida": False}
+        puesto = await db.puesto(pid)
+        logger.info("Peticion en cola (puesto %s): %s", puesto, datos["titulo"])
+    await avisar_cola()
+    return {"estado": "en_cola", "ya_pedida": False, "puesto": puesto}
+
+
+async def _mandar_peticion(p: dict, conf: dict) -> None:
+    """Escribe en Telegram una peticion de la cola y la marca enviada o
+    fallida. Una que falla sale de la cola con su motivo: reintentarla sola
+    cada hora contra un chat que no deja escribir no arregla nada."""
+    from app.database import peticiones as db
+
+    datos = {"tmdb_id": p["tmdb_id"], "media_type": p["media_type"], "titulo": p["titulo"],
+             "titulo_original": None, "year": p.get("year"), "poster": p.get("poster")}
+    texto = rellenar(conf["plantilla"], datos)
+    try:
+        cliente = _cliente()
+        destino = await _destino(cliente, conf["chat_id"])
+        mensaje = await _mandar(cliente, destino, texto, datos.get("poster"), conf.get("tema_id"))
+    except Exception as e:
+        motivo = str(e) if isinstance(e, PeticionError) else f"Telegram no ha dejado mandarla: {str(e)[:120]}"
+        logger.warning("Peticion «%s» no se pudo mandar: %s", p["titulo"], motivo)
+        await db.marcar_fallida(p["id"], motivo)
+        return
+    donde = conf["chat_nombre"] + (f" › {conf['tema_nombre']}" if conf.get("tema_nombre") else "")
+    await db.marcar_enviada(p["id"], conf["chat_id"], donde, getattr(mensaje, "id", None))
+    logger.info("Peticion mandada a %s: %s", donde or conf["chat_id"], texto.splitlines()[0])
+
+
+async def segundos_para_siguiente() -> int:
+    """Cuanto falta para que salga la siguiente de la cola (0 = en el proximo
+    minuto)."""
+    from app.database import peticiones as db
+
+    return await db.segundos_para_siguiente(MINUTOS_ENTRE_ENVIOS)
+
+
+async def despachar() -> bool:
+    """Si toca (ha pasado una hora desde el ultimo envio), manda la primera de
+    la cola. Devuelve si ha mandado algo."""
+    from app.database import peticiones as db
+
+    conf = await ajustes()
+    if not conf["chat_id"]:
+        return False
+    async with _envio:
+        if await segundos_para_siguiente() > 0:
+            return False
+        lista = await db.cola()
+        if not lista:
+            return False
+        await _mandar_peticion(lista[0], conf)
+    await avisar_cola()
+    return True
+
+
+async def enviar_ya(peticion_id: int) -> None:
+    """El admin manda una de la cola sin esperar su turno. Cuenta como envio:
+    la siguiente espera su hora desde ahora."""
+    from app.database import peticiones as db
+
+    conf = await ajustes()
+    if not conf["chat_id"]:
+        raise PeticionError("Aún no se ha elegido a qué chat de Telegram van las peticiones", 409)
+    async with _envio:
+        p = await db.por_id(peticion_id)
+        if not p or p["estado"] != "en_cola":
+            raise PeticionError("Esa petición ya no está en la cola", 409)
+        await _mandar_peticion(p, conf)
+    await avisar_cola()
+
+
+async def avisar_cola() -> None:
+    """Con mas de AVISO_COLA en cola, un aviso al movil de los admins. Una vez
+    cada vez que se pasa el umbral: si la cola baja y vuelve a subir, otra."""
+    from app.database import peticiones as db
+    from app.database.connection import get_app_settings, get_pool, set_app_settings
+    from app.services.push import enviar
+
+    n = await db.cuantas_en_cola()
+    avisado = (await get_app_settings()).get(CLAVE_AVISO_COLA) == "1"
+    if n <= AVISO_COLA:
+        if avisado:
+            await set_app_settings({CLAVE_AVISO_COLA: "0"})
+        return
+    if avisado:
+        return
+    await set_app_settings({CLAVE_AVISO_COLA: "1"})
+    pool = get_pool()
+    if not pool:
+        return
+    async with pool.acquire() as conn:
+        admins = [r["id"] for r in await conn.fetch(
+            "SELECT id FROM users WHERE role = 'admin' AND active IS NOT FALSE")]
+    for uid in admins:
+        try:
+            await enviar(uid, {"title": "Peticiones en cola",
+                               "body": f"Hay {n} peticiones esperando a salir (sale una cada hora)",
+                               "reason": "peticiones", "tag": "peticiones-cola"})
+        except Exception as e:
+            logger.warning("Aviso de cola al admin %d fallo: %s", uid, e)
+    logger.info("Peticiones: %d en cola, avisado a %d admins", n, len(admins))
 
 
 async def probar(api_key: str, plantilla: str | None = None) -> str:
@@ -370,10 +466,17 @@ async def repasar() -> int:
 
 
 async def vigilante(minutos: float = MINUTOS_VIGILANTE) -> None:
+    """Cada minuto mira si toca mandar la siguiente de la cola; cada
+    `minutos`, si ha llegado algo de lo pedido. Lo que llega estando aun en
+    la cola se da por conseguido sin mandarse."""
     await asyncio.sleep(60)
+    vuelta = 0
     while True:
         try:
-            await repasar()
+            if vuelta % max(int(minutos), 1) == 0:
+                await repasar()
+            await despachar()
         except Exception as e:
             logger.error("Vigilante de peticiones fallo: %s", e)
-        await asyncio.sleep(max(minutos, 1) * 60)
+        vuelta += 1
+        await asyncio.sleep(60)

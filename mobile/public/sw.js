@@ -65,7 +65,9 @@ self.addEventListener('notificationclick', (event) => {
   // lleva a Descargas, que es donde esta lo que acaba de bajar.
   const destino = d.tmdb_id
     ? `/m/t/${d.kind === 'series' ? 'series' : 'movie'}/${d.tmdb_id}`
-    : d.reason === 'descarga' ? '/m/descargas' : '/m/';
+    : d.reason === 'descarga' ? '/m/descargas'
+    // El aviso al admin de que la cola de peticiones crece.
+    : d.reason === 'peticiones' ? '/m/admin/peticiones' : '/m/';
   event.waitUntil((async () => {
     const abiertas = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
     for (const cliente of abiertas) {

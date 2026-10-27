@@ -55,6 +55,51 @@ async def desmarcar_visto(user_id: int, tmdb_id: int, media_type: str,
     return True
 
 
+async def marcar_episodios(user_id: int, tmdb_id: int, media_type: str,
+                           episodios: list[tuple[int, int]], marcar: bool,
+                           quitar_entero: bool = False) -> bool:
+    """Marca o desmarca varios capitulos de golpe: una temporada entera, o
+    todos menos uno.
+
+    `quitar_entero` quita la marca de "serie vista" **sin tocar los
+    capitulos** (al reves que `desmarcar_visto` sobre el titulo, que los
+    borra todos). Es lo que hace falta al quitar el visto de un capitulo de
+    una serie marcada entera: deja de estar entera, pero los demas capitulos
+    siguen vistos. Antes eso se hacia quitando el titulo entero y se perdia
+    todo lo marcado. Va en una transaccion: o queda todo o nada.
+    """
+    pool = get_pool()
+    if not pool:
+        return False
+    temporadas = [int(s or 0) for s, _ in episodios]
+    capitulos = [int(e) for _, e in episodios]
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            if quitar_entero:
+                await conn.execute("""
+                    DELETE FROM user_watched
+                    WHERE user_id = $1 AND tmdb_id = $2 AND media_type = $3
+                      AND season = 0 AND episode = 0
+                """, user_id, tmdb_id, media_type)
+            if not episodios:
+                return True
+            if marcar:
+                await conn.execute("""
+                    INSERT INTO user_watched (user_id, tmdb_id, media_type, season, episode)
+                    SELECT $1, $2, $3, s, e FROM unnest($4::int[], $5::int[]) AS t(s, e)
+                    WHERE e > 0
+                    ON CONFLICT DO NOTHING
+                """, user_id, tmdb_id, media_type, temporadas, capitulos)
+            else:
+                await conn.execute("""
+                    DELETE FROM user_watched w
+                    USING unnest($4::int[], $5::int[]) AS t(s, e)
+                    WHERE w.user_id = $1 AND w.tmdb_id = $2 AND w.media_type = $3
+                      AND w.season = t.s AND w.episode = t.e AND t.e > 0
+                """, user_id, tmdb_id, media_type, temporadas, capitulos)
+    return True
+
+
 async def visto_de_titulo(user_id: int, tmdb_id: int, media_type: str) -> dict:
     """Lo que esta cuenta ha visto de un titulo: si esta entero y que episodios."""
     pool = get_pool()

@@ -33,7 +33,9 @@ self.addEventListener('notificationclick', (event) => {
   // ayudaria a encontrarlo.
   const destino = d.tmdb_id
     ? `/?ficha=${d.kind === 'series' ? 's' : 'm'}${d.tmdb_id}`
-    : d.reason === 'descarga' ? '/descargas' : '/';
+    : d.reason === 'descarga' ? '/descargas'
+    // El aviso al admin de que la cola de peticiones crece.
+    : d.reason === 'peticiones' ? '/admin/peticiones' : '/';
   event.waitUntil((async () => {
     const abiertas = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
     for (const cliente of abiertas) {

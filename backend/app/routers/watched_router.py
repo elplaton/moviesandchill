@@ -82,3 +82,29 @@ async def delete_watched(req: WatchedRequest, user: Annotated[str, Depends(get_c
                           req.season or 0, req.episode or 0)
     cache.cambio_de_cuenta(uid)
     return {"watched": False}
+
+
+class EpisodiosRequest(BaseModel):
+    tmdb_id: int
+    media_type: str
+    # [[temporada, episodio], ...]; temporada 0 si no se sabe.
+    episodios: list[list[int]]
+    marcar: bool
+    # Quitar la marca de "serie vista" sin tocar los capitulos.
+    quitar_entero: bool = False
+
+
+@router.post("/watched/episodios")
+async def post_watched_episodios(req: EpisodiosRequest, user: Annotated[str, Depends(get_current_user)]):
+    """Varios capitulos de golpe: una temporada entera, o todos menos uno (al
+    quitar el visto de un capitulo de una serie marcada entera)."""
+    from app.database.watched import marcar_episodios
+
+    uid = await _user_id(user)
+    if uid is None:
+        return {"error": "Usuario no encontrado"}
+    pares = [(p[0], p[1]) for p in req.episodios if len(p) == 2][:2000]
+    await marcar_episodios(uid, req.tmdb_id, _tipo_tmdb(req.media_type), pares,
+                           req.marcar, req.quitar_entero)
+    cache.cambio_de_cuenta(uid)
+    return {"ok": True}

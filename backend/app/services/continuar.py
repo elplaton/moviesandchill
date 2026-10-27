@@ -3,10 +3,12 @@
 Dos reglas que la definen, y que son las que complican lo que si no seria un
 simple ORDER BY:
 
-1. **Una tarjeta por titulo.** Los episodios de una serie y las dos calidades
-   de una pelicula comparten `grupo` (la carpeta del titulo), asi que de cada
-   grupo sale solo lo ultimo que se vio. Si no, dejar tres episodios a medias
-   de la misma serie llenaba la fila con esa serie.
+1. **Una tarjeta por titulo, la del capitulo mas avanzado.** Lo que decide
+   que dos filas son el mismo titulo es su ficha de TMDB (`clave_titulo`), y
+   solo sin ficha la carpeta: lo visto sin descargar no tiene carpeta, y
+   agrupando solo por ella cada capitulo salia como una tarjeta. De cada serie
+   manda el capitulo mas avanzado (temporada y episodio mas altos), no el
+   ultimo que se toco: volver a ver el 2x03 no puede tapar que vas por el 4x08.
 
 2. **Al terminar un episodio se ofrece el siguiente.** Por eso el historial no
    se borra al acabar: una fila terminada es justo lo que permite saber por
@@ -174,40 +176,77 @@ def _tarjeta(fila: dict, path: str, position: float, duration: float,
     }
 
 
+def clave_titulo(fila: dict) -> tuple:
+    """Que titulo es una fila del historial: su ficha si la tiene; si no, su
+    carpeta."""
+    if fila.get("tmdb_id"):
+        return ("tmdb", fila.get("tmdb_type") or "", fila["tmdb_id"])
+    return ("grupo", fila.get("grupo") or grupo_de(fila["path"]))
+
+
+def _terminada(f: dict) -> bool:
+    duracion = float(f.get("duration") or 0)
+    return duracion > 0 and float(f.get("position") or 0) / duracion >= FIN
+
+
+def _vale(f: dict) -> bool:
+    """Si una fila puede dar tarjeta: terminada (ofrece el siguiente) o
+    empezada de verdad y todavia reproducible."""
+    if _terminada(f):
+        return True
+    if float(f.get("position") or 0) < MIN_SEGUNDOS or float(f.get("duration") or 0) <= 0:
+        return False
+    # `tg:<canal>:<msg>` se vio sin descargar: no esta en disco y no tiene
+    # por que estarlo.
+    return f["path"].startswith("tg:") or os.path.isfile(os.path.join(_base(), f["path"]))
+
+
+def _mas_avanzada(filas: list[dict]) -> dict | None:
+    """De las filas de un mismo titulo que valen, la del capitulo mas avanzado.
+    Llegan de la mas reciente a la mas vieja, asi que sin capitulos (una
+    pelicula, o filas que no lo saben) gana la primera, y a igual capitulo
+    tambien. Solo entre las que valen: si el capitulo mas alto se abrio diez
+    segundos o se borro del disco, la serie no puede desaparecer de la fila."""
+    validas = [f for f in filas if _vale(f)]
+    if not validas:
+        return None
+    con_capitulo = [f for f in validas if f.get("episode") is not None]
+    if not con_capitulo:
+        return validas[0]
+    return max(con_capitulo, key=lambda f: (f.get("season") or 0, f["episode"]))
+
+
 def continuar_viendo(filas: list[dict], limite: int = 20,
                      marcados: dict[int, set[tuple[int, int]]] | None = None) -> list[dict]:
     """Las tarjetas de la fila, a partir del historial de la cuenta.
 
-    `filas` llega ya ordenada de lo mas reciente a lo mas viejo, asi que la
-    primera de cada grupo es la que manda. `marcados` son los episodios que la
+    `filas` llega ya ordenada de lo mas reciente a lo mas viejo: las tarjetas
+    salen en el orden de lo ultimo que se toco de cada titulo, y de cada uno
+    el capitulo mas avanzado (`_mas_avanzada`). `marcados` son los episodios que la
     cuenta ha marcado como vistos a mano, por tmdb_id: no se ofrecen como
     siguiente aunque esten en disco y sin reproducir.
     """
-    vistos: set[str] = set()
     tarjetas: list[dict] = []
     terminados = {f["path"] for f in filas
                   if (f.get("duration") or 0) > 0
                   and float(f["position"]) / float(f["duration"]) >= FIN}
 
-    for fila in filas:
-        grupo = fila.get("grupo") or grupo_de(fila["path"])
-        if grupo in vistos:
+    # Por titulo, en el orden de lo ultimo que se toco de cada uno.
+    por_titulo: dict[tuple, list[dict]] = {}
+    for f in filas:
+        por_titulo.setdefault(clave_titulo(f), []).append(f)
+
+    for grupo_filas in por_titulo.values():
+        fila = _mas_avanzada(grupo_filas)
+        if fila is None:
             continue
-        vistos.add(grupo)
 
         rel = fila["path"]
         posicion = float(fila.get("position") or 0)
         duracion = float(fila.get("duration") or 0)
         temporada, episodio = fila.get("season"), fila.get("episode")
-        terminado = duracion > 0 and posicion / duracion >= FIN
 
-        if not terminado:
-            if posicion < MIN_SEGUNDOS or duracion <= 0:
-                continue
-            # `tg:<canal>:<msg>` se vio sin descargar: no esta en disco y no
-            # tiene por que estarlo.
-            if not rel.startswith("tg:") and not os.path.isfile(os.path.join(_base(), rel)):
-                continue  # se borro de la biblioteca
+        if not _terminada(fila):
             tarjetas.append(_tarjeta(fila, rel, posicion, duracion, temporada, episodio, False))
         else:
             sig = siguiente_episodio(rel, terminados,

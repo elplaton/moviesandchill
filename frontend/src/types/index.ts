@@ -182,7 +182,7 @@ export interface BrowseItem {
   /** Solo en las filas de top: un top trae también lo que no tenemos. */
   en_catalogo?: boolean;
   /** Solo en las filas de top: si alguien lo ha pedido ya, y si fui yo. */
-  peticion?: { estado: 'enviada' | 'conseguida' | 'fallida'; mia: boolean } | null;
+  peticion?: { estado: 'en_cola' | 'enviada' | 'conseguida' | 'fallida' | 'descartada'; mia: boolean } | null;
   /** Puesto de un top que TMDB no conoce: solo hay nombre; ni ficha ni «Pedir». */
   sin_ficha?: boolean;
 }
