@@ -7,6 +7,7 @@ import { cachedContinueWatching, clearWatched, continueWatching, type Watched } 
 import { IClose, IPlay, IStar } from '../components/Icons';
 import { fondoDeTitulo } from '../utils/text';
 import { useCarriles } from '../hooks/useCarriles';
+import Secciones from '../components/Secciones';
 
 /** Portada: un destacado grande, "Continuar viendo" y los carriles del servidor. */
 export default function Home() {
@@ -45,6 +46,7 @@ export default function Home() {
   return (
     <div className="pb-4">
       {hero && (
+        <div className="relative">
         <Link to={link(hero)} className="block relative h-[62vw] max-h-[420px] overflow-hidden">
           <img src={hero.backdrop || hero.poster} alt="" className="absolute inset-0 w-full h-full object-cover" />
           <div className="absolute inset-0" style={{ background: 'linear-gradient(180deg, rgba(20,20,20,0.1) 30%, #141414 100%)' }} />
@@ -58,8 +60,19 @@ export default function Home() {
             </p>
           </div>
         </Link>
+        {/* Encima del destacado y fuera del enlace: tocar una pildora no
+            puede abrir la ficha de la novedad. */}
+        <div className="absolute left-4 right-4" style={{ top: 'calc(var(--safe-t) + 12px)' }}>
+          <Secciones sobreImagen />
+        </div>
+        </div>
       )}
-      {!hero && <div className="px-4 pt-6 pb-4" style={{ paddingTop: 'calc(var(--safe-t) + 24px)' }}><h1 className="text-[28px] font-bold text-nf-red tracking-tighter">MOVIES&amp;CHILL</h1></div>}
+      {!hero && (
+        <div className="px-4 pt-6 pb-4" style={{ paddingTop: 'calc(var(--safe-t) + 24px)' }}>
+          <h1 className="text-[28px] font-bold text-nf-red tracking-tighter mb-3">MOVIES&amp;CHILL</h1>
+          <Secciones />
+        </div>
+      )}
 
       {resume.length > 0 && (
         <Row title="Continuar viendo">

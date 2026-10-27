@@ -13,6 +13,9 @@ import type { BrowseItem, BrowseRow, Featured } from '../types';
 interface Props {
   filter?: 'movie' | 'series';
   heading: string;
+  /** Plataformas: una fila por Netflix, HBO Max... (`/browse/plataformas`)
+   *  en vez de la portada. Sin "Continuar viendo", que es cosa del inicio. */
+  fuente?: 'portada' | 'plataformas';
 }
 
 const ROWS_AROUND = 2;
@@ -51,10 +54,12 @@ function watchedToFeatured(w: Watched): Featured {
 }
 
 /**
- * Portada, Peliculas y Series: carriles por genero sobre /browse/home. Solo
- * montan tarjetas las filas cercanas a la enfocada; el resto deja su hueco.
+ * Portada, Peliculas, Series y Plataformas: carriles sobre /browse/home (o
+ * /browse/plataformas). Solo montan tarjetas las filas cercanas a la
+ * enfocada; el resto deja su hueco.
  */
-export default function Catalog({ filter, heading }: Props) {
+export default function Catalog({ filter, heading, fuente = 'portada' }: Props) {
+  const portada = !filter && fuente === 'portada';
   const [rows, setRows] = useState<BrowseRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [focusRow, setFocusRow] = useState(0);
@@ -62,17 +67,17 @@ export default function Catalog({ filter, heading }: Props) {
   const [playing, setPlaying] = useState<Watched | null>(null);
   // De la cache primero, para que la fila este ahi nada mas abrir, y acto
   // seguido lo que diga el servidor (que sabe lo visto en el movil o la web).
-  const [resume, setResume] = useState<Watched[]>(() => (filter ? [] : cachedContinueWatching()));
+  const [resume, setResume] = useState<Watched[]>(() => (portada ? cachedContinueWatching() : []));
 
   useEffect(() => {
-    if (filter) return;
+    if (!portada) return;
     continueWatching().then(setResume).catch(() => {});
-  }, [filter]);
+  }, [portada]);
 
   useEffect(() => {
     (async () => {
       try {
-        const res = await apiFetch('/browse/home');
+        const res = await apiFetch(fuente === 'plataformas' ? '/browse/plataformas' : '/browse/home');
         const data = await res.json();
         let list: BrowseRow[] = data.rows || [];
         if (filter) {
@@ -85,7 +90,7 @@ export default function Catalog({ filter, heading }: Props) {
         setLoading(false);
       }
     })();
-  }, [filter]);
+  }, [filter, fuente]);
 
   const featuredRows = useMemo(() => rows.map((r) => ({
     genre: r.genre,
@@ -103,8 +108,8 @@ export default function Catalog({ filter, heading }: Props) {
 
   const onPlayerClose = useCallback(() => {
     setPlaying(null);
-    continueWatching().then(setResume).catch(() => {});
-  }, []);
+    if (portada) continueWatching().then(setResume).catch(() => {});
+  }, [portada]);
 
   const hasResume = resume.length > 0;
   const rowOffset = hasResume ? 1 : 0;
@@ -135,7 +140,13 @@ export default function Catalog({ filter, heading }: Props) {
       {loading && (
         <p className="text-body text-tv-text3" style={{ paddingLeft: 'var(--content-x)' }}>Cargando catálogo…</p>
       )}
-      {!loading && rows.length === 0 && (
+      {!loading && rows.length === 0 && fuente === 'plataformas' && (
+        <div style={{ paddingLeft: 'var(--content-x)' }}>
+          <p className="text-lead text-tv-text2">Todavía no hay nada aquí.</p>
+          <p className="text-body text-tv-text3 mt-2">El servidor está mirando en qué plataforma está cada título; vuelve en unos minutos.</p>
+        </div>
+      )}
+      {!loading && rows.length === 0 && fuente === 'portada' && (
         <div style={{ paddingLeft: 'var(--content-x)' }}>
           <p className="text-lead text-tv-text2">Todavía no hay nada indexado.</p>
           <p className="text-body text-tv-text3 mt-2">Añade canales desde la versión web y espera a que termine el escaneo.</p>

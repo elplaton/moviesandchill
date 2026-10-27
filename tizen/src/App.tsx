@@ -9,6 +9,7 @@ import Login from './pages/Login';
 import Home from './pages/Home';
 import Movies from './pages/Movies';
 import Series from './pages/Series';
+import Plataformas from './pages/Plataformas';
 import Search from './pages/Search';
 import Library from './pages/Library';
 import Favorites from './pages/Favorites';
@@ -38,6 +39,7 @@ function Shell() {
           <Route path="/" element={<Home />} />
           <Route path="/peliculas" element={<Movies />} />
           <Route path="/series" element={<Series />} />
+          <Route path="/plataformas" element={<Plataformas />} />
           <Route path="/buscar" element={<Search />} />
           <Route path="/favoritos" element={<Favorites />} />
           <Route path="/descargas" element={<Library />} />

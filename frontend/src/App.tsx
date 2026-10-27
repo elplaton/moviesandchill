@@ -4,6 +4,7 @@ import Login from './pages/Login';
 import Home from './pages/Home';
 import Movies from './pages/Movies';
 import Series from './pages/Series';
+import Plataformas from './pages/Plataformas';
 import Search from './pages/Search';
 import Onboarding from './pages/Onboarding';
 import Downloads from './pages/Downloads';
@@ -39,6 +40,7 @@ export default function App() {
       <Route path="/" element={<Protected>{hasPreferences === false ? <Navigate to="/onboarding" replace /> : <Home />}</Protected>} />
       <Route path="/peliculas" element={<Protected><Movies /></Protected>} />
       <Route path="/series" element={<Protected><Series /></Protected>} />
+      <Route path="/plataformas" element={<Protected><Plataformas /></Protected>} />
       <Route path="/buscar" element={<Protected><Search /></Protected>} />
       <Route path="/favoritos" element={<Protected><Favorites /></Protected>} />
       <Route path="/descargas" element={<Protected><Downloads /></Protected>} />

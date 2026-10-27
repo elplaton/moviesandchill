@@ -221,6 +221,10 @@ async def _ensure_tables():
                 PRIMARY KEY (tmdb_id, media_type)
             )
         """)
+        # Con que formato se guardo la fila (ver `VERSION` en plataformas.py):
+        # lo de una version vieja se vuelve a mirar.
+        await conn.execute(
+            "ALTER TABLE tmdb_plataformas ADD COLUMN IF NOT EXISTS version SMALLINT NOT NULL DEFAULT 1")
         # Estado de la interfaz que es **de la cuenta** y no del aparato: lo
         # ultimo que se busco, por ejemplo. Es el gemelo por usuario de
         # `app_settings`, y existe para que estas cosas no acaben en el

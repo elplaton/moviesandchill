@@ -62,8 +62,17 @@ interface Memoria {
 
 const memoria = new Map<string, Memoria>();
 
-function clave(filter?: string) {
-  return filter || 'inicio';
+/**
+ * De donde salen los carriles: la portada, o la pestaña de Plataformas (una
+ * fila por Netflix, HBO Max... con lo mas nuevo que tenemos de cada una). Las
+ * dos se paginan igual por `/browse/row`, asi que el motor es el mismo.
+ */
+export type Fuente = 'portada' | 'plataformas';
+const RUTA: Record<Fuente, string> = { portada: '/browse/home', plataformas: '/browse/plataformas' };
+
+function clave(filter?: string, fuente: Fuente = 'portada') {
+  const base = filter || 'inicio';
+  return fuente === 'portada' ? base : `${fuente}:${base}`;
 }
 
 export function olvidarCarriles() {
@@ -123,8 +132,8 @@ export function hayMas(c: Carril, dir: 1 | -1): boolean {
   return dir > 0 ? c.hasta < c.total : c.desde > 0;
 }
 
-export function useCarriles(filter?: 'movie' | 'series') {
-  const k = clave(filter);
+export function useCarriles(filter?: 'movie' | 'series', fuente: Fuente = 'portada') {
+  const k = clave(filter, fuente);
   const guardado = memoria.get(k);
   const vigente = guardado && Date.now() - guardado.ts < FRESCO ? guardado : undefined;
   const [carriles, setCarriles] = useState<Carril[]>(vigente?.carriles || []);
@@ -150,7 +159,7 @@ export function useCarriles(filter?: 'movie' | 'series') {
     const seed = String(Math.floor(Math.random() * 1e9));
     const q = new URLSearchParams({ seed });
     if (filter) q.set('media_type', filter);
-    apiFetch(`/browse/home?${q}`)
+    apiFetch(`${RUTA[fuente]}?${q}`)
       .then(r => r.json())
       .then(d => {
         if (!vivo) return;

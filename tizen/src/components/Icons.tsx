@@ -13,6 +13,10 @@ export const IconFilm = () => (
 export const IconTv = () => (
   <svg {...base} className="w-full h-full"><rect x="3" y="6" width="18" height="12" rx="2" /><path d="M8 21h8M12 18v3M8 3l4 3 4-3" /></svg>
 );
+// Plataformas: tres pantallas apiladas, una por servicio.
+export const IconLayers = () => (
+  <svg {...base} className="w-full h-full"><rect x="3" y="9" width="14" height="11" rx="2" /><path d="M7 6h12a2 2 0 012 2v9M10 3h9" /></svg>
+);
 export const IconDownload = () => (
   <svg {...base} className="w-full h-full"><path d="M12 4v11M7 10l5 5 5-5" /><path d="M4 19h16" /></svg>
 );

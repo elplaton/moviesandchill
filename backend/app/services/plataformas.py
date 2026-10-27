@@ -2,7 +2,7 @@
 algo nuevo en el.
 
 La pestaña "Plataformas" enseña lo mas novedoso de Netflix, HBO Max, Disney+,
-Prime Video y Crunchyroll, pero **solo lo que tenemos**: lo que se puede ver o
+Prime Video, Movistar Plus+ y Crunchyroll, pero **solo lo que tenemos**: lo que se puede ver o
 descargar al pulsarlo. Hacerlo al reves (pedir a TMDB lo ultimo de Netflix y
 buscarlo en el catalogo) dejaba filas de tres tarjetas, porque lo mas nuevo de
 una plataforma casi nunca esta aun en los canales. Asi que se pregunta por
@@ -36,12 +36,20 @@ PLATAFORMAS: list[dict] = [
     {"clave": "hbo", "nombre": "HBO Max", "ids": [1899, 1825]},
     {"clave": "disney", "nombre": "Disney+", "ids": [337]},
     {"clave": "prime", "nombre": "Prime Video", "ids": [119, 2100]},
+    {"clave": "movistar", "nombre": "Movistar Plus+", "ids": [2241, 149]},
     {"clave": "crunchyroll", "nombre": "Crunchyroll", "ids": [283, 1968]},
 ]
+# Hulu no esta: en España no existe, y sus series (The Bear, El cuento de la
+# criada) TMDB las da aqui como Disney+, que es donde se ven. Ya salen en esa
+# fila.
 POR_CLAVE = {p["clave"]: p for p in PLATAFORMAS}
-# Solo se guardan estas: el resto (Movistar, Filmin, los cuarenta canales de
-# Amazon) no lo pinta nadie y engordaria la tabla.
-_IDS = {i for p in PLATAFORMAS for i in p["ids"]}
+
+# Que se guarda en cada fila. Se guardan **todas** las plataformas de
+# suscripcion, no solo las de la lista: asi añadir una (Filmin, SkyShowtime)
+# es tocar `PLATAFORMAS` y nada mas, sin volver a preguntar por miles de
+# titulos. La version 1 guardaba solo las de la lista; lo que tenga una
+# version anterior se vuelve a mirar sin esperar a que caduque.
+VERSION = 2
 
 # Peliculas de cuantos años atras se miran. Una pelicula vieja no es novedad en
 # ninguna plataforma; una serie si puede serlo, y esas entran todas.
@@ -76,10 +84,11 @@ async def pendientes(limite: int = POR_PASADA) -> list[tuple[int, str]]:
             WHERE tc.poster IS NOT NULL
               AND (c.media_type = 'tv' OR tc.year >= $1)
               AND (tp.comprobado_en IS NULL
+                   OR tp.version < $4
                    OR tp.comprobado_en < NOW() - make_interval(days => $2))
-            ORDER BY (tp.comprobado_en IS NULL) DESC, tc.year DESC NULLS LAST
+            ORDER BY (tp.comprobado_en IS NULL OR tp.version < $4) DESC, tc.year DESC NULLS LAST
             LIMIT $3
-        """, desde, DIAS_VIGENCIA, limite)
+        """, desde, DIAS_VIGENCIA, limite, VERSION)
     return [(r["tmdb_id"], r["media_type"]) for r in rows]
 
 
@@ -89,7 +98,7 @@ def _proveedores(data: dict) -> list[int]:
     en la cuota, no que se puede alquilar alli."""
     pais = ((data.get("watch/providers") or {}).get("results") or {}).get(PAIS) or {}
     ids = {p.get("provider_id") for tipo in ("flatrate", "ads") for p in pais.get(tipo) or []}
-    return sorted(i for i in ids if i in _IDS)
+    return sorted(i for i in ids if isinstance(i, int))
 
 
 def _ultima_fecha(data: dict, media_type: str) -> str | None:
@@ -117,12 +126,14 @@ async def mirar(api_key: str, tmdb_id: int, media_type: str) -> bool:
         return False
     async with pool.acquire() as conn:
         await conn.execute("""
-            INSERT INTO tmdb_plataformas (tmdb_id, media_type, proveedores, ultima_fecha, comprobado_en)
-            VALUES ($1, $2, $3::int[], $4::date, NOW())
+            INSERT INTO tmdb_plataformas (tmdb_id, media_type, proveedores, ultima_fecha,
+                                          comprobado_en, version)
+            VALUES ($1, $2, $3::int[], $4::date, NOW(), $5)
             ON CONFLICT (tmdb_id, media_type) DO UPDATE
-               SET proveedores = $3::int[], ultima_fecha = $4::date, comprobado_en = NOW()
+               SET proveedores = $3::int[], ultima_fecha = $4::date,
+                   comprobado_en = NOW(), version = $5
         """, tmdb_id, media_type, _proveedores(data),
-            date.fromisoformat(fecha) if fecha else None)
+            date.fromisoformat(fecha) if fecha else None, VERSION)
     return True
 
 

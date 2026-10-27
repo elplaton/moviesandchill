@@ -9,6 +9,7 @@ const LINKS = [
   { to: '/', label: 'Inicio', end: true },
   { to: '/peliculas', label: 'Películas' },
   { to: '/series', label: 'Series' },
+  { to: '/plataformas', label: 'Plataformas' },
   { to: '/favoritos', label: 'Favoritos' },
   { to: '/descargas', label: 'Descargas' },
 ];

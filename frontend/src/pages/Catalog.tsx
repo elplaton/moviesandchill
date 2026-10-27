@@ -8,6 +8,7 @@ import Player from '../components/Player';
 import TitleSheet from '../components/TitleSheet';
 import Button from '../components/ui/Button';
 import { useCatalog } from '../hooks/useCatalog';
+import type { Fuente } from '../hooks/useCarriles';
 import { cachedContinueWatching, clearWatched, continueWatching, type Watched } from '../utils/progress';
 import { IconInfo, IconPlay } from '../components/ui/Icon';
 import type { BrowseItem } from '../types';
@@ -16,22 +17,27 @@ interface Props {
   /** Sin filtro es la portada (con destacado); con filtro, Películas o Series. */
   filter?: 'movie' | 'series';
   heading?: string;
+  /** Plataformas: una fila por Netflix, HBO Max... en vez de la portada. */
+  fuente?: Fuente;
 }
 
-/** Portada, Películas y Series: los tres son carriles sobre el mismo catálogo. */
-export default function Catalog({ filter, heading }: Props) {
+/** Portada, Películas, Series y Plataformas: todo son carriles sobre el
+ *  mismo catálogo; lo único que cambia es de dónde salen las filas. */
+export default function Catalog({ filter, heading, fuente = 'portada' }: Props) {
   const { rows, loading, cargarMas, scrollXDe, recordarScrollX,
-          sheet, open, cerrar } = useCatalog(filter);
+          sheet, open, cerrar } = useCatalog(filter, fuente);
+  // El destacado y "Continuar viendo" son cosa de la portada.
+  const portada = !filter && fuente === 'portada';
   // "Continuar viendo" solo en la portada: en Películas y Series estorbaría.
   // De la caché primero para que esté ahí sin esperar a la red, y acto seguido
   // lo que diga el servidor, que es quien sabe lo visto en el móvil o la tele.
-  const [resume, setResume] = useState<Watched[]>(() => (filter ? [] : cachedContinueWatching()));
+  const [resume, setResume] = useState<Watched[]>(() => (portada ? cachedContinueWatching() : []));
   const [playing, setPlaying] = useState<Watched | null>(null);
 
   const refrescar = useCallback(() => {
-    if (filter) return;
+    if (!portada) return;
     continueWatching().then(setResume).catch(() => {});
-  }, [filter]);
+  }, [portada]);
 
   useEffect(() => { refrescar(); }, [refrescar]);
 
@@ -45,10 +51,10 @@ export default function Catalog({ filter, heading }: Props) {
 
   // El destacado sale de Novedades, que es lo más reciente y con mejor imagen.
   const hero = useMemo(() => {
-    if (filter) return null;
+    if (!portada) return null;
     const pool = rows.find(r => r.genre === 'Novedades')?.items || rows[0]?.items || [];
     return pool.find(i => i.backdrop) || pool[0] || null;
-  }, [rows, filter]);
+  }, [rows, portada]);
 
   const card = (item: BrowseItem, rowKey: string) => (
     <Card
@@ -102,7 +108,13 @@ export default function Catalog({ filter, heading }: Props) {
       ))}
 
       {loading && <p className="px-gutter py-10 text-base text-nf-faint">Cargando catálogo…</p>}
-      {!loading && rows.length === 0 && (
+      {!loading && rows.length === 0 && fuente === 'plataformas' && (
+        <div className="px-gutter py-16">
+          <p className="text-lg text-nf-dim">Todavía no hay nada que enseñar aquí.</p>
+          <p className="mt-1 text-base text-nf-faint">El servidor está mirando en qué plataforma está cada título; vuelve en unos minutos.</p>
+        </div>
+      )}
+      {!loading && rows.length === 0 && fuente === 'portada' && (
         <div className="px-gutter py-16">
           <p className="text-lg text-nf-dim">Todavía no hay nada indexado.</p>
           <p className="mt-1 text-base text-nf-faint">Añade canales desde Administración y espera a que termine el escaneo.</p>

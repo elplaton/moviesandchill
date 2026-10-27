@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { fetchMediaFiles } from '../services/media';
 import type { BrowseItem, TMDBMetadata } from '../types';
 import type { SheetInput } from '../components/TitleSheet';
-import { useCarriles } from './useCarriles';
+import { useCarriles, type Fuente } from './useCarriles';
 
 /** Identifica un título en la URL: 's' o 'm' delante del id de TMDB, porque
  *  los ids de películas y series son espacios independientes. */
@@ -114,8 +114,8 @@ export function useSheet() {
  * servidor: filtrar en el cliente dejaba carriles de ocho tarjetas en cuanto
  * las páginas fueron de veinte.
  */
-export function useCatalog(filter?: 'movie' | 'series') {
-  const carriles = useCarriles(filter);
+export function useCatalog(filter?: 'movie' | 'series', fuente: Fuente = 'portada') {
+  const carriles = useCarriles(filter, fuente);
   const sheet = useSheet();
   return { ...carriles, ...sheet, rows: carriles.carriles };
 }

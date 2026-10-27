@@ -6,6 +6,7 @@ import Toasts from './components/Toasts';
 import Login from './pages/Login';
 import Home from './pages/Home';
 import Search from './pages/Search';
+import Plataformas from './pages/Plataformas';
 import Title from './pages/Title';
 import Downloads from './pages/Downloads';
 import Favorites from './pages/Favorites';
@@ -131,6 +132,7 @@ export default function App() {
       <Routes>
         <Route path="/" element={<Home />} />
         <Route path="/buscar" element={<Search />} />
+        <Route path="/plataformas" element={<Plataformas />} />
         <Route path="/t/:kind/:id" element={<Title />} />
         <Route path="/favoritos" element={<Favorites />} />
         <Route path="/descargas" element={<Downloads />} />
