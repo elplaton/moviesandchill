@@ -6,6 +6,7 @@ import AdminUsers from './admin/AdminUsers';
 import AdminDownloads from './admin/AdminDownloads';
 import AdminTelegram from './admin/AdminTelegram';
 import AdminNovedades from './admin/AdminNovedades';
+import AdminPeticiones from './admin/AdminPeticiones';
 import Channels from './Channels';
 import Settings from './Settings';
 import Logs from './Logs';
@@ -15,6 +16,7 @@ const TABS = [
   { id: 'descargas', label: 'Descargas' },
   { id: 'canales', label: 'Canales' },
   { id: 'novedades', label: 'Novedades' },
+  { id: 'peticiones', label: 'Peticiones' },
   { id: 'telegram', label: 'Telegram' },
   { id: 'ajustes', label: 'Ajustes' },
   { id: 'registros', label: 'Registros' },
@@ -58,6 +60,7 @@ export default function Admin() {
         {tab === 'descargas' && <AdminDownloads onToast={show} />}
         {tab === 'canales' && <Channels embedded />}
         {tab === 'novedades' && <AdminNovedades />}
+        {tab === 'peticiones' && <AdminPeticiones onToast={show} />}
         {tab === 'telegram' && <AdminTelegram onToast={show} />}
         {tab === 'ajustes' && <Settings embedded />}
         {tab === 'registros' && <Logs embedded />}

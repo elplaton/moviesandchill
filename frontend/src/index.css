@@ -87,6 +87,11 @@ body {
    nada, y en el onboarding (donde la accion es un rotulo, no un boton) no se
    podia seleccionar ninguna pelicula. */
 .card:focus-within .card-info :is(button, a) { pointer-events: auto; }
+/* Abierta a mano: en un top, pulsar la carátula de algo que no tenemos saca el
+   botón de pedir. Sin ratón no hay hover, y Safari no da el foco a un botón
+   al pulsarlo, así que ni `:hover` ni `:focus-within` lo enseñarían. */
+.card-info.card-info-on { opacity: 1; transform: translateY(0); }
+.card-info.card-info-on :is(button, a) { pointer-events: auto; }
 
 /* Flechas del carril: solo aparecen si hay a dónde ir y el ratón está encima. */
 .rail-arrow { opacity: 0; transition: opacity 160ms ease-out; }

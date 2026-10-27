@@ -23,7 +23,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiFetch } from '../services/api';
-import type { BrowseItem, BrowseRow } from '../types';
+import type { BrowseItem, BrowseRow, SeccionFila, TopFila } from '../types';
 
 /** Lo que se pide cada vez que se llega al borde del carril. */
 export const PAGINA = 20;
@@ -49,6 +49,12 @@ export interface Carril {
    * cuantas tarjetas se han ido de verdad, no cuantos puestos se han pedido.
    */
   shift: number;
+  /** Lo que se enseña como titulo de la fila; si no hay, `genre`. */
+  titulo?: string;
+  /** Plataforma de la fila (solo en la pestaña Plataformas). */
+  seccion?: SeccionFila;
+  /** La fila es un top (puesto grande en cada tarjeta, no pagina). */
+  top?: TopFila;
 }
 
 interface Memoria {
@@ -92,7 +98,27 @@ function aCarril(row: BrowseRow): Carril {
     // servidor quito una repetida, el puesto sigue gastado.
     hasta: Math.min(total, Math.max(items.length, PAGINA)),
     shift: 0,
+    titulo: row.titulo,
+    seccion: row.seccion,
+    top: row.top,
   };
+}
+
+/**
+ * Apunta como pedida por mi una tarjeta de top que no tenemos, en **todas**
+ * las portadas guardadas: el mismo titulo puede estar en el top de la portada
+ * y en el de su plataforma, y al volver a la otra pestaña tiene que decir
+ * «Pedida» igual. Va sobre la memoria del modulo y no sobre el estado del
+ * componente porque es la memoria la que sobrevive a ir y volver de una ficha.
+ */
+function apuntarPedida(tmdbId: number, mediaType: string) {
+  for (const m of memoria.values()) {
+    m.carriles = m.carriles.map(c => !c.top ? c : {
+      ...c,
+      items: c.items.map(i => i.tmdb_id === tmdbId && i.media_type === mediaType
+        ? { ...i, peticion: { estado: 'enviada' as const, mia: true } } : i),
+    });
+  }
 }
 
 /** Mezcla una pagina nueva en la ventana del carril. Sin estado: es lo que se
@@ -213,5 +239,11 @@ export function useCarriles(filter?: 'movie' | 'series', fuente: Fuente = 'porta
     if (m) m.scrollX[genre] = x;
   }, [k]);
 
-  return { carriles, loading, cargarMas, scrollXDe, recordarScrollX };
+  const marcarPedida = useCallback((tmdbId: number, mediaType: string) => {
+    apuntarPedida(tmdbId, mediaType);
+    const m = memoria.get(k);
+    if (m) setCarriles(m.carriles);
+  }, [k]);
+
+  return { carriles, loading, cargarMas, scrollXDe, recordarScrollX, marcarPedida };
 }

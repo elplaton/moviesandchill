@@ -22,7 +22,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiFetch } from '../services/api';
-import type { BrowseItem, BrowseRow } from '../types';
+import type { BrowseItem, BrowseRow, BrowseSeccion, BrowseTop } from '../types';
 
 /** Lo que se pide cada vez que se llega al borde del carril. */
 export const PAGINA = 20;
@@ -32,7 +32,14 @@ export const VENTANA = 80;
 const FRESCO = 10 * 60 * 1000;
 
 export interface Carril {
+  /** Clave unica de la fila: con ella se pagina y se recuerda su scroll. */
   genre: string;
+  /** Lo que se enseña como titulo, si no es `genre`. */
+  titulo?: string;
+  /** A que plataforma pertenece (solo en la pestaña Plataformas). */
+  seccion?: BrowseSeccion;
+  /** La fila es un top: se pinta con el numero del puesto y no pagina. */
+  top?: BrowseTop;
   /** Con que se piden mas paginas ("novedades", "genero:Accion", "favoritos"...).
    *  null = fila que no se pagina (el respaldo de recomendados, por ejemplo). */
   key: string | null;
@@ -83,6 +90,9 @@ function aCarril(row: BrowseRow): Carril {
   const total = row.total ?? items.length;
   return {
     genre: row.genre,
+    titulo: row.titulo,
+    seccion: row.seccion,
+    top: row.top,
     key: row.key ?? null,
     items,
     total,

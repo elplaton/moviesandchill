@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import Shell from '../components/Shell';
 import Rail from '../components/Rail';
 import Card from '../components/Card';
+import TopRail from '../components/TopRail';
 import ContinueCard from '../components/ContinueCard';
 import Hero from '../components/Hero';
 import Player from '../components/Player';
@@ -55,7 +56,9 @@ export default function Catalog({ filter, heading, fuente = 'portada' }: Props) 
     if (!portada) return null;
     const pool = rows.find(r => r.key === 'plataforma:todas')?.items
       || rows.find(r => r.genre === 'Novedades')?.items || rows[0]?.items || [];
-    return pool.find(i => i.backdrop) || pool[0] || null;
+    // Un top trae también lo que no tenemos, y eso no tiene ficha que abrir.
+    const nuestros = pool.filter(i => i.en_catalogo !== false);
+    return nuestros.find(i => i.backdrop) || nuestros[0] || null;
   }, [rows, portada]);
 
   const card = (item: BrowseItem, rowKey: string) => (
@@ -64,7 +67,8 @@ export default function Catalog({ filter, heading, fuente = 'portada' }: Props) 
       title={item.title}
       poster={item.poster}
       rating={item.rating}
-      meta={item.plataforma ? item.plataforma
+      meta={item.subtitulo ? item.subtitulo
+        : item.plataforma ? item.plataforma
         : item.media_type === 'series' && item.episode_count
         ? `${item.episode_count} episodios`
         : item.year ? String(item.year) : undefined}
@@ -99,16 +103,40 @@ export default function Catalog({ filter, heading, fuente = 'portada' }: Props) 
       {/* Las filas de género se piden de veinte en veinte al acercarse al final
           del carril, y sueltan las tarjetas de la izquierda para no acumular
           mil nodos; `shift` es lo que deja el scroll donde estaba. */}
-      {rows.map(row => (
-        <Rail key={row.genre} title={row.genre}
-          onNearEnd={row.key ? () => cargarMas(row.genre, 1) : undefined}
-          onNearStart={row.key ? () => cargarMas(row.genre, -1) : undefined}
-          shift={row.shift}
-          scrollX={scrollXDe(row.genre)}
-          onScrollX={x => recordarScrollX(row.genre, x)}>
-          {row.items.map(item => card(item, row.genre))}
-        </Rail>
-      ))}
+      {rows.map((row, i) => {
+        const titulo = row.titulo ?? row.genre;
+        // En Plataformas las filas llegan agrupadas (todas las de Netflix,
+        // luego las de HBO Max...): la cabecera va al empezar cada grupo.
+        const seccion = row.seccion && row.seccion.clave !== rows[i - 1]?.seccion?.clave
+          ? row.seccion : null;
+        return (
+          <Fragment key={row.genre}>
+            {seccion && (
+              <div className={`mb-4 flex items-center gap-3 px-gutter ${i > 0 ? 'mt-14' : ''}`}>
+                {seccion.logo && (
+                  <img src={seccion.logo} alt="" loading="lazy"
+                    className="h-11 w-11 shrink-0 rounded-[10px] bg-nf-surface object-cover" />
+                )}
+                <h2 className="text-title font-bold">{seccion.nombre}</h2>
+              </div>
+            )}
+            {row.top ? (
+              <TopRail title={titulo} top={row.top} items={row.items} onOpen={open}
+                scrollX={scrollXDe(row.genre)}
+                onScrollX={x => recordarScrollX(row.genre, x)} />
+            ) : (
+              <Rail title={titulo}
+                onNearEnd={row.key ? () => cargarMas(row.genre, 1) : undefined}
+                onNearStart={row.key ? () => cargarMas(row.genre, -1) : undefined}
+                shift={row.shift}
+                scrollX={scrollXDe(row.genre)}
+                onScrollX={x => recordarScrollX(row.genre, x)}>
+                {row.items.map(item => card(item, row.genre))}
+              </Rail>
+            )}
+          </Fragment>
+        );
+      })}
 
       {loading && <p className="px-gutter py-10 text-base text-nf-faint">Cargando catálogo…</p>}
       {!loading && rows.length === 0 && fuente === 'plataformas' && (

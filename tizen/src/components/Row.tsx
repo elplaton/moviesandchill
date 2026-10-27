@@ -11,6 +11,13 @@ interface Props {
   minHeight?: number;
   /** Margen izquierdo; por defecto el del contenido. */
   inset?: number | string;
+  /** Línea pequeña bajo el título (de dónde salen los datos de un top). */
+  note?: string;
+  /** Algo encima del título, dentro de la fila (el logo de una plataforma).
+   *  Va dentro y no como hermano para que la columna siga teniendo una fila
+   *  por hijo: al enfocar, Screen alinea el borde de arriba de la fila, y así
+   *  la cabecera queda a la vista justo encima de su primera fila. */
+  cabecera?: ReactNode;
 }
 
 const EDGE = 0; // la tarjeta enfocada se alinea con el borde izquierdo del contenido
@@ -21,7 +28,7 @@ const EDGE = 0; // la tarjeta enfocada se alinea con el borde izquierdo del cont
  * al margen izquierdo, como en cualquier interfaz de television: asi siempre
  * hay carril por delante y se sabe por donde se va.
  */
-export default function Row({ title, children, index, id, minHeight, inset }: Props) {
+export default function Row({ title, children, index, id, minHeight, inset, note, cabecera }: Props) {
   const left = inset ?? 'var(--content-x)';
   const trackRef = useRef<HTMLDivElement>(null);
   const offsetRef = useRef(0);
@@ -39,7 +46,9 @@ export default function Row({ title, children, index, id, minHeight, inset }: Pr
 
   return (
     <FocusScope id={id} index={index} orientation="horizontal" onChildFocus={onChildFocus} className="relative mb-9">
-      <h2 className="text-row font-semibold text-tv-text mb-3" style={{ paddingLeft: left }}>{title}</h2>
+      {cabecera && <div style={{ paddingLeft: left }}>{cabecera}</div>}
+      <h2 className={`text-row font-semibold text-tv-text ${note ? 'mb-1' : 'mb-3'}`} style={{ paddingLeft: left }}>{title}</h2>
+      {note && <p className="text-caption text-tv-text3 mb-2" style={{ paddingLeft: left }}>{note}</p>}
       {/* pt/pb dejan sitio a la escala de la tarjeta enfocada (sube ~17 px) sin recortarla ni pisar el titulo */}
       <div className="relative overflow-hidden" style={{ minHeight: minHeight ?? 340, paddingLeft: left }}>
         <div ref={trackRef} className="rail-track flex space-x-[18px] pt-[30px] pb-6" style={{ transform: 'translate3d(0,0,0)' }}>

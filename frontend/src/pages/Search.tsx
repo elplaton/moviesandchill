@@ -4,6 +4,7 @@ import Shell from '../components/Shell';
 import Card from '../components/Card';
 import TitleSheet, { type SheetInput } from '../components/TitleSheet';
 import Button from '../components/ui/Button';
+import PedirTmdb from '../components/PedirTmdb';
 import { guardarUltimaBusqueda, leerUltimaBusqueda, ultimaBusquedaEnMemoria } from '../services/estado';
 import { apiFetch } from '../services/api';
 import { fetchMediaFiles } from '../services/media';
@@ -157,11 +158,16 @@ export default function Search() {
         )}
 
         {!busy && text.trim().length >= 2 && results.length === 0 && (
-          <div>
-            <p className="text-lg text-nf-dim">Nada con «{text.trim()}».</p>
-            <p className="mt-1 text-base text-nf-faint">Prueba con menos palabras o con el título original.</p>
+          <div className="mb-10">
+            <p className="text-lg text-nf-dim">Nada con «{text.trim()}» en el catálogo.</p>
+            <p className="mt-1 text-base text-nf-faint">Prueba con menos palabras o con el título original, o pídelo.</p>
           </div>
         )}
+
+        {/* Pedir lo que no está: un botón si no ha salido nada, un enlace al
+            final si sí (por si no es el que se buscaba). No mientras busca:
+            "no hay resultados" aún no se sabe. */}
+        {!busy && <PedirTmdb termino={text} sinResultados={results.length === 0} />}
       </div>
 
       <div className="h-16" />

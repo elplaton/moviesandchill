@@ -2,6 +2,8 @@ import { useCallback, useEffect, useLayoutEffect, useRef, type ReactNode } from 
 
 interface Props {
   title: string;
+  /** Una linea pequeña bajo el titulo (de donde salen los datos de un top). */
+  subtitle?: string;
   children: ReactNode;
   action?: ReactNode;
   /** Se pide mas al acercarse al final del carril (o al principio). */
@@ -26,7 +28,7 @@ function paso(el: HTMLElement): number {
   return a ? a.getBoundingClientRect().width : 0;
 }
 
-export default function Row({ title, children, action, onNearEnd, onNearStart,
+export default function Row({ title, subtitle, children, action, onNearEnd, onNearStart,
                               shift, scrollX, onScrollX }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   // Por referencia y no en las dependencias: el padre los recrea en cada
@@ -77,7 +79,10 @@ export default function Row({ title, children, action, onNearEnd, onNearStart,
   return (
     <section className="mb-6">
       <div className="flex items-baseline justify-between px-4 mb-2">
-        <h2 className="text-[17px] font-semibold">{title}</h2>
+        <div className="min-w-0">
+          <h2 className="text-[17px] font-semibold">{title}</h2>
+          {subtitle && <p className="text-[11px] text-nf-text3 mt-0.5">{subtitle}</p>}
+        </div>
         {action}
       </div>
       <div ref={ref} onScroll={medir}

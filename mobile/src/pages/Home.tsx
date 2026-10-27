@@ -8,13 +8,14 @@ import { IClose, IPlay, IStar } from '../components/Icons';
 import { fondoDeTitulo } from '../utils/text';
 import { useCarriles } from '../hooks/useCarriles';
 import Secciones from '../components/Secciones';
+import TopRow from '../components/TopRow';
 
 /** Portada: un destacado grande, "Continuar viendo" y los carriles del servidor. */
 export default function Home() {
   // Los carriles viven en un modulo, no en el componente: al volver de una
   // ficha estan las mismas filas, con las mismas caratulas ya cargadas y en
   // la misma posicion. Pedirlos otra vez devolveria un orden distinto.
-  const { carriles: rows, loading, cargarMas, scrollXDe, recordarScrollX } = useCarriles();
+  const { carriles: rows, loading, cargarMas, scrollXDe, recordarScrollX, marcarPedida } = useCarriles();
   // De la cache primero, para que la fila este ahi al abrir la app, y acto
   // seguido lo que diga el servidor (que es quien manda y quien sabe lo visto
   // en la tele o en el escritorio).
@@ -43,7 +44,9 @@ export default function Home() {
   // El destacado sale de lo ultimo que ha llegado a alguna plataforma (es de
   // lo que se habla), y si esa fila no esta, de Novedades.
   const hero = rows.find(r => r.key === 'plataforma:todas')?.items.find(i => i.backdrop)
-    || rows.find(r => r.genre === 'Novedades')?.items[0] || rows[0]?.items[0];
+    || rows.find(r => r.genre === 'Novedades')?.items[0]
+    // El respaldo nunca es algo que no tenemos (un top trae titulos sin ficha).
+    || rows.flatMap(r => r.items).find(i => i.en_catalogo !== false);
   const link = (i: { tmdb_id: number; media_type: string }) => `/t/${i.media_type}/${i.tmdb_id}`;
 
   return (
@@ -112,8 +115,13 @@ export default function Home() {
       {/* Las filas de genero se piden de veinte en veinte al acercarse al final
           y sueltan las caratulas de la izquierda, asi que el carril no se
           acaba nunca y el movil no acumula mil nodos. */}
-      {rows.map(r => (
-        <Row key={r.genre} title={r.genre}
+      {rows.map(r => r.top ? (
+        // Los tops («Top 15 películas en tendencia en España») traen tambien
+        // lo que no tenemos, para pedirlo: van con su propia fila.
+        <TopRow key={r.genre} carril={r} scrollX={scrollXDe(r.genre)}
+          onScrollX={x => recordarScrollX(r.genre, x)} onPedida={marcarPedida} />
+      ) : (
+        <Row key={r.genre} title={r.titulo ?? r.genre}
           onNearEnd={r.key ? () => cargarMas(r.genre, 1) : undefined}
           onNearStart={r.key ? () => cargarMas(r.genre, -1) : undefined}
           shift={r.shift}

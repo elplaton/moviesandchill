@@ -3,6 +3,8 @@ import { IconChevronL, IconChevronR } from './ui/Icon';
 
 interface Props {
   title: string;
+  /** Línea pequeña bajo el título (de dónde salen los datos de un top). */
+  subtitle?: ReactNode;
   children: ReactNode;
   /** Enlace opcional a la derecha del título ("Ver todo"). */
   action?: ReactNode;
@@ -45,7 +47,7 @@ function paso(el: HTMLElement): number {
  * carril es invisible salvo que el ratón tenga rueda horizontal. Aparecen al
  * pasar por encima y solo cuando hay a dónde ir, y avanzan una pantalla justa.
  */
-export default function Rail({ title, children, action, onNearEnd, onNearStart,
+export default function Rail({ title, subtitle, children, action, onNearEnd, onNearStart,
                                shift, scrollX, onScrollX }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const [edges, setEdges] = useState({ left: false, right: false });
@@ -110,7 +112,10 @@ export default function Rail({ title, children, action, onNearEnd, onNearStart,
   return (
     <section className="rail-wrap relative mb-10">
       <div className="mb-3 flex items-baseline justify-between px-gutter">
-        <h2 className="text-lg font-semibold">{title}</h2>
+        <div>
+          <h2 className="text-lg font-semibold">{title}</h2>
+          {subtitle && <p className="mt-0.5 text-xs text-nf-faint">{subtitle}</p>}
+        </div>
         {action}
       </div>
 

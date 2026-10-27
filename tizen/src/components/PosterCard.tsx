@@ -17,6 +17,16 @@ interface Props {
   /** Anillo de descarga en curso, 0-100. */
   downloading?: number;
   busyLabel?: string;
+  /** Puesto en un top: el número grande a la izquierda de la carátula. */
+  puesto?: number;
+  /** Carátula atenuada con esta etiqueta encima ("No la tenemos"). */
+  aviso?: string;
+}
+
+/** El número del top: ancho reservado según cifras y lo que lo pisa la carátula. */
+const SOLAPE = 32;
+function anchoPuesto(n: number): number {
+  return n < 10 ? 150 : 250;
 }
 
 function hashHue(s: string): number {
@@ -30,7 +40,7 @@ function hashHue(s: string): number {
  * arriba cuando la tarjeta tiene el foco. Sin caratula se pinta el titulo
  * grande sobre un degradado.
  */
-function PosterCard({ item, index, focusKey, autoFocus, onSelect, caption, downloaded, downloading, busyLabel }: Props) {
+function PosterCard({ item, index, focusKey, autoFocus, onSelect, caption, downloaded, downloading, busyLabel, puesto, aviso }: Props) {
   const [broken, setBroken] = useState(false);
   const handleEnter = useCallback(() => onSelect(item), [onSelect, item]);
   const handleFocus = useCallback(() => setFeatured(item), [item]);
@@ -46,15 +56,23 @@ function PosterCard({ item, index, focusKey, autoFocus, onSelect, caption, downl
 
   const hue = hashHue(item.title);
   const progress = item.progress;
+  // Con puesto, la tarjeta enfocable es número + carátula: así el número
+  // escala con ella y el carril alinea el número (no la carátula) al margen.
+  const slot = puesto !== undefined ? anchoPuesto(puesto) : 0;
 
   return (
     <div
       ref={ref}
-      className="tv-card relative shrink-0"
-      style={{ width: 'var(--card-w)' }}
+      className={`tv-card relative shrink-0${puesto !== undefined ? ' flex items-end' : ''}`}
+      style={{ width: puesto !== undefined ? `calc(var(--card-w) + ${slot - SOLAPE}px)` : 'var(--card-w)' }}
       onMouseEnter={onMouseEnter}
       onClick={handleEnter}
     >
+      {puesto !== undefined && (
+        <span className={`tv-puesto shrink-0${puesto >= 10 ? ' tv-puesto-2' : ''}`} aria-hidden="true"
+          style={{ width: slot, marginRight: -SOLAPE }}>{puesto}</span>
+      )}
+      <div className="relative shrink-0" style={{ width: 'var(--card-w)' }}>
       <div className="tv-poster relative rounded-md overflow-hidden bg-tv-surface" style={{ width: 'var(--card-w)', height: 'var(--card-h)' }}>
         {item.poster && !broken ? (
           <img src={item.poster} alt="" className="absolute inset-0 w-full h-full object-cover"
@@ -86,6 +104,14 @@ function PosterCard({ item, index, focusKey, autoFocus, onSelect, caption, downl
           </div>
         )}
 
+        {aviso && (
+          // Velo solido y no un filtro: en la GPU de la tele un grayscale es
+          // un pase mas por tarjeta, y a tres metros el velo se lee igual.
+          <div className="absolute inset-0 bg-black/60 flex items-end justify-center p-3">
+            <span className="px-3 py-1 rounded bg-black/80 border border-white/25 text-caption font-semibold text-tv-text truncate">{aviso}</span>
+          </div>
+        )}
+
         {progress !== undefined && progress > 0 && (
           <div className="tv-card-progress absolute left-0 right-0 bottom-0 h-[6px] bg-white/25">
             <div className="h-full bg-tv-red" style={{ width: `${Math.round(progress * 100)}%` }} />
@@ -95,13 +121,15 @@ function PosterCard({ item, index, focusKey, autoFocus, onSelect, caption, downl
       {caption && (
         <p className="mt-2 text-caption text-tv-text2 truncate text-center" style={{ width: 'var(--card-w)' }}>{caption}</p>
       )}
+      </div>
     </div>
   );
 }
 
 function same(a: Props, b: Props) {
   return a.item === b.item && a.index === b.index && a.focusKey === b.focusKey && a.autoFocus === b.autoFocus
-    && a.caption === b.caption && a.downloaded === b.downloaded && a.downloading === b.downloading && a.busyLabel === b.busyLabel;
+    && a.caption === b.caption && a.downloaded === b.downloaded && a.downloading === b.downloading && a.busyLabel === b.busyLabel
+    && a.puesto === b.puesto && a.aviso === b.aviso;
 }
 
 export default memo(PosterCard, same);

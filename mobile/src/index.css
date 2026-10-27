@@ -80,6 +80,44 @@ html.instalada .app-shell {
 }
 html.instalada .player-shell { top: 0; bottom: 0; height: auto; }
 
+/*
+ * La hoja de pedir un titulo de un top (TopRow): por portal en el <body> por
+ * lo mismo que el reproductor, y con su mismo armazon para que el borde de
+ * abajo sea el de lo que se ve y no quede detras de la barra de Safari. Por
+ * debajo de los avisos (z-60), que son los que dicen si se ha pedido.
+ */
+.hoja-shell {
+  position: fixed;
+  top: var(--app-top, 0px);
+  left: 0;
+  right: 0;
+  height: 100dvh;
+  height: var(--app-h, 100dvh);
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+}
+html.instalada .hoja-shell { top: 0; bottom: 0; height: auto; }
+@keyframes subir { from { transform: translateY(100%); } to { transform: translateY(0); } }
+.subir { animation: subir 220ms ease-out; }
+
+/*
+ * El puesto de un top: un numero enorme hueco, solo el contorno, que la
+ * caratula tapa en parte, como el Top 10 de Netflix. El relleno es el fondo
+ * de la app y no transparente para que el trazo de una cifra no se vea a
+ * traves de la otra cuando se solapan (el 10, el 11...).
+ */
+.puesto-top {
+  font-size: 150px;
+  font-weight: 900;
+  line-height: 0.75;
+  letter-spacing: -0.12em;
+  color: #141414;
+  -webkit-text-stroke: 3px #8a8a8a;
+  paint-order: stroke fill;
+}
+
 /* Lo unico que se desplaza. Con overscroll contain el rebote no arrastra la pagina. */
 .app-main { flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
 ::-webkit-scrollbar { display: none; }

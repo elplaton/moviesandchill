@@ -1,8 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { apiFetch } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import { toast } from '../utils/toast';
+import { chatsDestino, guardarAjustes, peticionesAdmin, TIPO_PETICION, vistaPrevia,
+         type AjustesPeticiones, type ChatDestino, type PeticionAdmin } from '../services/peticiones';
 
 const GB = 1024 ** 3;
 const fmt = (b: number | null | undefined) => b == null ? 'Sin límite' : `${(b / GB).toFixed(b >= GB * 10 ? 0 : 1)} GB`;
@@ -10,7 +12,8 @@ const input = 'w-full h-11 rounded-xl bg-white/10 border border-white/10 px-4 te
 // Mismo orden y mismas secciones que el panel de escritorio.
 const TABS = [
   ['usuarios', 'Usuarios'], ['descargas', 'Descargas'], ['canales', 'Canales'],
-  ['novedades', 'Novedades'], ['telegram', 'Telegram'], ['servidor', 'Ajustes'],
+  ['novedades', 'Novedades'], ['peticiones', 'Peticiones'], ['telegram', 'Telegram'],
+  ['servidor', 'Ajustes'],
   ['registros', 'Registros'],
 ] as const;
 
@@ -428,6 +431,174 @@ function Novedades() {
   );
 }
 
+const TIPO_CHAT: Record<ChatDestino['tipo'], string> = { canal: 'Canal', grupo: 'Grupo', bot: 'Bot', persona: 'Persona' };
+const ESTADO_PETICION: Record<PeticionAdmin['estado'], [string, string]> = {
+  enviada: ['Pedida', 'bg-white/10 text-nf-text3'],
+  conseguida: ['Ya está', 'bg-nf-ok/15 text-green-300'],
+  fallida: ['Falló', 'bg-nf-red/15 text-red-300'],
+};
+
+/** A qué chat de Telegram van las peticiones, con qué texto, y todo lo pedido. */
+function Peticiones() {
+  const [ajustes, setAjustes] = useState<AjustesPeticiones | null>(null);
+  const [lista, setLista] = useState<PeticionAdmin[]>([]);
+  const [error, setError] = useState('');
+  // Chats: se cargan solo al pulsar, porque el servidor recorre todos los
+  // dialogos de la cuenta de Telegram y tarda unos segundos.
+  const [chats, setChats] = useState<ChatDestino[] | null>(null);
+  const [cargandoChats, setCargandoChats] = useState(false);
+  const [filtro, setFiltro] = useState('');
+  const [plantilla, setPlantilla] = useState('');
+  const [previa, setPrevia] = useState('');
+  const [guardando, setGuardando] = useState(false);
+  const previaReq = useRef(0);
+
+  useEffect(() => {
+    peticionesAdmin().then(d => {
+      setLista(d.peticiones || []);
+      setAjustes(d.ajustes); setPlantilla(d.ajustes.plantilla);
+    }).catch(e => setError(e instanceof Error ? e.message : 'No se han podido cargar las peticiones'));
+  }, []);
+
+  // Vista previa con retardo, y solo la última respuesta cuenta.
+  useEffect(() => {
+    if (!ajustes) return;
+    const mine = ++previaReq.current;
+    const t = setTimeout(() => {
+      vistaPrevia(plantilla).then(texto => { if (mine === previaReq.current) setPrevia(texto); })
+        .catch(() => { if (mine === previaReq.current) setPrevia(''); });
+    }, 400);
+    return () => clearTimeout(t);
+  }, [plantilla, !!ajustes]);
+
+  const abrirChats = async () => {
+    setCargandoChats(true); setError('');
+    try { setChats(await chatsDestino()); }
+    catch (e) { setError(e instanceof Error ? e.message : 'No se han podido cargar los chats'); }
+    finally { setCargandoChats(false); }
+  };
+  const elegir = async (c: ChatDestino) => {
+    if (!c.puede_escribir) return;
+    try {
+      setAjustes(await guardarAjustes({ chat_id: c.id, chat_nombre: c.nombre }));
+      setChats(null); setFiltro('');
+      toast(`Las peticiones irán a ${c.nombre}`, 'ok');
+    } catch (e) { toast(e instanceof Error ? e.message : 'No se ha podido guardar', 'error', 6000); }
+  };
+  const guardarPlantilla = async () => {
+    setGuardando(true);
+    try { const a = await guardarAjustes({ plantilla }); setAjustes(a); setPlantilla(a.plantilla); toast('Plantilla guardada', 'ok'); }
+    catch (e) { toast(e instanceof Error ? e.message : 'No se ha podido guardar', 'error', 6000); }
+    finally { setGuardando(false); }
+  };
+
+  const cuando = (at: string | null) => {
+    if (!at) return '';
+    const t = new Date(at);
+    return Number.isNaN(t.getTime()) ? at : t.toLocaleDateString('es-ES', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+  };
+  const visibles = (chats || []).filter(c => c.nombre.toLowerCase().includes(filtro.trim().toLowerCase()));
+  const boton = 'w-full h-11 rounded-xl text-[15px] font-semibold disabled:opacity-40';
+
+  if (!ajustes) return <p className="text-[14px] text-nf-text3">{error || 'Cargando…'}</p>;
+  return (
+    <div>
+      <section className="rounded-2xl bg-white/5 p-4 mb-4">
+        <p className="text-[13px] font-semibold text-nf-text2 mb-1">Chat de destino</p>
+        <p className="text-[15px]">{ajustes.chat_id ? ajustes.chat_nombre || `Chat ${ajustes.chat_id}` : 'Sin elegir'}</p>
+        <p className="text-[12px] text-nf-text3 mt-1 leading-relaxed">
+          {ajustes.chat_id ? 'Cada petición se escribe ahí con la cuenta de Telegram del servidor.'
+            : 'Hasta que se elija uno, nadie puede pedir nada.'}
+          {` Cada cuenta puede pedir ${ajustes.limite_dia} al día.`}
+        </p>
+        {error && <p className="mt-3 text-[13px] text-red-300">{error}</p>}
+        {chats === null ? (
+          <button onClick={abrirChats} disabled={cargandoChats} className={`${boton} mt-3 bg-white/10`}>
+            {cargandoChats ? 'Cargando chats… (tarda unos segundos)' : ajustes.chat_id ? 'Cambiar chat' : 'Elegir chat'}
+          </button>
+        ) : (
+          <div className="mt-3">
+            <input className={input} value={filtro} onChange={e => setFiltro(e.target.value)} placeholder="Buscar por nombre" autoCapitalize="none" />
+            <div className="mt-2 max-h-[50vh] overflow-y-auto rounded-xl bg-black/20 divide-y divide-white/5">
+              {visibles.length === 0 && <p className="p-3 text-[13px] text-nf-text3">Ningún chat con ese nombre.</p>}
+              {visibles.map(c => (
+                <button key={c.id} onClick={() => elegir(c)} disabled={!c.puede_escribir}
+                  className={`w-full text-left flex items-center gap-2 p-3 ${c.puede_escribir ? 'active:bg-white/10' : 'opacity-40'} ${c.id === ajustes.chat_id ? 'bg-white/10' : ''}`}>
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-[14px] truncate">{c.nombre}</span>
+                    <span className="block text-[12px] text-nf-text3 truncate">
+                      {TIPO_CHAT[c.tipo] || c.tipo}{c.usuario ? ` · @${c.usuario}` : ''}{!c.puede_escribir ? ' · no se puede escribir' : ''}
+                    </span>
+                  </span>
+                  {c.del_catalogo && <span className="shrink-0 text-[11px] px-2 py-1 rounded-lg bg-amber-400/15 text-amber-300">canal del catálogo</span>}
+                </button>
+              ))}
+            </div>
+            <button onClick={() => { setChats(null); setFiltro(''); }} className="w-full h-10 mt-1 text-[13px] text-nf-text3">Cancelar</button>
+          </div>
+        )}
+      </section>
+
+      <section className="rounded-2xl bg-white/5 p-4 mb-4">
+        <p className="text-[13px] font-semibold text-nf-text2 mb-2">Plantilla del mensaje</p>
+        <textarea value={plantilla} onChange={e => setPlantilla(e.target.value)} rows={4}
+          className="w-full rounded-xl bg-white/10 border border-white/10 p-3 text-[16px] outline-none focus:border-white/40" />
+        {/* Tocar un hueco lo añade al final: en el teclado del movil las llaves
+            estan escondidas en la tercera pantalla de simbolos. */}
+        <ul className="mt-2 space-y-1 text-[12px] text-nf-text3">
+          {Object.entries(ajustes.huecos || {}).map(([h, explica]) => (
+            <li key={h}>
+              <button onClick={() => setPlantilla(t => t + `{${h}}`)} className="text-left">
+                <span className="font-mono text-nf-text2 px-1.5 py-0.5 rounded bg-white/10">{`{${h}}`}</span> {explica}
+              </button>
+            </li>
+          ))}
+        </ul>
+        <p className="mt-1 text-[11px] text-nf-text3">Toca un hueco para añadirlo.</p>
+        <p className="mt-3 text-[12px] font-semibold text-nf-text2">Vista previa</p>
+        <p className="mt-1 rounded-xl bg-black/30 p-3 text-[13px] whitespace-pre-wrap break-words">{previa || '—'}</p>
+        <button onClick={guardarPlantilla} disabled={guardando || !plantilla.trim() || plantilla === ajustes.plantilla}
+          className={`${boton} mt-3 bg-nf-red`}>
+          {guardando ? 'Guardando…' : 'Guardar'}
+        </button>
+        <button onClick={() => setPlantilla(ajustes.plantilla_por_defecto)} disabled={plantilla === ajustes.plantilla_por_defecto}
+          className="w-full h-10 mt-1 text-[13px] text-nf-text3 disabled:opacity-40">
+          Restaurar la de por defecto
+        </button>
+      </section>
+
+      <p className="text-[13px] font-semibold text-nf-text2 mb-2">{lista.length} {lista.length === 1 ? 'petición' : 'peticiones'}</p>
+      {lista.length === 0 ? (
+        <p className="text-[14px] text-nf-text3 leading-relaxed">Nadie ha pedido nada todavía.</p>
+      ) : (
+        <div className="rounded-2xl bg-white/5 divide-y divide-white/5">
+          {lista.map(p => {
+            const [etiqueta, clase] = ESTADO_PETICION[p.estado] || [p.estado, 'bg-white/10 text-nf-text3'];
+            return (
+              <div key={p.id} className="flex items-start gap-3 p-3">
+                <div className="w-9 h-[54px] shrink-0 rounded-md overflow-hidden bg-white/5">
+                  {p.poster && <img src={p.poster} alt="" loading="lazy" className="w-full h-full object-cover" />}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-[14px] truncate">{p.titulo}</p>
+                  <p className="text-[12px] text-nf-text3 truncate">
+                    {TIPO_PETICION[p.media_type]}{p.year ? ` · ${p.year}` : ''} · {cuando(p.creada_en)}
+                  </p>
+                  <p className="text-[12px] text-nf-text3 truncate">
+                    {p.usuarios?.length ? `La esperan: ${p.usuarios.join(', ')}` : 'Ya no la espera nadie'}
+                  </p>
+                  {p.estado === 'fallida' && p.error && <p className="text-[12px] text-red-300 mt-0.5 break-words">{p.error}</p>}
+                </div>
+                <span className={`shrink-0 text-[11px] px-2 py-1 rounded-lg ${clase}`}>{etiqueta}</span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** Sesión de Telegram y sus credenciales, igual que en el escritorio. */
 function Telegram() {
   const [st, setSt] = useState<any>(null);
@@ -667,6 +838,7 @@ export default function Admin() {
       {tab === 'descargas' && <DownloadsAll />}
       {tab === 'canales' && <Channels />}
       {tab === 'novedades' && <Novedades />}
+      {tab === 'peticiones' && <Peticiones />}
       {tab === 'telegram' && <Telegram />}
       {tab === 'servidor' && <Server />}
       {tab === 'registros' && <Registros />}

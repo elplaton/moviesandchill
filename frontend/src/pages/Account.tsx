@@ -4,6 +4,7 @@ import { apiFetch } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import { useFollows } from '../contexts/FollowsContext';
 import { clearAllWatched } from '../utils/progress';
+import MisPeticiones from '../components/MisPeticiones';
 import { activarAvisos, desactivarAvisos, estadoAvisos, probarAvisos,
          type EstadoAvisos } from '../services/push';
 
@@ -117,6 +118,8 @@ export default function Account() {
             </ul>
           )}
         </div>
+
+        <MisPeticiones />
 
         <div className="bg-white/5 border border-white/10 rounded-2xl p-6 shadow-xl">
           <h2 className="text-white font-semibold mb-4">Cambiar contraseña</h2>

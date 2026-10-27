@@ -175,15 +175,45 @@ export interface BrowseItem {
   message_id?: number;
   /** Solo en la fila "Lo último en plataformas": en cuál está ("Netflix"). */
   plataforma?: string;
+  /** Solo en las filas de top: el puesto (1, 2, 3...). */
+  puesto?: number;
+  /** Solo en las filas de top: «Temporada 4», «Miniserie»... */
+  subtitulo?: string | null;
+  /** Solo en las filas de top: un top trae también lo que no tenemos. */
+  en_catalogo?: boolean;
+  /** Solo en las filas de top: si alguien lo ha pedido ya, y si fui yo. */
+  peticion?: { estado: 'enviada' | 'conseguida' | 'fallida'; mia: boolean } | null;
+}
+
+/** A qué plataforma pertenece una fila de la pestaña Plataformas. */
+export interface BrowseSeccion {
+  clave: string;
+  nombre: string;
+  logo: string | null;
+}
+
+/** Una fila que es un top: de dónde sale, de cuándo es y de qué. */
+export interface BrowseTop {
+  fuente: 'netflix' | 'tmdb';
+  fecha: string;
+  media_type: 'movie' | 'series';
 }
 
 export interface BrowseRow {
+  /** Clave interna y única de la fila; se enseña solo si no hay `titulo`. */
   genre: string;
+  /** Lo que se enseña como título. En Plataformas `genre` lleva la plataforma
+   *  delante para ser única, y aquí va sin ella. */
+  titulo?: string;
   items: BrowseItem[];
   /** Cuantos titulos hay en total en esta fila (no cuantos han llegado). */
   total?: number;
   /** El genero con el que se piden mas paginas; null si la fila no se pagina. */
   key?: string | null;
+  /** Solo en /browse/plataformas. Las filas llegan agrupadas por sección. */
+  seccion?: BrowseSeccion;
+  /** La fila es un top (no pagina). */
+  top?: BrowseTop;
 }
 
 /** Una version de una pelicula en disco: el mismo titulo en otra calidad. */
