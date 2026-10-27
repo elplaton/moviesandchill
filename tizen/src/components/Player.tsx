@@ -3,7 +3,8 @@ import Overlay from './Overlay';
 import { useBackHandler } from '../focus/react';
 import { pushMediaHandler, pushRawHandler } from '../focus/keys';
 import { audioLabel, fetchTracks, subtitleUrl, type MediaTracks } from '../services/tracks';
-import { streamTicket, streamUrl } from '../services/api';
+import { streamTicket } from '../services/api';
+import { useFuente } from '../hooks/useFuente';
 import { soloPuntero } from '../tv/platform';
 import { markWatched, resumePoint, setWatched } from '../tv/progress';
 import { toast } from '../tv/toast';
@@ -12,7 +13,9 @@ import SiguienteEp, { opcionesSiguiente } from './SiguienteEp';
 import { useSiguiente } from '../hooks/useSiguiente';
 
 interface Props {
-  src: string;
+  /** Ya no se usa: la URL la monta el reproductor (`useFuente`) con la
+   *  entrada de reproduccion. Se queda para no tocar a quien lo llama. */
+  src?: string;
   path: string;
   title: string;
   subtitle?: string;
@@ -63,7 +66,7 @@ function fmt(s: number): string {
  * volver son botones en pantalla.
  */
 export default function Player(props: Props) {
-  const { src, onClose } = props;
+  const { onClose } = props;
   // Que se esta reproduciendo ahora, que no siempre es lo que dijo el padre:
   // al acabar un capitulo el reproductor pasa al siguiente por su cuenta (ver
   // `useSiguiente`). Los nombres de dentro son los de siempre, asi que todo
@@ -223,17 +226,18 @@ export default function Player(props: Props) {
   const [subActiva, setSubActiva] = useState(-1);
 
   // La URL del video espera a la entrada de reproduccion: el token de acceso
-  // caduca a la hora y cortaba las peliculas largas por la mitad. Hasta que
-  // llega se usa la que venga en `src`, que es lo de antes.
-  const [fuente, setFuente] = useState(src);
+  // caduca a la hora y cortaba las peliculas largas por la mitad. La entrada
+  // vale para una sola ruta, asi que al cambiar de episodio se olvida.
+  const [ticket, setTicket] = useState<{ path: string; t: string } | null>(null);
   useEffect(() => {
     let vivo = true;
-    // Al cambiar de episodio la URL se pone ya, sin esperar a la entrada: si
-    // no, el <video> seguiria un instante con el archivo anterior.
-    setFuente(streamUrl(path));
-    streamTicket(path).then(t => { if (vivo) setFuente(streamUrl(path, t)); });
+    streamTicket(path).then(t => { if (vivo) setTicket({ path, t }); });
     return () => { vivo = false; };
-  }, [path]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [path]);
+  // Tal cual o adaptado al vuelo (HLS): lo de Telegram con audio AC-3/DTS que
+  // la tele no decodifica, o un AVI, pasa por el servidor. Lo del disco va
+  // siempre tal cual, que ya lo dejo compatible la conversion.
+  const fuente = useFuente(videoRef, path, ticket?.path === path ? ticket.t : null);
 
   useEffect(() => {
     let vivo = true;
@@ -404,7 +408,9 @@ export default function Player(props: Props) {
     // esto llego a pintar una pantalla entera encima del video (ver su
     // `Player`); aqui es un aviso de cinco segundos, pero miente igual.
     const onError = () => {
-      if (!v.error) return;
+      // Sin fuente puesta todavia (espera a la entrada y a saber si va por
+      // HLS) un error no dice nada del archivo.
+      if (!v.error || !v.currentSrc) return;
       toast('No se ha podido reproducir el archivo', 'error', 5000);
     };
     v.addEventListener('loadedmetadata', onMeta);

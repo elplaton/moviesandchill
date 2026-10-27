@@ -13,6 +13,7 @@ import Player from './Player';
 import { soloPuntero } from '../tv/platform';
 import TvButton from './TvButton';
 import { IconCheck, IconDownload, IconHeart, IconPlay, IconStar, IconTrash } from './Icons';
+import { audioQueNoSuena, comprobarReproduccion, motivoNoSeVe } from '../services/reproducir';
 import { groupEpisodes, groupVersions, seasonLabel, episodeLabel, type Episode, type Version } from '../utils/versions';
 import type { DownloadState, Featured, SearchResult } from '../types';
 
@@ -28,7 +29,12 @@ export interface DetailInput {
 
 interface Props { input: DetailInput; onClose: () => void }
 
-type RowState = { status: 'ready'; path: string } | { status: 'busy'; ds: DownloadState } | { status: 'idle' };
+/** `stream`: no esta en disco pero se puede ver sin descargar (ver `streamable`). */
+type RowState = { status: 'ready'; path: string } | { status: 'busy'; ds: DownloadState } | { status: 'stream' } | { status: 'idle' };
+
+/** Que variante representa a un episodio en la lista: la que ya esta en disco,
+ *  luego la que se esta bajando, luego la que se puede ver al vuelo. */
+const PRIORIDAD: Record<RowState['status'], number> = { ready: 0, busy: 1, stream: 2, idle: 3 };
 
 function stateLabel(ds: DownloadState): string {
   if (ds.status === 'extracting') return 'Extrayendo';
@@ -46,6 +52,17 @@ function Chip({ label, index, selected, onSelect }: { label: string; index: numb
   );
 }
 
+function DownloadButton({ focusKey, onDownload }: { focusKey: string; onDownload: () => void }) {
+  const { ref, focusKey: id } = useFocusItem<HTMLDivElement>({ index: 1, focusKey, onEnter: onDownload });
+  return (
+    <div ref={ref} onMouseEnter={() => applyFocus(id)} onClick={(e) => { e.stopPropagation(); onDownload(); }}
+      className="tv-row-item shrink-0 w-[96px] h-[84px] rounded-lg mb-[10px] flex flex-col items-center justify-center text-tv-text2">
+      <span className="w-7 h-7"><IconDownload /></span>
+      <span className="text-[14px] font-semibold mt-1">Descargar</span>
+    </div>
+  );
+}
+
 function DeleteButton({ focusKey, onDelete }: { focusKey: string; onDelete: () => void }) {
   const { ref, focusKey: id } = useFocusItem<HTMLDivElement>({ index: 1, focusKey, onEnter: onDelete });
   return (
@@ -59,17 +76,19 @@ function DeleteButton({ focusKey, onDelete }: { focusKey: string; onDelete: () =
 
 /**
  * Fila de episodio o version. Es un carril horizontal de una o dos casillas:
- * la accion principal (reproducir/descargar) y, si el archivo esta en disco,
- * Borrar al lado. Arriba y abajo cambian de fila; izquierda y derecha, de casilla.
+ * la accion principal (reproducir, ver o descargar) y al lado Borrar si el
+ * archivo esta en disco, o Descargar si se puede ver sin bajarlo. Arriba y
+ * abajo cambian de fila; izquierda y derecha, de casilla.
  */
-function ListRow({ index, focusKey, label, title, meta, state, variants, onEnter, onDelete, autoFocus }: {
+function ListRow({ index, focusKey, label, title, meta, state, variants, onEnter, onDelete, onDownload, autoFocus }: {
   index: number; focusKey: string; label: string; title: string; meta: string; state: RowState; variants: number;
-  onEnter: () => void; onDelete?: () => void; autoFocus?: boolean;
+  onEnter: () => void; onDelete?: () => void; onDownload?: () => void; autoFocus?: boolean;
 }) {
   return (
     <FocusScope index={index} orientation="horizontal" className="flex items-stretch space-x-[10px]">
       <MainCell focusKey={focusKey} label={label} title={title} meta={meta} state={state} variants={variants} onEnter={onEnter} autoFocus={autoFocus} />
       {state.status === 'ready' && onDelete && <DeleteButton focusKey={`${focusKey}-del`} onDelete={onDelete} />}
+      {state.status === 'stream' && onDownload && <DownloadButton focusKey={`${focusKey}-dl`} onDownload={onDownload} />}
     </FocusScope>
   );
 }
@@ -100,6 +119,11 @@ function MainCell({ focusKey, label, title, meta, state, variants, onEnter, auto
             <span className="tv-progress-track block h-[6px] rounded-full bg-white/20 overflow-hidden">
               <span className="block h-full bg-tv-red" style={{ width: `${state.ds.progress}%` }} />
             </span>
+          </span>
+        )}
+        {state.status === 'stream' && (
+          <span className="tv-pill inline-flex items-center space-x-2 px-4 h-[40px] rounded-full bg-white/20 text-caption font-bold">
+            <span className="w-5 h-5"><IconPlay /></span><span>Ver</span>
           </span>
         )}
         {state.status === 'idle' && (
@@ -198,16 +222,57 @@ export default function TitleDetail({ input, onClose }: Props) {
     if (p) return { status: 'ready', path: p };
     const ds = downloadStates.get(v.messageId);
     if (ds && (ds.status === 'downloading' || ds.status === 'extracting' || ds.status === 'converting')) return { status: 'busy', ds };
-    return { status: 'idle' };
+    return v.streamable ? { status: 'stream' } : { status: 'idle' };
   }, [pathOf, downloadStates]);
 
   const play = useCallback((path: string, subtitle?: string) => {
     setPlaying({ path, title: meta.title, subtitle });
   }, [meta.title]);
 
+  const descargar = useCallback((v: Version) => {
+    toast('Preparando la descarga…');
+    download(v.messageId, v.channelId).then((err) => {
+      if (err) toast(err, 'error', 5000);
+      else toast(`Descargando ${v.baseName}${v.parts > 1 ? ` (${v.parts} partes)` : ''}`);
+    });
+  }, [download]);
+
+  /** Lo que no se puede ver al vuelo se ofrece descargar, diciendo por que. */
+  const ofrecerDescarga = useCallback((v: Version, motivo: string) => {
+    setDialog({
+      title: 'No se puede ver sin descargar',
+      text: motivo ? `${motivo.charAt(0).toUpperCase()}${motivo.slice(1)}.` : 'Hay que descargarlo primero.',
+      actions: [
+        { label: 'Descargar', primary: true, onSelect: () => { setDialog(null); descargar(v); } },
+        { label: 'Cancelar', onSelect: () => setDialog(null) },
+      ],
+    });
+  }, [descargar]);
+
+  // Ver sin descargar: se pregunta al servidor (lee unos KB y lo mira una vez,
+  // la primera) y, si se puede, el reproductor abre la ruta `tg:` que
+  // devuelve, como cualquier otra.
+  const comprobando = useRef(false);
+  const ver = useCallback(async (v: Version, subtitle?: string) => {
+    if (comprobando.current) return;
+    comprobando.current = true;
+    toast('Comprobando…');
+    try {
+      const r = await comprobarReproduccion(v.channelId, v.messageId);
+      if (r.modo !== 'ver' || !r.path) { ofrecerDescarga(v, r.motivo); return; }
+      const motivo = motivoNoSeVe(r);
+      if (motivo) { ofrecerDescarga(v, motivo); return; }
+      if (audioQueNoSuena(r)) toast('El audio es AC-3/DTS: puede verse sin sonido', 'error', 5000);
+      play(r.path, subtitle);
+    } finally {
+      comprobando.current = false;
+    }
+  }, [ofrecerDescarga, play]);
+
   const act = useCallback((v: Version, subtitle?: string) => {
     const st = stateOf(v);
     if (st.status === 'ready') { play(st.path, subtitle); return; }
+    if (st.status === 'stream') { ver(v, subtitle); return; }
     if (st.status === 'busy') {
       const ds = st.ds;
       setDialog({
@@ -221,12 +286,8 @@ export default function TitleDetail({ input, onClose }: Props) {
       });
       return;
     }
-    toast('Preparando la descarga…');
-    download(v.messageId, v.channelId).then((err) => {
-      if (err) toast(err, 'error', 5000);
-      else toast(`Descargando ${v.baseName}${v.parts > 1 ? ` (${v.parts} partes)` : ''}`);
-    });
-  }, [stateOf, play, download, pauseBatch, cancelBatch]);
+    descargar(v);
+  }, [stateOf, play, ver, descargar, pauseBatch, cancelBatch]);
 
   const askDelete = useCallback((path: string, label: string) => {
     setDialog({
@@ -247,12 +308,16 @@ export default function TitleDetail({ input, onClose }: Props) {
     });
   }, [recargar]);
 
+  const mejorVariante = useCallback((e: Episode): Version =>
+    e.variants.reduce((a, b) => (PRIORIDAD[stateOf(b).status] < PRIORIDAD[stateOf(a).status] ? b : a)), [stateOf]);
+
   const onEpisode = useCallback((e: Episode) => {
     const subtitle = `${episodeLabel(e)} · ${episodeNames.get(`${e.season}:${e.episode}`) || ''}`.replace(/ · $/, '');
     if (e.variants.length === 1) { act(e.variants[0], subtitle); return; }
-    // Si alguna ya esta en disco, esa manda; si no, se elige version.
-    const ready = e.variants.find((v) => stateOf(v).status === 'ready');
-    if (ready) { act(ready, subtitle); return; }
+    // Si alguna ya esta en disco, esa manda; luego la que se esta bajando, y
+    // luego la que se puede ver sin descargar. Si no, se elige version.
+    const mejor = mejorVariante(e);
+    if (stateOf(mejor).status !== 'idle') { act(mejor, subtitle); return; }
     setDialog({
       title: `Elige versión · ${episodeLabel(e)}`,
       actions: e.variants.map((v) => ({
@@ -260,7 +325,7 @@ export default function TitleDetail({ input, onClose }: Props) {
         onSelect: () => { setDialog(null); act(v, subtitle); },
       })),
     });
-  }, [act, stateOf, episodeNames]);
+  }, [act, mejorVariante, stateOf, episodeNames]);
 
   // Desplazamiento de la lista: la fila enfocada nunca baja del 60 % del alto visible.
   const onListFocus = useCallback((_i: number, childId: string) => {
@@ -294,6 +359,11 @@ export default function TitleDetail({ input, onClose }: Props) {
     return { path: pick.p, subtitle: sub, resume: !!resumed };
   }, [versions, pathOf]);
 
+  // Sin nada en disco, la primera version de la pelicula que se pueda ver sin
+  // descargar: es lo que se quiere casi siempre, a un OK de distancia.
+  const alVuelo = useMemo(() => (playable || kind === 'series' ? null : versions.find((v) => v.streamable) || null),
+    [playable, kind, versions]);
+
   const readyCount = versions.filter((v) => !!pathOf(v)).length;
   const marcado = !!input.tmdbId && esFavorito(input.tmdbId, kind);
 
@@ -305,12 +375,12 @@ export default function TitleDetail({ input, onClose }: Props) {
   const initialDone = useRef(false);
   useEffect(() => {
     if (initialDone.current) return;
-    const target = playable ? 'detail-play' : firstRowKey;
+    const target = playable ? 'detail-play' : alVuelo ? 'detail-ver' : firstRowKey;
     if (!target) return;
     initialDone.current = true;
     const raf = requestAnimationFrame(() => setFocus(target));
     return () => cancelAnimationFrame(raf);
-  }, [playable, firstRowKey]);
+  }, [playable, alVuelo, firstRowKey]);
   const bg = bigBackdrop(meta.backdrop) || meta.poster;
   const infoParts: string[] = [];
   if (meta.year) infoParts.push(String(meta.year));
@@ -357,6 +427,11 @@ export default function TitleDetail({ input, onClose }: Props) {
                 {playable.resume ? 'Continuar viendo' : 'Reproducir'}
               </TvButton>
             )}
+            {alVuelo && (
+              <TvButton index={0} focusKey="detail-ver" primary icon={<IconPlay />} onClick={() => ver(alVuelo)}>
+                Ver ahora
+              </TvButton>
+            )}
             {input.tmdbId ? (
               <TvButton index={1} focusKey="detail-fav" icon={<IconHeart filled={marcado} />}
                 className={marcado ? 'text-tv-red' : ''}
@@ -395,7 +470,7 @@ export default function TitleDetail({ input, onClose }: Props) {
             <FocusScope index={1} orientation="vertical" onChildFocus={onListFocus} as="none">
               <div ref={listRef} className="tv-list-track" style={{ transform: 'translate3d(0,0,0)' }}>
                 {kind === 'series' && shown.map((e, i) => {
-                  const best = e.variants.find((v) => stateOf(v).status !== 'idle') || e.variants[0];
+                  const best = mejorVariante(e);
                   const st = stateOf(best);
                   const name = episodeNames.get(`${e.season}:${e.episode}`) || best.baseName;
                   return (
@@ -403,7 +478,8 @@ export default function TitleDetail({ input, onClose }: Props) {
                       label={episodeLabel(e)} title={name}
                       meta={`${best.quality} · ${best.sizeStr}${best.channelName ? ` · ${best.channelName}` : ''}`}
                       state={st} variants={e.variants.length} onEnter={() => onEpisode(e)} autoFocus={i === 0 && !playable}
-                      onDelete={st.status === 'ready' ? () => askDelete(st.path, `${episodeLabel(e)} · ${name}`) : undefined} />
+                      onDelete={st.status === 'ready' ? () => askDelete(st.path, `${episodeLabel(e)} · ${name}`) : undefined}
+                      onDownload={st.status === 'stream' ? () => descargar(best) : undefined} />
                   );
                 })}
                 {kind === 'movie' && versions.map((v, i) => (
@@ -411,7 +487,8 @@ export default function TitleDetail({ input, onClose }: Props) {
                     title={v.baseName}
                     meta={`${v.quality} · ${v.sizeStr}${v.parts > 1 ? ` · ${v.parts} partes` : ''}${v.channelName ? ` · ${v.channelName}` : ''}`}
                     state={stateOf(v)} variants={1} onEnter={() => act(v)} autoFocus={i === 0 && !playable}
-                    onDelete={(() => { const st = stateOf(v); return st.status === 'ready' ? () => askDelete(st.path, v.baseName) : undefined; })()} />
+                    onDelete={(() => { const st = stateOf(v); return st.status === 'ready' ? () => askDelete(st.path, v.baseName) : undefined; })()}
+                    onDownload={stateOf(v).status === 'stream' ? () => descargar(v) : undefined} />
                 ))}
               </div>
             </FocusScope>
@@ -419,8 +496,8 @@ export default function TitleDetail({ input, onClose }: Props) {
           </div>
           <p className="mt-3 text-caption text-tv-text3">
             {soloPuntero()
-              ? 'Pulsa una fila: se reproduce si está en disco y se descarga si no'
-              : 'OK: reproducir si está en disco, descargar si no · Atrás: volver'}
+              ? 'Pulsa una fila: se reproduce si está en disco, se ve sin descargar si se puede y si no se descarga'
+              : 'OK: reproducir, ver sin descargar o descargar · ▶ Descargar · Atrás: volver'}
           </p>
         </FocusScope>
       </FocusScope>
