@@ -42,6 +42,17 @@ document.documentElement.setAttribute('data-plataforma', plataforma());
 // contenido deja de desbordar, los dos viewports se igualan en 960 y `k` sigue
 // saliendo 0.5. La PS4 lleva un WebKit sin `visualViewport`, de ahi el
 // respaldo.
+//
+// En el Fire TV se escala con `zoom` y no con `transform`. El video no lo
+// pinta la pagina: Android lo pone en una capa aparte (un SurfaceView) y la
+// coloca con la caja del <video> **sin** los transform de sus padres. Con
+// `scale(0.5)` la capa salia al doble —una pelicula 2,39:1 en pos (0,276) y
+// 3840x1608 en vez de (0,138) y 1920x804, medido en SurfaceFlinger—, o sea
+// bajada media pantalla y con la mitad cortada. Pasaba "a veces" porque el
+// WebView solo usa esa capa con algunos videos. `zoom` cambia la caja de
+// verdad y la capa cae en su sitio.
+const CON_ZOOM = plataforma() === 'firetv';
+
 function fitToWindow() {
   const root = document.getElementById('root');
   if (!root) return;
@@ -51,6 +62,12 @@ function fitToWindow() {
   const k = Math.min(ancho / 1920, alto / 1080);
   const x = Math.max(0, (ancho - 1920 * k) / 2);
   const y = Math.max(0, (alto - 1080 * k) / 2);
+  if (CON_ZOOM) {
+    // El margen va en px del lienzo: dentro de `zoom` se multiplica por k.
+    root.style.zoom = String(k);
+    root.style.margin = `${y / k}px 0 0 ${x / k}px`;
+    return;
+  }
   root.style.transformOrigin = '0 0';
   root.style.transform = Math.abs(k - 1) < 0.001 && x < 1 && y < 1 ? '' : `translate(${x}px, ${y}px) scale(${k})`;
 }
