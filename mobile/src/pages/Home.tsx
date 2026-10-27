@@ -40,7 +40,10 @@ export default function Home() {
     clearWatched(w.path).catch(() => {});
   };
 
-  const hero = rows.find(r => r.genre === 'Novedades')?.items[0] || rows[0]?.items[0];
+  // El destacado sale de lo ultimo que ha llegado a alguna plataforma (es de
+  // lo que se habla), y si esa fila no esta, de Novedades.
+  const hero = rows.find(r => r.key === 'plataforma:todas')?.items.find(i => i.backdrop)
+    || rows.find(r => r.genre === 'Novedades')?.items[0] || rows[0]?.items[0];
   const link = (i: { tmdb_id: number; media_type: string }) => `/t/${i.media_type}/${i.tmdb_id}`;
 
   return (
@@ -51,7 +54,7 @@ export default function Home() {
           <img src={hero.backdrop || hero.poster} alt="" className="absolute inset-0 w-full h-full object-cover" />
           <div className="absolute inset-0" style={{ background: 'linear-gradient(180deg, rgba(20,20,20,0.1) 30%, #141414 100%)' }} />
           <div className="absolute left-4 right-4 bottom-4">
-            <p className="text-[11px] font-semibold text-nf-red tracking-wide mb-1">NOVEDAD</p>
+            <p className="text-[11px] font-semibold text-nf-red tracking-wide mb-1 uppercase">{hero.plataforma ? `Nuevo en ${hero.plataforma}` : 'Novedad'}</p>
             <h1 className="text-[26px] font-bold leading-tight line-clamp-2">{hero.title}</h1>
             <p className="text-[13px] text-nf-text2 mt-1 flex items-center gap-2">
               {hero.rating ? <span className="inline-flex items-center gap-1"><span className="w-3.5 h-3.5 text-nf-warn"><IStar /></span>{hero.rating.toFixed(1)}</span> : null}
@@ -116,7 +119,7 @@ export default function Home() {
           shift={r.shift}
           scrollX={scrollXDe(r.genre)}
           onScrollX={x => recordarScrollX(r.genre, x)}>
-          {r.items.map(i => <Poster key={`${r.genre}-${i.id}`} to={link(i)} title={i.title} poster={i.poster} subtitle={i.media_type === 'series' && i.episode_count ? `${i.episode_count} ep.` : i.year ? String(i.year) : undefined} />)}
+          {r.items.map(i => <Poster key={`${r.genre}-${i.id}`} to={link(i)} title={i.title} poster={i.poster} subtitle={i.plataforma ? i.plataforma : i.media_type === 'series' && i.episode_count ? `${i.episode_count} ep.` : i.year ? String(i.year) : undefined} />)}
         </Row>
       ))}
       {loading && <p className="px-4 text-nf-text3 text-[14px]">Cargando…</p>}

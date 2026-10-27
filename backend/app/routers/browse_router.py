@@ -59,6 +59,8 @@ CLAVE_AÑADIDOS = "anadidos"
 CLAVE_RECOMENDADO = "recomendado"
 CLAVE_FAVORITOS = "favoritos"
 CLAVE_PLATAFORMA = "plataforma:"
+# La fila mezclada de la portada: todas las plataformas juntas.
+CLAVE_PLATAFORMAS_TODAS = "plataforma:todas"
 
 
 def item_from_row(row: dict) -> dict:
@@ -79,6 +81,8 @@ def item_from_row(row: dict) -> dict:
         "channel_id": row["channel_id"],
         "channel_name": row.get("channel_name"),
         "message_id": row["message_id"],
+        # Solo en la fila mezclada de plataformas: en que plataforma esta.
+        **({"plataforma": row["plataforma_nombre"]} if row.get("plataforma_nombre") else {}),
     }
 
 
@@ -220,7 +224,8 @@ async def browse_home(user: Annotated[str, Depends(get_current_user)],
 
 async def _portada(user: str, semilla: str, media_type: str | None):
     from app.database.browse import (get_browse_pool, get_estrenos, get_genre_rows,
-                                     get_recently_added, get_recomendados)
+                                     get_recently_added, get_recomendados,
+                                     get_ultimo_en_plataformas)
     from app.database.preferences import get_preferences
     from app.database.users import get_user_by_username
 
@@ -240,6 +245,7 @@ async def _portada(user: str, semilla: str, media_type: str | None):
         "novedades": get_estrenos(ITEMS_PER_ROW, media_type=tipo, semilla=semilla),
         "añadidos": get_recently_added(ITEMS_PER_ROW, media_type=tipo),
         "generos": get_genre_rows(semilla, ITEMS_PER_ROW, media_type=tipo, max_filas=GENRE_LIMIT),
+        "plataformas": get_ultimo_en_plataformas(0, ITEMS_PER_ROW, media_type=tipo),
     }
     if gustos:
         tareas["recomendado"] = get_recomendados(semilla, gustos, liked_years,
@@ -274,6 +280,12 @@ async def _portada(user: str, semilla: str, media_type: str | None):
         return filas, total
 
     rows = []
+    # Lo ultimo de Netflix, HBO Max... todas juntas, delante de Novedades. Es
+    # tambien de donde sacan los clientes el destacado de arriba.
+    filas, total = pagina("plataformas")
+    if filas:
+        rows.append(_fila("Lo último en plataformas", filas, total=total,
+                          key=CLAVE_PLATAFORMAS_TODAS))
     filas, total = pagina("novedades")
     if filas:
         rows.append(_fila("Novedades", filas, total=total, key=CLAVE_NOVEDADES))
@@ -326,6 +338,9 @@ async def _pagina_de(key: str, user: str, semilla: str, offset: int, limit: int,
         return await get_estrenos(limit, media_type=tipo, semilla=semilla, offset=offset)
     if key == CLAVE_AÑADIDOS:
         return await get_recently_added(limit, media_type=tipo, offset=offset)
+    if key == CLAVE_PLATAFORMAS_TODAS:
+        from app.database.browse import get_ultimo_en_plataformas
+        return await get_ultimo_en_plataformas(offset, limit, media_type=tipo)
     if key.startswith(CLAVE_PLATAFORMA):
         from app.database.browse import get_plataforma_pagina
         from app.services.plataformas import POR_CLAVE

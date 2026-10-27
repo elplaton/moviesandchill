@@ -49,10 +49,12 @@ export default function Catalog({ filter, heading, fuente = 'portada' }: Props) 
     clearWatched(w.path).catch(() => {});
   }, []);
 
-  // El destacado sale de Novedades, que es lo más reciente y con mejor imagen.
+  // El destacado sale de lo último que ha llegado a alguna plataforma (es de
+  // lo que se habla), y si esa fila no está, de Novedades.
   const hero = useMemo(() => {
     if (!portada) return null;
-    const pool = rows.find(r => r.genre === 'Novedades')?.items || rows[0]?.items || [];
+    const pool = rows.find(r => r.key === 'plataforma:todas')?.items
+      || rows.find(r => r.genre === 'Novedades')?.items || rows[0]?.items || [];
     return pool.find(i => i.backdrop) || pool[0] || null;
   }, [rows, portada]);
 
@@ -62,7 +64,8 @@ export default function Catalog({ filter, heading, fuente = 'portada' }: Props) 
       title={item.title}
       poster={item.poster}
       rating={item.rating}
-      meta={item.media_type === 'series' && item.episode_count
+      meta={item.plataforma ? item.plataforma
+        : item.media_type === 'series' && item.episode_count
         ? `${item.episode_count} episodios`
         : item.year ? String(item.year) : undefined}
       onOpen={() => open(item)}

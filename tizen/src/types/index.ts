@@ -182,6 +182,8 @@ export interface BrowseItem {
   channel_id?: number;
   channel_name?: string;
   message_id?: number;
+  /** Solo en la fila "Lo último en plataformas": en cuál está ("Netflix"). */
+  plataforma?: string;
 }
 
 export interface BrowseRow {

@@ -31,7 +31,8 @@ function toFeatured(item: BrowseItem, rowKey: string): Featured {
     rating: item.rating,
     overview: item.overview,
     genres: item.genres,
-    subtitle: item.media_type === 'series' && item.episode_count ? `${item.episode_count} episodios` : undefined,
+    subtitle: item.plataforma ? `En ${item.plataforma}`
+      : item.media_type === 'series' && item.episode_count ? `${item.episode_count} episodios` : undefined,
   };
 }
 
@@ -114,7 +115,13 @@ export default function Catalog({ filter, heading, fuente = 'portada' }: Props) 
   const hasResume = resume.length > 0;
   const rowOffset = hasResume ? 1 : 0;
   const isMounted = (i: number) => Math.abs(i - focusRow) <= ROWS_AROUND;
-  const fallback = featuredRows[0]?.items[0]?.f || null;
+  // El destacado de partida sale de lo ultimo que ha llegado a alguna
+  // plataforma; luego el panel sigue a la tarjeta enfocada, como siempre.
+  const fallback = useMemo(() => {
+    const i = rows.findIndex((r) => r.key === 'plataforma:todas');
+    const fila = i >= 0 ? featuredRows[i] : featuredRows[0];
+    return fila?.items.find(({ f }) => f.backdrop)?.f || fila?.items[0]?.f || null;
+  }, [rows, featuredRows]);
 
   return (
     <Screen hero heading={heading} heroFallback={fallback} ready={!loading && (rows.length > 0 || hasResume)} onRowFocus={setFocusRow}>
