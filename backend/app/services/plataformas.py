@@ -2,7 +2,8 @@
 algo nuevo en el.
 
 La pestaña "Plataformas" enseña lo mas novedoso de Netflix, HBO Max, Disney+,
-Prime Video, Movistar Plus+ y Crunchyroll, pero **solo lo que tenemos**: lo que se puede ver o
+Prime Video, Movistar Plus+, Apple TV+, SkyShowtime, Filmin, Atresplayer y
+Crunchyroll, pero **solo lo que tenemos**: lo que se puede ver o
 descargar al pulsarlo. Hacerlo al reves (pedir a TMDB lo ultimo de Netflix y
 buscarlo en el catalogo) dejaba filas de tres tarjetas, porque lo mas nuevo de
 una plataforma casi nunca esta aun en los canales. Asi que se pregunta por
@@ -37,6 +38,10 @@ PLATAFORMAS: list[dict] = [
     {"clave": "disney", "nombre": "Disney+", "ids": [337]},
     {"clave": "prime", "nombre": "Prime Video", "ids": [119, 2100]},
     {"clave": "movistar", "nombre": "Movistar Plus+", "ids": [2241, 149]},
+    {"clave": "apple", "nombre": "Apple TV+", "ids": [350, 2243]},
+    {"clave": "skyshowtime", "nombre": "SkyShowtime", "ids": [1773]},
+    {"clave": "filmin", "nombre": "Filmin", "ids": [63]},
+    {"clave": "atresplayer", "nombre": "Atresplayer", "ids": [62]},
     {"clave": "crunchyroll", "nombre": "Crunchyroll", "ids": [283, 1968]},
 ]
 # Hulu no esta: en España no existe, y sus series (The Bear, El cuento de la
@@ -58,6 +63,36 @@ AÑOS_PELICULAS = 5
 DIAS_VIGENCIA = 7
 POR_PASADA = 2500
 CONCURRENCIA = 10
+
+
+# El logo de cada plataforma, de la lista de proveedores de TMDB. Cambia muy de
+# vez en cuando, asi que se pide una vez al dia y se guarda en memoria.
+_logos: dict[int, str] = {}
+_logos_cuando = 0.0
+
+
+async def logos(api_key: str) -> dict[str, str]:
+    """clave de plataforma -> URL del logo (cuadrado, el icono de la app)."""
+    import time
+
+    from app.services.tmdb import IMAGE_BASE, _get
+
+    global _logos, _logos_cuando
+    if api_key and (not _logos or time.time() - _logos_cuando > 86400):
+        nuevos: dict[int, str] = {}
+        for tipo in ("movie", "tv"):
+            data = await _get(f"/watch/providers/{tipo}", {"api_key": api_key, "watch_region": PAIS})
+            for p in (data or {}).get("results", []):
+                if p.get("logo_path"):
+                    nuevos.setdefault(p["provider_id"], p["logo_path"])
+        if nuevos:
+            _logos, _logos_cuando = nuevos, time.time()
+    out = {}
+    for p in PLATAFORMAS:
+        ruta = next((_logos[i] for i in p["ids"] if i in _logos), None)
+        if ruta:
+            out[p["clave"]] = f"{IMAGE_BASE}/w154{ruta}"
+    return out
 
 
 async def pendientes(limite: int = POR_PASADA) -> list[tuple[int, str]]:

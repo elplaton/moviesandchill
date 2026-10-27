@@ -91,7 +91,9 @@ class Base:
 class Telegram:
     def __init__(self):
         self.enviados = []
+        self.fotos = []
         self.romper = None
+        self.sin_fotos = False
 
     def is_connected(self):
         return True
@@ -103,6 +105,15 @@ class Telegram:
         if self.romper:
             raise RuntimeError(self.romper)
         self.enviados.append((destino, texto))
+        return types.SimpleNamespace(id=len(self.enviados))
+
+    async def send_file(self, destino, archivo, caption=""):
+        if self.romper:
+            raise RuntimeError(self.romper)
+        if self.sin_fotos:
+            raise RuntimeError("WEBPAGE_MEDIA_EMPTY")
+        self.fotos.append(archivo)
+        self.enviados.append((destino, caption))
         return types.SimpleNamespace(id=len(self.enviados))
 
 
@@ -123,8 +134,10 @@ def montar():
 
     tmdb = types.ModuleType("app.services.tmdb")
     async def get_details(api_key, tmdb_id, tipo):
+        # Los pares llevan caratula y los impares no.
+        poster = f"https://image.tmdb.org/t/p/w342/p{tmdb_id}.jpg" if tmdb_id % 2 == 0 else None
         return {"title": f"Titulo {tmdb_id}", "original_title": f"Original {tmdb_id}",
-                "year": 2024, "poster": None}
+                "year": 2024, "poster": poster}
     tmdb.get_details = get_details
     sys.modules["app.services.tmdb"] = tmdb
 
@@ -182,10 +195,24 @@ comprueba("sumarse no cuenta para el limite", 0, base.mandadas.get(2, 0))
 comprueba("la serie y la pelicula con el mismo id son dos peticiones",
           {"estado": "enviada", "ya_pedida": False}, pedir(1, 20, "series"))
 
+comprueba("con caratula sale como foto, a 500 px", "https://image.tmdb.org/t/p/w500/p20.jpg", tg.fotos[0])
+
+print("\nLa caratula")
+fotos = len(tg.fotos)
+pedir(9, 61, admin=True)
+comprueba("sin caratula sale solo el texto", fotos, len(tg.fotos))
+tg.sin_fotos = True
+pedir(9, 62, admin=True)
+comprueba("si Telegram no acepta la foto, sale el texto igualmente",
+          "#peticion Titulo 62 (2024) · Película\nhttps://www.themoviedb.org/movie/62", tg.enviados[-1][1])
+comprueba("y la peticion queda enviada", "enviada", base.peticiones[(62, "movie")]["estado"])
+tg.sin_fotos = False
+
 print("\nEl limite")
 pedir(1, 30)
+escritos = len(tg.enviados)
 comprueba("con tres hoy, la cuarta no sale", 429, pedir(1, 40)[1])
-comprueba("y no se ha escrito nada", 3, len(tg.enviados))
+comprueba("y no se ha escrito nada", escritos, len(tg.enviados))
 comprueba("el admin no tiene limite", {"estado": "enviada", "ya_pedida": False}, pedir(1, 40, admin=True))
 
 print("\nCuando Telegram falla")
@@ -211,6 +238,16 @@ avisos.clear()
 asyncio.run(s.repasar())
 comprueba("la siguiente pasada no vuelve a avisar", [], avisos)
 comprueba("la serie con el mismo id sigue esperando", "enviada", base.peticiones[(20, "tv")]["estado"])
+
+print("\nUna serie avisa una vez, no por capitulo")
+avisos.clear()
+base.catalogo.add((20, "tv"))          # llega el primer capitulo
+asyncio.run(s.repasar())
+comprueba("al llegar el primer capitulo, un aviso", [(1, "Titulo 20 ya se puede ver o descargar", "series")], avisos)
+avisos.clear()
+for _ in range(3):                     # van llegando mas capitulos
+    asyncio.run(s.repasar())
+comprueba("los capitulos siguientes no vuelven a avisar", [], avisos)
 
 print(f"\n{total - len(fallos)} correctas, {len(fallos)} fallidas")
 sys.exit(1 if fallos else 0)

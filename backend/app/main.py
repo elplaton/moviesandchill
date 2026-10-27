@@ -194,6 +194,11 @@ async def startup():
         from app.services.plataformas import relleno_periodico as relleno_plataformas
         _spawn(relleno_plataformas(api_key_tmdb), "relleno_plataformas")
 
+    # Los tops de cada plataforma: una foto al dia.
+    if api_key_tmdb:
+        from app.services.tops import fotografo
+        _spawn(fotografo(api_key_tmdb), "fotografo_tops")
+
     # Lo pedido que ya ha llegado: se marca y se avisa a quien lo esperaba.
     from app.services.peticiones import vigilante as vigilante_peticiones
     _spawn(vigilante_peticiones(), "vigilante_peticiones")

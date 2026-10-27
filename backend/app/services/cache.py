@@ -66,15 +66,15 @@ TTL = {
     # nadie (es un hecho del disco) y lo piden la ficha y el buscador, que lo
     # recorrian entero cada uno por su cuenta.
     "nombres": 600,
-    # La pestaña "Plataformas". Es igual para todas las cuentas (lo que hay en
-    # Netflix no depende de quien mire), asi que no es personal y una sola
-    # entrada sirve a todos. La invalida el relleno al terminar cada pasada.
+    # La pestaña "Plataformas". Es personal desde que lleva los tops: cada
+    # tarjeta de lo que no tenemos dice si esta cuenta ya lo ha pedido. La
+    # invalidan el relleno de plataformas y la foto diaria de los tops.
     "plataformas": 600,
 }
 
 # Espacios cuyo contenido es de una cuenta concreta. En estos, `recordar()`
 # exige `user_id`: sin el, dos cuentas compartirian la misma entrada.
-PERSONALES = {"portada", "fila", "ficha", "disco", "busqueda"}
+PERSONALES = {"portada", "fila", "ficha", "disco", "busqueda", "plataformas"}
 
 _redis = None
 _activa = False

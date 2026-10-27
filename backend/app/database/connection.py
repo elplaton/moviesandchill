@@ -225,6 +225,21 @@ async def _ensure_tables():
         # lo de una version vieja se vuelve a mirar.
         await conn.execute(
             "ALTER TABLE tmdb_plataformas ADD COLUMN IF NOT EXISTS version SMALLINT NOT NULL DEFAULT 1")
+        # Los tops (services/tops.py): una foto al dia de cada lista, asi que
+        # queda el historico. `ambito` es la clave de la plataforma o "todas";
+        # `datos` lleva lo justo para pintar el titulo aunque no lo tengamos.
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS tops (
+                fecha      DATE NOT NULL,
+                ambito     VARCHAR(20) NOT NULL,
+                media_type VARCHAR(10) NOT NULL,
+                puesto     SMALLINT NOT NULL,
+                tmdb_id    INTEGER NOT NULL,
+                fuente     VARCHAR(10) NOT NULL,
+                datos      JSONB,
+                PRIMARY KEY (fecha, ambito, media_type, puesto)
+            )
+        """)
         # Peticiones de titulos que no tenemos, mandadas a un chat de Telegram
         # (services/peticiones.py). Una fila por titulo: si dos personas piden
         # lo mismo, el mensaje sale una vez y las dos esperan la misma fila.

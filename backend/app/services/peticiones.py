@@ -192,6 +192,27 @@ async def _destino(cliente, chat_id: int):
     raise PeticionError("El chat de peticiones ya no está entre los de la cuenta: elige otro en Admin", 409)
 
 
+# El pie de una foto en Telegram mide como mucho 1024 caracteres; la
+# plantilla esta limitada a 1000, asi que cabe salvo titulos imposibles.
+MAX_PIE = 1024
+
+
+async def _mandar(cliente, destino, texto: str, poster: str | None):
+    """El mensaje, con la caratula si la hay: la foto con el texto de pie.
+
+    Va a 500 px y no a los 342 que se guardan para las tarjetas: en Telegram
+    se ve grande. La imagen la descarga Telegram de la URL de TMDB; si no la
+    acepta (pasa a veces con URLs externas), se manda el texto solo. La
+    peticion no se puede perder por la foto.
+    """
+    if poster and len(texto) <= MAX_PIE:
+        try:
+            return await cliente.send_file(destino, poster.replace("/w342/", "/w500/"), caption=texto)
+        except Exception as e:
+            logger.warning("Peticion: la caratula no se pudo mandar (%s); va solo el texto", str(e)[:120])
+    return await cliente.send_message(destino, texto, link_preview=False)
+
+
 async def pedir(user_id: int, es_admin: bool, tmdb_id: int, media_type: str, api_key: str) -> dict:
     """Pide un titulo. Devuelve {"estado", "ya_pedida"}; lo que no se puede
     hacer sale como `PeticionError` con un texto para el usuario."""
@@ -228,7 +249,7 @@ async def pedir(user_id: int, es_admin: bool, tmdb_id: int, media_type: str, api
         try:
             cliente = _cliente()
             destino = await _destino(cliente, conf["chat_id"])
-            mensaje = await cliente.send_message(destino, texto, link_preview=False)
+            mensaje = await _mandar(cliente, destino, texto, datos.get("poster"))
         except PeticionError as e:
             await db.guardar_fallida(datos, str(e))
             raise
