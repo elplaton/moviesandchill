@@ -18,18 +18,19 @@ function MisPeticiones() {
   const [lista, setLista] = useState<MiPeticion[] | null>(null);
   const [quedan, setQuedan] = useState<number | null>(null);
   // Como va la cola, para decir cuando sale cada una de las mias.
-  const [cola, setCola] = useState<{ segundos: number; minutos: number } | null>(null);
+  const [cola, setCola] = useState<{ segundos: number; minutos: number; pausadas: boolean } | null>(null);
   const [quitando, setQuitando] = useState<number | null>(null);
   useEffect(() => {
     misPeticiones().then(d => {
       setLista(d.peticiones || []); setQuedan(d.quedan_hoy);
-      setCola({ segundos: d.segundos_para_siguiente, minutos: d.minutos_entre_envios });
+      setCola({ segundos: d.segundos_para_siguiente, minutos: d.minutos_entre_envios, pausadas: !!d.pausadas });
     }).catch(() => setLista([]));
   }, []);
   /** «En cola · puesto 3 · sale en unas 2 h». Sin ritmo de la cola, el puesto. */
   const textoCola = (p: MiPeticion) => {
     if (!p.puesto) return 'En cola';
-    const sale = cola && cola.minutos ? ` · sale ${enCuanto(segundosHastaPuesto(p.puesto, cola.segundos, cola.minutos))}` : '';
+    const sale = cola?.pausadas ? ' · publicación en pausa'
+      : cola && cola.minutos ? ` · sale ${enCuanto(segundosHastaPuesto(p.puesto, cola.segundos, cola.minutos))}` : '';
     return `En cola · puesto ${p.puesto}${sale}`;
   };
   const quitar = async (p: MiPeticion) => {

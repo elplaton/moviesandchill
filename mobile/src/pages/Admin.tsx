@@ -482,6 +482,17 @@ function Peticiones() {
     const d = await peticionesAdmin();
     setLista(d.peticiones || []); setCola(d.cola);
   };
+  const [pausando, setPausando] = useState(false);
+  const alternarPausa = async () => {
+    if (!cola) return;
+    setPausando(true);
+    try {
+      await guardarAjustes({ pausadas: !cola.pausadas });
+      await recargar();
+      toast(cola.pausadas ? 'Publicación reanudada' : 'Publicación en pausa', 'ok');
+    } catch (e) { toast(e instanceof Error ? e.message : 'No se ha podido cambiar', 'error', 6000); }
+    finally { setPausando(false); }
+  };
   const enCola = async (p: PeticionAdmin, hacer: () => Promise<string | null>) => {
     setEnCurso(p.id);
     try {
@@ -577,10 +588,24 @@ function Peticiones() {
         <p className="text-[13px] font-semibold text-nf-text2 mb-1">Cola</p>
         {/* Una a la hora en total, no por cuenta: escribir mas seguido en el
             grupo con la cuenta del servidor es lo que hace que la echen. */}
-        <p className="text-[15px]">
-          {enLaCola.length === 0 ? `Sale ${ritmo(minutos)} · no hay nada esperando`
-            : `Sale ${ritmo(minutos)} · la siguiente ${salePuesto(1)}`}
-        </p>
+        {cola?.pausadas ? (
+          <p className="rounded-xl bg-amber-400/15 p-3 text-[13px] text-amber-200 leading-relaxed">
+            Publicación en pausa: lo que se pide entra en la cola, pero no sale nada a Telegram hasta que la
+            reanudes. «Enviar ya» sigue funcionando.
+          </p>
+        ) : (
+          <p className="text-[15px]">
+            {enLaCola.length === 0 ? `Sale ${ritmo(minutos)} · no hay nada esperando`
+              : `Sale ${ritmo(minutos)} · la siguiente ${salePuesto(1)}`}
+          </p>
+        )}
+        {/* Pausar no cierra las peticiones: se sigue pidiendo y la cola se
+            llena, pero no sale nada a Telegram hasta reanudar. */}
+        <button onClick={alternarPausa} disabled={pausando || !cola}
+          className={`w-full h-11 mt-3 rounded-xl text-[15px] font-semibold disabled:opacity-40 ${
+            cola?.pausadas ? 'bg-nf-ok/20 text-nf-ok' : 'bg-white/10'}`}>
+          {pausando ? 'Guardando…' : cola?.pausadas ? 'Reanudar publicación' : 'Pausar publicación'}
+        </button>
         {muchas && (
           <p className="mt-3 rounded-xl bg-amber-400/15 p-3 text-[13px] text-amber-200 leading-relaxed">
             Hay {enLaCola.length} esperando: la última saldría {salePuesto(enLaCola.length)}. Sube las importantes,

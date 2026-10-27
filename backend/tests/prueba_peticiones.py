@@ -241,6 +241,7 @@ def montar():
     async def ajustes():
         return {"chat_id": base.ajustes.get("chat"), "chat_nombre": "Peticiones",
                 "tema_id": base.ajustes.get("tema"), "tema_nombre": base.ajustes.get("tema_nombre", ""),
+                "pausadas": base.ajustes.get("pausa", False),
                 "plantilla": base.ajustes.get("plantilla", s.PLANTILLA_POR_DEFECTO)}
     s.ajustes = ajustes
     s._cliente = lambda: tg
@@ -423,6 +424,17 @@ avisos.clear()
 for _ in range(3):                     # van llegando mas capitulos
     asyncio.run(s.repasar())
 comprueba("los capitulos siguientes no vuelven a avisar", [], avisos)
+
+print("\nPublicacion en pausa")
+base.ajustes["pausa"] = True
+esperar(120)
+comprueba("en pausa se puede seguir pidiendo", "en_cola", pedir(9, 153, admin=True)["estado"])
+enviados = len(tg.enviados)
+comprueba("pero no sale nada aunque toque", False, despachar())
+comprueba("ni un mensaje", enviados, len(tg.enviados))
+base.ajustes["pausa"] = False
+comprueba("al reanudar sale la siguiente", True, despachar())
+asyncio.run(base.descartar(base.peticiones[(153, "movie")]["id"]))
 
 print(f"\n{total - len(fallos)} correctas, {len(fallos)} fallidas")
 sys.exit(1 if fallos else 0)

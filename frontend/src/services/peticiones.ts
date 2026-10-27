@@ -57,6 +57,8 @@ export interface RitmoCola {
   /** Cuanto falta para que salga la primera (0 = en el proximo minuto). */
   segundos_para_siguiente: number;
   minutos_entre_envios: number;
+  /** El admin ha pausado la publicación: la cola se llena pero no sale nada. */
+  pausadas?: boolean;
 }
 
 export interface ColaAdmin extends RitmoCola {
@@ -170,6 +172,9 @@ export async function avisoAlPedir(r: RespuestaPedir): Promise<string> {
   if (!r.puesto) return 'En cola: te avisaremos cuando esté';
   try {
     const ritmo = await misPeticiones();
+    if (ritmo.pausadas) {
+      return `En cola (puesto ${r.puesto}): la publicación está en pausa y saldrá cuando se reanude. Te avisaremos cuando esté`;
+    }
     return `En cola (puesto ${r.puesto}): saldrá ${cuandoSale(segundosHastaPuesto(r.puesto, ritmo))}. Te avisaremos cuando esté`;
   } catch {
     return `En cola (puesto ${r.puesto}). Te avisaremos cuando esté`;
@@ -221,6 +226,7 @@ export async function probarPeticion(plantilla?: string): Promise<string> {
 
 export async function guardarAjustes(cambios: {
   chat_id?: number; chat_nombre?: string; tema_id?: number | null; tema_nombre?: string; plantilla?: string;
+  pausadas?: boolean;
 }): Promise<AjustesPeticiones> {
   return json(await apiFetch('/admin/peticiones/ajustes', { method: 'POST', body: JSON.stringify(cambios) }));
 }

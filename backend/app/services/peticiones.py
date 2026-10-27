@@ -54,6 +54,9 @@ MINUTOS_ENTRE_ENVIOS = 60
 # Con mas de esto en cola se avisa al admin (una vez cada vez que se pasa).
 AVISO_COLA = 5
 CLAVE_AVISO_COLA = "peticiones_aviso_cola"
+# Publicacion en pausa: se sigue pudiendo pedir (entra en la cola), pero el
+# despachador no manda nada a Telegram hasta que el admin la reanude.
+CLAVE_PAUSA = "peticiones_pausadas"
 # Estados en los que una peticion sigue viva (hay quien la espera).
 PENDIENTES = ("en_cola", "enviada")
 
@@ -117,6 +120,7 @@ async def ajustes() -> dict:
         "chat_nombre": s.get(CLAVE_CHAT_NOMBRE) or "",
         "tema_id": int(tema) if tema.isdigit() else None,
         "tema_nombre": s.get(CLAVE_TEMA_NOMBRE) or "",
+        "pausadas": s.get(CLAVE_PAUSA) == "1",
         "plantilla": plantilla,
         "plantilla_por_defecto": PLANTILLA_POR_DEFECTO,
         "huecos": HUECOS,
@@ -354,7 +358,7 @@ async def despachar() -> bool:
     from app.database import peticiones as db
 
     conf = await ajustes()
-    if not conf["chat_id"]:
+    if not conf["chat_id"] or conf.get("pausadas"):
         return False
     async with _envio:
         if await segundos_para_siguiente() > 0:

@@ -37,6 +37,7 @@ export default function AdminPeticiones({ onToast }: { onToast: (m: string) => v
   // botones de la cola se apagan, no solo el pulsado: mover dos a la vez
   // cambia los puestos por debajo de la otra y el orden acaba sin sentido.
   const [accion, setAccion] = useState<string | null>(null);
+  const [pausando, setPausando] = useState(false);
   const [chats, setChats] = useState<ChatTelegram[] | null>(null);
   const [cargandoChats, setCargandoChats] = useState(false);
   const [filtro, setFiltro] = useState('');
@@ -108,6 +109,19 @@ export default function AdminPeticiones({ onToast }: { onToast: (m: string) => v
     setProbando(false);
   };
 
+  const alternarPausa = async () => {
+    if (!cola) return;
+    setPausando(true);
+    setError('');
+    try {
+      const a = await guardarAjustes({ pausadas: !cola.pausadas });
+      setAjustes(a);
+      cargar();
+      onToast(cola.pausadas ? 'Publicación reanudada' : 'Publicación en pausa');
+    } catch (e) { setError(e instanceof Error ? e.message : 'No se ha podido cambiar'); }
+    setPausando(false);
+  };
+
   const guardarPlantilla = async () => {
     setGuardando(true);
     setError('');
@@ -168,12 +182,28 @@ export default function AdminPeticiones({ onToast }: { onToast: (m: string) => v
 
       {cola && (
         <div className={CARD}>
-          <h2 className="text-white font-semibold mb-1">Cola</h2>
-          <p className="text-nf-dim text-sm mb-4">
-            Sale una {cada(cola.minutos_entre_envios)}
-            {enCola.length > 0 && <> · la siguiente {cuandoSale(cola.segundos_para_siguiente)}</>}.
-            Así no se llena el grupo de mensajes nuestros.
-          </p>
+          <div className="mb-1 flex items-center justify-between gap-3">
+            <h2 className="text-white font-semibold">Cola</h2>
+            {/* Pausar no cierra las peticiones: se sigue pidiendo y la cola se
+                llena, pero no sale nada a Telegram hasta reanudar. */}
+            <button onClick={alternarPausa} disabled={pausando}
+              className={`rounded-xl px-4 py-2 text-sm font-medium transition-all disabled:opacity-40 ${
+                cola.pausadas ? 'bg-nf-ok/20 text-nf-ok hover:bg-nf-ok/30' : 'bg-white/10 text-white hover:bg-white/20'}`}>
+              {pausando ? 'Guardando…' : cola.pausadas ? 'Reanudar publicación' : 'Pausar publicación'}
+            </button>
+          </div>
+          {cola.pausadas ? (
+            <p className="mb-4 rounded-xl border border-amber-400/30 bg-amber-400/10 px-4 py-3 text-sm text-amber-200">
+              Publicación en pausa: lo que se pide entra en la cola, pero no sale nada a Telegram hasta que la reanudes.
+              «Enviar ya» sigue funcionando.
+            </p>
+          ) : (
+            <p className="text-nf-dim text-sm mb-4">
+              Sale una {cada(cola.minutos_entre_envios)}
+              {enCola.length > 0 && <> · la siguiente {cuandoSale(cola.segundos_para_siguiente)}</>}.
+              Así no se llena el grupo de mensajes nuestros.
+            </p>
+          )}
           {enCola.length >= cola.aviso_a_partir_de && (
             // A una por hora, una cola larga son horas de espera para el
             // último que pidió: mejor verlo aquí que enterarse por él.

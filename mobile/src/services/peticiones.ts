@@ -71,6 +71,8 @@ export interface EstadoCola {
   minutos_entre_envios: number;
   /** A partir de cuantas en cola el servidor avisa al admin. */
   aviso_a_partir_de: number;
+  /** El admin ha pausado la publicación: la cola se llena pero no sale nada. */
+  pausadas?: boolean;
 }
 
 export interface AjustesPeticiones {
@@ -141,6 +143,7 @@ export interface MisPeticiones {
   quedan_hoy: number | null;
   segundos_para_siguiente: number;
   minutos_entre_envios: number;
+  pausadas?: boolean;
 }
 
 export async function misPeticiones(): Promise<MisPeticiones> {
@@ -183,7 +186,8 @@ export async function textoAlPedir(d: Pedida): Promise<string> {
   let cuando = '';
   try {
     const m = await misPeticiones();
-    cuando = `: saldrá ${enCuanto(segundosHastaPuesto(d.puesto, m.segundos_para_siguiente, m.minutos_entre_envios))}`;
+    cuando = m.pausadas ? ': la publicación está en pausa y saldrá cuando se reanude'
+      : `: saldrá ${enCuanto(segundosHastaPuesto(d.puesto, m.segundos_para_siguiente, m.minutos_entre_envios))}`;
   } catch {}
   return `En cola (puesto ${d.puesto})${cuando}. Te avisaremos cuando esté`;
 }
@@ -237,6 +241,7 @@ export async function probarPeticion(plantilla?: string): Promise<void> {
 
 export async function guardarAjustes(cambios: {
   chat_id?: number; chat_nombre?: string; tema_id?: number | null; tema_nombre?: string; plantilla?: string;
+  pausadas?: boolean;
 }): Promise<AjustesPeticiones> {
   return json(await apiFetch('/admin/peticiones/ajustes', { method: 'POST', body: JSON.stringify(cambios) }),
     'No se han podido guardar');

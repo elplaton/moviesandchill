@@ -112,8 +112,12 @@ async def mias(user: Annotated[str, Depends(get_current_user)]):
 
     cuenta = await _cuenta(user)
     hoy = await db.mandadas_hoy(cuenta["id"])
+    from app.services.peticiones import ajustes
+
     return {"peticiones": [_salida(p) for p in await db.de_usuario(cuenta["id"])],
             "quedan_hoy": None if cuenta.get("role") == "admin" else max(0, LIMITE_DIA - hoy),
+            # Con la publicacion en pausa no hay hora estimada: sale cuando se reanude.
+            "pausadas": (await ajustes()).get("pausadas", False),
             # Para decir "sale en unos 40 min": la del puesto N sale cuando
             # falte esto mas (N - 1) huecos de MINUTOS_ENTRE_ENVIOS.
             "segundos_para_siguiente": await segundos_para_siguiente(),
@@ -140,6 +144,7 @@ async def todas(admin: Annotated[str, Depends(get_current_admin)]):
 
     return {"peticiones": [_salida(p) for p in await db.todas()], "ajustes": await ajustes(),
             "cola": {"segundos_para_siguiente": await segundos_para_siguiente(),
+                     "pausadas": (await ajustes()).get("pausadas", False),
                      "minutos_entre_envios": MINUTOS_ENTRE_ENVIOS, "aviso_a_partir_de": AVISO_COLA + 1}}
 
 
@@ -224,16 +229,20 @@ class Ajustes(BaseModel):
     tema_id: int | None = None
     tema_nombre: str | None = None
     plantilla: str | None = None
+    # Pausar o reanudar la publicacion en Telegram (la cola se sigue llenando).
+    pausadas: bool | None = None
 
 
 @router.post("/admin/peticiones/ajustes")
 async def guardar_ajustes(req: Ajustes, admin: Annotated[str, Depends(get_current_admin)]):
     from app.database.connection import set_app_settings
-    from app.services.peticiones import (CLAVE_CHAT_ID, CLAVE_CHAT_NOMBRE, CLAVE_PLANTILLA,
+    from app.services.peticiones import (CLAVE_CHAT_ID, CLAVE_CHAT_NOMBRE, CLAVE_PAUSA, CLAVE_PLANTILLA,
                                          CLAVE_TEMA_ID, CLAVE_TEMA_NOMBRE,
                                          PLANTILLA_POR_DEFECTO, ajustes)
 
     valores: dict[str, str] = {}
+    if req.pausadas is not None:
+        valores[CLAVE_PAUSA] = "1" if req.pausadas else "0"
     if req.chat_id is not None:
         valores[CLAVE_CHAT_ID] = str(req.chat_id)
         valores[CLAVE_CHAT_NOMBRE] = (req.chat_nombre or "")[:200]

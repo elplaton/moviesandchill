@@ -15,7 +15,8 @@ export default function MisPeticiones() {
     misPeticiones().then(d => {
       setLista(d.peticiones);
       setQuedan(d.quedan_hoy);
-      setRitmo({ segundos_para_siguiente: d.segundos_para_siguiente, minutos_entre_envios: d.minutos_entre_envios });
+      setRitmo({ segundos_para_siguiente: d.segundos_para_siguiente, minutos_entre_envios: d.minutos_entre_envios,
+                 pausadas: d.pausadas });
     }).catch(() => setLista([]));
   }, []);
 
@@ -24,7 +25,8 @@ export default function MisPeticiones() {
   const linea = (p: Peticion) => {
     if (p.estado !== 'en_cola' || !p.puesto) return ESTADO_TEXTO[p.estado];
     const partes = [ESTADO_TEXTO.en_cola, `puesto ${p.puesto}`];
-    if (ritmo) partes.push(`sale en ~${duracionAprox(segundosHastaPuesto(p.puesto, ritmo))}`);
+    if (ritmo?.pausadas) partes.push('publicación en pausa');
+    else if (ritmo) partes.push(`sale en ~${duracionAprox(segundosHastaPuesto(p.puesto, ritmo))}`);
     return partes.join(' · ');
   };
   useEffect(() => { cargar(); }, [cargar]);
