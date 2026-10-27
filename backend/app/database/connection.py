@@ -207,6 +207,20 @@ async def _ensure_tables():
                 PRIMARY KEY (channel_id, message_id)
             )
         """)
+        # En que plataformas de pago esta cada titulo en España y cuando
+        # salio lo ultimo (el ultimo episodio, en una serie). Lo rellena
+        # services/plataformas.py. Una lista vacia es "no esta en ninguna",
+        # que no es lo mismo que no tener fila: esa aun no se ha mirado.
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS tmdb_plataformas (
+                tmdb_id       INTEGER NOT NULL,
+                media_type    VARCHAR(10) NOT NULL,
+                proveedores   INTEGER[] NOT NULL DEFAULT '{}',
+                ultima_fecha  DATE,
+                comprobado_en TIMESTAMP DEFAULT NOW(),
+                PRIMARY KEY (tmdb_id, media_type)
+            )
+        """)
         # Estado de la interfaz que es **de la cuenta** y no del aparato: lo
         # ultimo que se busco, por ejemplo. Es el gemelo por usuario de
         # `app_settings`, y existe para que estas cosas no acaben en el

@@ -58,6 +58,7 @@ CLAVE_NOVEDADES = "novedades"
 CLAVE_AÑADIDOS = "anadidos"
 CLAVE_RECOMENDADO = "recomendado"
 CLAVE_FAVORITOS = "favoritos"
+CLAVE_PLATAFORMA = "plataforma:"
 
 
 def item_from_row(row: dict) -> dict:
@@ -325,6 +326,14 @@ async def _pagina_de(key: str, user: str, semilla: str, offset: int, limit: int,
         return await get_estrenos(limit, media_type=tipo, semilla=semilla, offset=offset)
     if key == CLAVE_AÑADIDOS:
         return await get_recently_added(limit, media_type=tipo, offset=offset)
+    if key.startswith(CLAVE_PLATAFORMA):
+        from app.database.browse import get_plataforma_pagina
+        from app.services.plataformas import POR_CLAVE
+
+        clave = key[len(CLAVE_PLATAFORMA):]
+        if clave not in POR_CLAVE:
+            return [], 0
+        return await get_plataforma_pagina(clave, offset, limit, media_type=tipo)
 
     # Las dos que son de la cuenta: hay que saber quién pregunta.
     db_user = await get_user_by_username(user)
@@ -376,6 +385,47 @@ async def _fila_pagina(key: str, user: str, seed: str, offset: int, limit: int,
         return None
     return {"key": key, "items": _dedupe([item_from_row(f) for f in filas]),
             "total": total, "offset": offset}
+
+
+@router.get("/browse/plataformas")
+async def browse_plataformas(user: Annotated[str, Depends(get_current_user)],
+                             media_type: str | None = None):
+    """La pestaña "Plataformas": una fila por plataforma con lo mas novedoso
+    de cada una **que tenemos**. Cada fila pagina por `/browse/row` como las
+    de la portada (`key = plataforma:<clave>`).
+
+    No depende de quien mire, asi que la cache es una para todos. Y no lleva
+    semilla: el orden es la fecha de lo ultimo que salio, no un sorteo.
+    """
+    from app.services import cache
+
+    # Un fallo no se cachea (`recordar` no guarda los None): se devuelve vacio
+    # y la siguiente visita lo vuelve a intentar.
+    return (await cache.recordar("plataformas", [media_type or "todo"],
+                                 lambda: _plataformas(media_type))
+            or {"rows": [], "seed": ""})
+
+
+async def _plataformas(media_type: str | None) -> dict | None:
+    from app.database.browse import get_plataformas_filas
+    from app.services.plataformas import PLATAFORMAS
+
+    try:
+        por_clave = await get_plataformas_filas(ITEMS_PER_ROW, tipo_tmdb(media_type))
+    except Exception as e:
+        logger.error("Plataformas: la consulta fallo: %s", e)
+        return None
+    rows = []
+    for p in PLATAFORMAS:
+        filas, total = por_clave.get(p["clave"], ([], 0))
+        if not filas:
+            continue
+        fila = _fila(p["nombre"], filas, total=total, key=f"{CLAVE_PLATAFORMA}{p['clave']}")
+        fila["plataforma"] = p["clave"]
+        rows.append(fila)
+    # La semilla no ordena nada aqui, pero los clientes la mandan al paginar
+    # y asi el mismo motor de carriles sirve sin tocarlo.
+    return {"rows": rows, "seed": ""}
 
 
 @router.get("/browse/genre")

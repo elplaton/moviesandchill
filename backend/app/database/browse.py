@@ -395,6 +395,77 @@ async def get_genre_page(semilla: str, genero: str, offset: int = 0, limit: int 
     return filas, total
 
 
+# ---------------------------------------------------------------------------
+# Plataformas (Netflix, HBO Max...): lo mas novedoso de cada una que tenemos
+# ---------------------------------------------------------------------------
+
+def _tabla_plataformas() -> str:
+    """Las plataformas como una tabla de la consulta. Van escritas en el SQL y
+    no como parametro porque son constantes del codigo (y enteros): asi la
+    consulta no depende de como pase asyncpg un array de arrays."""
+    from app.services.plataformas import PLATAFORMAS
+
+    filas = ", ".join(f"('{p['clave']}', ARRAY[{', '.join(str(i) for i in p['ids'])}]::int[])"
+                      for p in PLATAFORMAS)
+    return f"plat(clave, ids) AS (VALUES {filas})"
+
+
+# Un titulo por plataforma en la que este, con la fecha de lo ultimo que ha
+# salido (el ultimo episodio, en una serie). Ordena por esa fecha: es lo que
+# quiere decir "lo mas novedoso". Lo que pasa de 45 dias en el futuro es un
+# dato malo de TMDB y no cuenta, igual que en Novedades.
+_POR_PLATAFORMA = """,
+    {plat},
+    desplegado AS (
+        SELECT f.*, p.clave AS plataforma, tp.ultima_fecha,
+               {sin_nota} AS sin_nota, {nota} AS nota
+        FROM fichas f
+        JOIN tmdb_plataformas tp ON tp.tmdb_id = f.tmdb_id AND tp.media_type = f.tmdb_type
+        JOIN plat p ON tp.proveedores && p.ids
+        WHERE (tp.ultima_fecha IS NULL OR tp.ultima_fecha <= CURRENT_DATE + INTERVAL '45 days')
+          {filtro} {solo}
+    ),
+    clasificado AS (
+        SELECT d.*,
+               COUNT(*) OVER (PARTITION BY plataforma) AS total,
+               ROW_NUMBER() OVER (PARTITION BY plataforma
+                                  ORDER BY ultima_fecha DESC NULLS LAST, sin_nota, nota DESC, tmdb_id) AS pos
+        FROM desplegado d
+    )
+"""
+
+
+def _sql_plataformas(media_type: str | None, solo: str, final: str) -> str:
+    return _consulta(_POR_PLATAFORMA.format(plat=_tabla_plataformas(), sin_nota=_SIN_NOTA,
+                                            nota=_NOTA, filtro=_filtro_tipo(media_type), solo=solo),
+                     final)
+
+
+async def get_plataformas_filas(por_fila: int = 20,
+                                media_type: str | None = None) -> dict[str, tuple[list[dict], int]]:
+    """La primera pagina de cada plataforma, en una sola consulta."""
+    filas = await _filas(_sql_plataformas(
+        media_type, "", "SELECT * FROM clasificado WHERE pos <= $1::int ORDER BY plataforma, pos"),
+        por_fila)
+    out: dict[str, tuple[list[dict], int]] = {}
+    for f in filas:
+        lista, _ = out.get(f["plataforma"], ([], 0))
+        lista.append(f)
+        out[f["plataforma"]] = (lista, f["total"])
+    return out
+
+
+async def get_plataforma_pagina(clave: str, offset: int = 0, limit: int = 20,
+                                media_type: str | None = None) -> tuple[list[dict], int]:
+    """Una pagina de una plataforma. Se filtra antes de numerar, como los
+    generos: Postgres no ordena las otras cuatro para nada."""
+    filas = await _filas(_sql_plataformas(
+        media_type, "AND p.clave = $1",
+        "SELECT * FROM clasificado WHERE pos > $2::int AND pos <= $2::int + $3::int ORDER BY pos"),
+        clave, offset, limit)
+    return filas, (filas[0]["total"] if filas else 0)
+
+
 # Compatibilidad con el codigo que aun llama a las funciones antiguas.
 async def get_browse_movies(limit: int = 300):
     return await get_browse_pool("movie", limit)

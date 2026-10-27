@@ -189,6 +189,10 @@ async def startup():
     if api_key_tmdb:
         from app.services.estrenos import relleno_periodico
         _spawn(relleno_periodico(api_key_tmdb), "relleno_fechas_estreno")
+        # En que plataforma (Netflix, HBO Max...) esta cada titulo: la pestaña
+        # "Plataformas" sale de ahi.
+        from app.services.plataformas import relleno_periodico as relleno_plataformas
+        _spawn(relleno_plataformas(api_key_tmdb), "relleno_plataformas")
 
 
 @app.on_event("shutdown")
