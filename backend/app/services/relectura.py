@@ -9,8 +9,9 @@ buscarse en TMDB con esas pistas (lo bien emparejado no se toca), y lo de los
 temas que se ignoran sale del catalogo.
 
 Va despacio a proposito (una pausa entre tandas): no corre prisa y comparte
-cuenta de Telegram con las descargas y lo que se ve sin descargar. Apunta por
-donde va en `app_settings`, asi que un reinicio la deja donde estaba. Solo
+cuenta de Telegram con las descargas y lo que se ve sin descargar. Lo ya
+releido queda marcado (`contexto_leido`), asi que un reinicio sigue donde
+estaba sin apuntar nada mas. Solo
 lee: no escribe nada en Telegram.
 """
 import asyncio
@@ -53,10 +54,6 @@ def _canal(channel_id: int, nombre: str, **cambios) -> None:
     c.update(cambios)
 
 
-def _clave(channel_id: int) -> str:
-    return f"relectura_{channel_id}"
-
-
 async def _pendientes(channel_id: int) -> set[int]:
     from app.database.connection import get_pool
 
@@ -71,10 +68,10 @@ async def _pendientes(channel_id: int) -> set[int]:
 
 async def releer_canal(downloader, channel_id: int, nombre: str, api_key: str = "") -> int:
     """Relee un canal. Devuelve cuantos archivos han recibido contexto."""
-    from app.database.connection import get_app_settings, set_app_settings
     from app.database.media import borrar_de_temas, guardar_contexto, marcar_leidos, temas_ignorados
-    from app.services.indexer import _contexto_a_item, ensure_enrich_worker, seguidor_para, ver
-    from app.services.title_parser import parse_filename
+    from app.services.contexto import interpretar
+    from app.services.indexer import (_contexto_a_item, ensure_enrich_worker, seguidor_para, tipo_de,
+                                      tipos_de_temas, ver)
 
     pendientes = await _pendientes(channel_id)
     if not pendientes:
@@ -86,11 +83,16 @@ async def releer_canal(downloader, channel_id: int, nombre: str, api_key: str = 
         _canal(channel_id, nombre, estado="sin_resolver")
         return 0
 
-    guardado = (await get_app_settings()).get(_clave(channel_id)) or ""
-    desde = max(int(guardado) if guardado.isdigit() else 0, min(pendientes) - MARGEN, 0)
+    # Se empieza un poco antes del primer pendiente (su ficha va encima). No
+    # hace falta apuntar por donde se iba: lo ya releido no esta pendiente, asi
+    # que tras un reinicio se sigue solo donde toca. Apuntarlo y empezar por
+    # ahi era peor: lo pendiente de antes de ese punto (lo que llego mientras
+    # se releia) no se leia nunca y acababa dado por borrado.
+    desde = max(min(pendientes) - MARGEN, 0)
     hasta = max(pendientes)
     ignorados = (await temas_ignorados()).get(channel_id, set())
-    seguidor = seguidor_para(downloader)
+    await tipos_de_temas(channel_id)
+    seguidor = seguidor_para(downloader, channel_id)
     logger.info("Relectura de %s: %d archivos pendientes (mensajes %d a %d)",
                 nombre, len(pendientes), desde, hasta)
 
@@ -108,7 +110,6 @@ async def releer_canal(downloader, channel_id: int, nombre: str, api_key: str = 
             await guardar_contexto(filas)
             hechos += len(filas)
             filas = []
-        await set_app_settings({_clave(channel_id): str(ultimo)})
         if api_key:
             ensure_enrich_worker(api_key)
 
@@ -121,9 +122,10 @@ async def releer_canal(downloader, channel_id: int, nombre: str, api_key: str = 
             if ctx.tema in ignorados:
                 a_borrar.add(ctx.tema)
             c = _contexto_a_item(ctx)
-            # Con el limpiador de ahora: "La silla ª" pasa a "La silla", y
-            # "Clarksons Farm 4x1" deja de ser una pelicula.
-            p = parse_filename(downloader._get_file_name(msg) or "")
+            # Con el limpiador de ahora y con su contexto: "La silla ª" pasa a
+            # "La silla", "Clarksons Farm 4x1" deja de ser una pelicula y
+            # "12 - Televisatron" es un capitulo de "LOS IMPOSIBLES".
+            p = interpretar(downloader._get_file_name(msg) or "", ctx.pie, ctx.ficha, tipo_de(channel_id, ctx.tema))
             filas.append((c.get("pie"), c.get("ficha"), c.get("tema_id"),
                           json.dumps(c["pistas"], ensure_ascii=False) if c.get("pistas") else None,
                           channel_id, msg.id, p.clean_title[:300], p.media_type, p.season, p.episode))
@@ -139,7 +141,7 @@ async def releer_canal(downloader, channel_id: int, nombre: str, api_key: str = 
     # Lo pendiente que ya no esta en Telegram (mensajes borrados) no se puede
     # releer nunca: se da por leido, o cada vuelta recorreria el canal entero
     # desde el mas viejo de ellos para no encontrar nada.
-    perdidos = [m for m in pendientes if m <= ultimo and m not in vistos_ids]
+    perdidos = [m for m in pendientes if desde < m <= ultimo and m not in vistos_ids]
     if perdidos:
         await marcar_leidos(channel_id, perdidos)
 
@@ -218,15 +220,22 @@ async def _al_dia_con_las_reglas() -> None:
     """Si las fichas se leian de otra forma la ultima vez (`contexto.VERSION`),
     lo releido se vuelve a releer: lo guardado se saco con las reglas viejas."""
     from app.database.connection import get_app_settings, set_app_settings
-    from app.database.media import olvidar_contexto
+    from app.database.media import olvidar_contexto, olvidar_sin_leer
     from app.services.contexto import VERSION
 
-    if (await get_app_settings()).get("contexto_version") == str(VERSION):
-        return
-    n = await olvidar_contexto()
-    await set_app_settings({"contexto_version": str(VERSION)})
-    logger.info("Relectura: las fichas se leen de otra forma (version %d), se vuelven a leer %d archivos",
-                VERSION, n)
+    ajustes = await get_app_settings()
+    if ajustes.get("contexto_version") != str(VERSION):
+        n = await olvidar_contexto()
+        await set_app_settings({"contexto_version": str(VERSION), "contexto_reparado": "1"})
+        logger.info("Relectura: las fichas se leen de otra forma (version %d), se vuelven a leer %d archivos",
+                    VERSION, n)
+    elif ajustes.get("contexto_reparado") != "1":
+        # Una vez: lo que una relectura anterior dio por leido sin leerlo
+        # (empezaba por el punto apuntado y se saltaba lo pendiente de antes).
+        # Releer de verdad deja siempre el tema puesto; sin tema no se leyo.
+        n = await olvidar_sin_leer()
+        await set_app_settings({"contexto_reparado": "1"})
+        logger.info("Relectura: %d archivos se dieron por leidos sin leerse, se vuelven a leer", n)
 
 
 async def relectura_de_fondo(downloader, api_key: str = "") -> None:

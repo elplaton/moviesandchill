@@ -236,6 +236,10 @@ async def _ensure_tables():
         await conn.execute("ALTER TABLE media_items ADD COLUMN IF NOT EXISTS pistas JSONB")
         await conn.execute(
             "ALTER TABLE media_items ADD COLUMN IF NOT EXISTS contexto_leido BOOLEAN NOT NULL DEFAULT FALSE")
+        # Lo decidido a mano en Admin -> Revision (la ficha buena, o "no es
+        # nada"): ni la relectura ni "Reclasificar" lo vuelven a tocar.
+        await conn.execute(
+            "ALTER TABLE media_items ADD COLUMN IF NOT EXISTS tmdb_manual BOOLEAN NOT NULL DEFAULT FALSE")
         # Temas de un canal con foro que no se indexan (Deportes, Libros...).
         await conn.execute(
             "ALTER TABLE channels ADD COLUMN IF NOT EXISTS temas_ignorados INTEGER[] NOT NULL DEFAULT '{}'")

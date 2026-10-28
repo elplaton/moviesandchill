@@ -12,7 +12,7 @@ import datetime
 import sys
 import types
 
-from app.services.contexto import Seguidor, concuerda, pistas_de
+from app.services.contexto import Seguidor, concuerda, interpretar, pistas_de, tipo_de_tema
 
 fallos = []
 total = 0
@@ -91,6 +91,55 @@ comprueba("K9: un titulo que es un numero", ("2046", 2004, None), p("Nombre: 204
 comprueba("y uno que parece un año", ("1917", 2019, None), p("Nombre: 1917\n\nAño: 2019"))
 comprueba("y otro", ("Crimen perfecto", 1954, None), p("Nombre: Crimen perfecto\n\nAño: 1954"))
 
+print("\nMas formatos de YoSoyFran (los que se quedaban sin carátula)")
+comprueba("el original en la segunda linea", ("Animales", 2026, "Animals"),
+          p("🎬 Animales (2026)\n\nAnimals\n\n🎭 Géneros: Suspense, Drama\n📝 Estado: Estrenada"))
+comprueba("la etiqueta con un emoji delante", ("La típica Navidad", 2023, None),
+          p("🎬 Nombre: La típica Navidad\n🎭 Género/s: Comedia\n📆 Año: 2023"))
+comprueba("y con otro", ("Mi Nombre Es Khan", None, None), p("▪️ Titulo: Mi Nombre Es Khan\n▪️ Idioma: Castellano"))
+comprueba("el genero pegado detras", ("LAS BRUJAS DE ZUGARRAMURDI", 2013, None),
+          p("2013 - LAS BRUJAS DE ZUGARRAMURDI Género: Comedia"))
+comprueba("la cabecera de una tanda de capitulos", ("Saint Seiya Saga Las 12 Casas", None, None),
+          p("Saint Seiya Saga Las 12 Casas. Capítulos 041-073"))
+comprueba("una sinopsis no es un titulo", None,
+          p("Perseguido por su turbulento pasado, Mad Max cree que la mejor forma de sobrevivir es ir solo"))
+comprueba("las etiquetas de Telegram tampoco", None,
+          p("Temp.6 El reencuentro de los mellizos #EsdPV #EsdPVT6 Capítulos 1031 a 1230 El descubrimiento"))
+
+print("\nEl tema dice si es serie")
+comprueba("Series", "series", tipo_de_tema("Series"))
+comprueba("Dibujos de Nuestra Infancia", "series", tipo_de_tema("Dibujos de Nuestra Infancia"))
+comprueba("Sagas de Películas", "movie", tipo_de_tema("Sagas de Películas"))
+comprueba("Cine Bélico", "movie", tipo_de_tema("Cine Bélico"))
+comprueba("Películas y Series no dice nada", None, tipo_de_tema("Películas y Series"))
+comprueba("Documentales tampoco", None, tipo_de_tema("Documentales Y Programas de TV"))
+
+
+def i(nombre, pie=None, ficha=None, tema=None):
+    x = interpretar(nombre, pie, ficha, tema)
+    return (x.media_type, x.title, x.season, x.episode)
+
+
+print("\nQue es cada archivo, con su contexto")
+comprueba("el capitulo de una tanda es de la serie de la cabecera", ("series", "LOS IMPOSIBLES", 1, 12),
+          i("12 - Televisatron.mp4", "12", "LOS IMPOSIBLES", "series"))
+comprueba("y con el numero detras", ("series", "Fragguel Rock", 1, 63),
+          i("Fraguel_Rock_63_1080p.Dual_Radioactive.mkv", None, "Fragguel Rock", "series"))
+comprueba("la cabecera dice que es serie aunque el tema no", ("series", "Saint Seiya Saga Las 12 Casas", 1, 63),
+          i("063 ¡Resonancia! Las Armaduras De Oro Del Santuario.mp4", None,
+            "Saint Seiya Saga Las 12 Casas. Capítulos 041-073", None))
+comprueba("el pie dice el capitulo que el nombre no", ("series", "La reina del flow", 2, 23),
+          i("60b016c396c721082c6ba750.mp4", "La reina del flow 2x23"))
+comprueba("y la serie aunque el archivo se llame como el capitulo", ("series", "Barrio Esperanza", 1, 2),
+          i("El mono que estaba solo.mp4", "Barrio Esperanza 1x2"))
+comprueba("la temporada sale de la cabecera", ("series", "Tokyo Reversers", 3, 1857),
+          i("1857_8_SUB.mp4", None, "Tokyo Reversers S3 VOSE", "series"))
+comprueba("una saga con numero de orden sigue siendo pelicula",
+          ("movie", "07 - James Bond - Diamantes Para La Eternidad", None, None),
+          i("07 - James Bond - Diamantes Para La Eternidad (1971).avi", None, None, "movie"))
+comprueba("y un numero en un tema de peliculas tambien", ("movie", "Apollo 13", None, None),
+          i("Apollo 13.mkv", None, "Apollo 13 (1995)", "movie"))
+
 print("\nQue la ficha sea del archivo")
 comprueba("mismo titulo", True, concuerda(pistas_de("LA SILLA (2026)"), "La silla (2026) ª[HD 1080P].mp4"))
 comprueba("uno empieza como el otro", True, concuerda(pistas_de("Gen V (Spin off de The Boys)"), "Generación V 1x01.zip.001"))
@@ -100,6 +149,10 @@ comprueba("y de un idioma a otro (Sicily, Sicilia)", True, concuerda(pistas_de("
 comprueba("los extras de K9 tambien", True, concuerda(pistas_de("Nombre: Rebeca, una mujer inolvidable"), "Extra - Rebecca.7z.001"))
 comprueba("las siglas (HDA)", True, concuerda(pistas_de("Hora de Aventuras - Temporada 1 (1080p)"), "HDA 1x05.mkv"))
 comprueba("las siglas con minusculas (LMdMM)", True, concuerda(pistas_de("La Maldición de Molly McGee"), "LMdMM 2x01.mkv"))
+comprueba("una abreviatura (LyOuve)", True, concuerda(pistas_de("Ley y orden uve Unidad de víctimas especiales"), "LyOuve.01x01.hdtv.cast.mkv"))
+comprueba("y otra (FLX)", True, concuerda(pistas_de("Félix el gato Serie de TV"), "FLX T3 EP-1.mp4"))
+comprueba("pero otra serie no (Ninja Hattori)", False,
+          concuerda(pistas_de("El Coyote Y El Correcaminos (1949 - 2010)"), "Ninja Hattori S01E001.mkv"))
 comprueba("una serie de al lado no (Breaking Bad, Better Call Saul)", False,
           concuerda(pistas_de("Breaking Bad - Temporada 3 (1080p)"), "Better Call Saul 3x07 - Gastos.zip.001"))
 comprueba("otra pelicula no", False, concuerda(pistas_de("VECINOS INVASORES"), "The Iron Claw (2023).mkv"))
@@ -167,6 +220,18 @@ c = con_nombre.ver(msg(301, 1, tema=2503, archivo="Vecinos Invasores.7z.001"))
 comprueba("con el nombre, la ficha que concuerda se pega", "VECINOS INVASORES", c.pistas.titulo if c.pistas else None)
 c = con_nombre.ver(msg(302, 2, tema=2503, archivo="The Iron Claw (2023).mkv"))
 comprueba("y la de otra pelicula no", None, c.ficha)
+
+en_series = Seguidor(es_foto=es["foto"], es_sticker=es["sticker"], es_archivo=es["archivo"],
+                     nombre_de=lambda m: m._archivo, tipo_tema=lambda t: "series" if t == 178783 else None)
+en_series.ver(msg(400, 0, tema=178783, texto="LOS IMPOSIBLES", foto=True))
+c = en_series.ver(msg(401, 1, tema=178783, texto="12", archivo="12 - Televisatron.mp4"))
+comprueba("en un tema de series la cabecera vale para el capitulo", "LOS IMPOSIBLES", c.ficha)
+en_series.ver(msg(402, 2, tema=178783, texto="Fragguel Rock"))
+c = en_series.ver(msg(403, 3, tema=178783, archivo="Fraguel_Rock_01_1080p.Dual_Radioactive.mkv"))
+comprueba("y una linea de texto sin año tambien es cabecera", "Fragguel Rock", c.ficha)
+con_nombre.ver(msg(404, 4, tema=2503, texto="Alguien tiene la pelicula de the iron claw?"))
+c = con_nombre.ver(msg(405, 5, tema=2503, archivo="12 - Algo.mp4"))
+comprueba("fuera de un tema de series una pregunta no es cabecera", None, c.ficha)
 
 print(f"\n{total - len(fallos)} correctas, {len(fallos)} fallidas")
 sys.exit(1 if fallos else 0)

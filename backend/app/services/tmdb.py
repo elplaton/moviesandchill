@@ -114,9 +114,12 @@ def _pick_best(results: list[dict], query: str, forced_type: str | None) -> dict
             candidates.append(item)
     if not candidates:
         return None
-    for c in candidates:
-        if _norm(c["title"]) == q or _norm(c["original_title"]) == q:
-            return c
+    # Con varios que se llaman exactamente asi (hay dos "Animales" de 2026: la
+    # de Netflix y otra), el mas votado. Antes se cogia el primero que daba
+    # TMDB y ahi salio la que no era: la del top de Netflix seguia "por pedir".
+    exactos = [c for c in candidates if _norm(c["title"]) == q or _norm(c["original_title"]) == q]
+    if exactos:
+        return max(exactos, key=lambda c: c.get("vote_count") or 0)
     for c in candidates:
         if _acceptable(c, query):
             return c
@@ -170,6 +173,39 @@ async def search(api_key: str, query: str, media_type: str | None = None, year: 
 
     _cache_set(key, best or _MISS)
     return best
+
+
+async def exactos(api_key: str, query: str, media_type: str, year: int | None = None) -> list[dict]:
+    """Todos los que se llaman exactamente asi (titulo u original), del tipo
+    dado y, si se sabe, de ese año. Para cuando hay que elegir entre dos que se
+    llaman igual con algo mas que los votos (`en_plataforma`)."""
+    if not api_key or not query:
+        return []
+    q = _norm(query)
+    extra = {("year" if media_type == "movie" else "first_air_date_year"): year} if year else {}
+    data = await _get(f"/search/{media_type}", {"api_key": api_key, "query": query, "language": "es-ES",
+                                               "page": 1, **extra})
+    out = []
+    for r in (data or {}).get("results") or []:
+        item = _to_result(r, media_type)
+        if item and (_norm(item["title"]) == q or _norm(item["original_title"]) == q):
+            out.append(item)
+    return out
+
+
+def _nombre_plataforma(nombre: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", unicodedata.normalize("NFKD", nombre or "").lower())
+
+
+async def en_plataforma(api_key: str, tmdb_id: int, media_type: str, plataformas: list[str]) -> bool:
+    """Si TMDB dice que el titulo esta en alguna de esas plataformas en España
+    ("Netflix", "Movistar Plus+"). Compara sin mayusculas, espacios ni signos."""
+    data = await _get(f"/{media_type}/{tmdb_id}/watch/providers", {"api_key": api_key})
+    es = ((data or {}).get("results") or {}).get("ES") or {}
+    tiene = {_nombre_plataforma(p.get("provider_name", "")) for k in ("flatrate", "ads", "free")
+             for p in es.get(k) or []}
+    buscadas = {_nombre_plataforma(p) for p in plataformas}
+    return any(b and any(b in t or t in b for t in tiene if t) for b in buscadas)
 
 
 def _extract_year(item: dict) -> int | None:

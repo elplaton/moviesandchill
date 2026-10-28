@@ -1,18 +1,20 @@
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate, useParams } from 'react-router-dom';
 import { apiFetch } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import { toast } from '../utils/toast';
-import { chatsDestino, enCuanto, enviarYa, ESTADO_TEXTO, guardarAjustes, moverEnCola, peticionesAdmin, probarPeticion,
+import { IClose } from '../components/Icons';
+import { buscarParaPedir, chatsDestino, enCuanto, enviarYa, ESTADO_TEXTO, guardarAjustes, moverEnCola, peticionesAdmin, probarPeticion,
          quitarDeCola, ritmo, segundosHastaPuesto, temasDe, TIPO_PETICION, vistaPrevia, volverALaCola,
-         type AjustesPeticiones, type ChatDestino, type EstadoCola, type TemaForo, type PeticionAdmin } from '../services/peticiones';
+         type AjustesPeticiones, type ChatDestino, type ResultadoPeticion, type TipoPeticion, type EstadoCola, type TemaForo, type PeticionAdmin } from '../services/peticiones';
 
 const GB = 1024 ** 3;
 const fmt = (b: number | null | undefined) => b == null ? 'Sin límite' : `${(b / GB).toFixed(b >= GB * 10 ? 0 : 1)} GB`;
 const input = 'w-full h-11 rounded-xl bg-white/10 border border-white/10 px-4 text-[16px] outline-none focus:border-white/40';
 // Mismo orden y mismas secciones que el panel de escritorio.
 const TABS = [
-  ['usuarios', 'Usuarios'], ['descargas', 'Descargas'], ['canales', 'Canales'],
+  ['usuarios', 'Usuarios'], ['descargas', 'Descargas'], ['canales', 'Canales'], ['revision', 'Revisión'],
   ['novedades', 'Novedades'], ['peticiones', 'Peticiones'], ['telegram', 'Telegram'],
   ['servidor', 'Ajustes'],
   ['registros', 'Registros'],
@@ -236,73 +238,14 @@ function TemasCanal({ channelId }: { channelId: number }) {
   );
 }
 
-interface RelecturaCanal { channel_id: number; nombre: string; estado: string; total: number; leidos: number; con_ficha: number; mensaje: number | null; hasta: number | null; error: string | null }
+interface RelecturaCanal { channel_id: number; nombre: string; estado: string; total: number; leidos: number; con_ficha: number; mensaje: number | null; desde: number | null; hasta: number | null; error: string | null }
 interface RelecturaEstado { corriendo: boolean; siguiente: string | null; canales: RelecturaCanal[] }
 
 const ESTADO_RELECTURA: Record<string, string> = {
   releyendo: 'Releyendo…', en_cola: 'En cola', terminado: 'Terminado', al_dia: 'Al día',
   pendiente: 'Pendiente', sin_resolver: 'Sin conexión al canal', fallo: 'Falló',
 };
-
-/**
- * La relectura del contexto (services/relectura.py): vuelve a leer en Telegram
- * lo ya indexado para ponerle su ficha y su pie. Va en segundo plano y tarda,
- * y sin esto solo se veía en el log, o sea, parecía que no hacía nada.
- */
-function Relectura() {
-  const [datos, setDatos] = useState<RelecturaEstado | null>(null);
-  const cargar = () => { apiFetch('/index/relectura').then(r => r.ok ? r.json() : null).then(d => d && setDatos(d)).catch(() => {}); };
-  useEffect(() => { cargar(); }, []);
-  useEffect(() => {
-    const t = setInterval(() => { if (!document.hidden) cargar(); }, datos?.corriendo ? 5000 : 20000);
-    return () => clearInterval(t);
-  }, [datos?.corriendo]);
-  const ahora = async () => {
-    try {
-      const d = await (await apiFetch('/index/relectura', { method: 'POST' })).json();
-      toast(d.ok ? (d.ya_en_marcha ? 'Ya estaba en marcha' : 'Empezando la relectura…') : (d.error || 'No se ha podido empezar'), d.ok ? 'ok' : 'error');
-    } catch { toast('No se ha podido empezar', 'error'); }
-    setTimeout(cargar, 1500);
-  };
-  if (!datos) return null;
-  const leidos = datos.canales.reduce((s, c) => s + c.leidos, 0);
-  const total = datos.canales.reduce((s, c) => s + c.total, 0);
-  const hora = (iso: string) => new Date(iso).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
-
-  return (
-    <section className="rounded-2xl bg-white/5 p-4 mb-4">
-      <div className="flex items-center justify-between mb-1">
-        <p className="text-[13px] font-semibold text-nf-text2">Relectura del contexto</p>
-        {datos.corriendo && <span className="text-[11px] text-yellow-400">En marcha</span>}
-      </div>
-      <p className="text-[12px] text-nf-text3 mb-3">
-        Vuelve a leer en Telegram lo ya indexado para ponerle la ficha y el pie de cada archivo.
-        {' '}{datos.corriendo ? `${leidos.toLocaleString('es-ES')} de ${total.toLocaleString('es-ES')} leídos.`
-          : datos.siguiente ? `La siguiente empieza sola a las ${hora(datos.siguiente)}.` : ''}
-      </p>
-      {datos.canales.map(c => {
-        const pct = c.total ? Math.round((c.leidos / c.total) * 100) : 100;
-        const releyendo = c.estado === 'releyendo';
-        return (
-          <div key={c.channel_id} className="py-2 border-t border-white/5">
-            <div className="flex items-center justify-between">
-              <p className="text-[14px] truncate">{c.nombre}</p>
-              <span className={`text-[11px] shrink-0 ml-2 ${releyendo ? 'text-yellow-400' : c.estado === 'fallo' || c.estado === 'sin_resolver' ? 'text-nf-red' : 'text-nf-text3'}`}>{ESTADO_RELECTURA[c.estado] || c.estado}</span>
-            </div>
-            <p className="text-[11px] text-nf-text3 mt-0.5 tabular-nums">
-              {c.leidos.toLocaleString('es-ES')} / {c.total.toLocaleString('es-ES')} · {c.con_ficha.toLocaleString('es-ES')} con ficha · {pct} %
-            </p>
-            <div className="mt-1 h-1.5 rounded-full bg-white/10 overflow-hidden">
-              <div className={`h-full ${releyendo ? 'bg-yellow-500' : pct >= 100 ? 'bg-nf-ok' : 'bg-white/30'}`} style={{ width: `${Math.min(pct, 100)}%` }} />
-            </div>
-            {c.error && <p className="text-[11px] text-nf-red mt-1">{c.error}</p>}
-          </div>
-        );
-      })}
-      <button onClick={ahora} disabled={datos.corriendo} className="mt-3 w-full h-11 rounded-xl bg-white/10 disabled:opacity-40 text-[15px] font-medium">Releer ahora</button>
-    </section>
-  );
-}
+const horaCorta = (iso: string) => new Date(iso).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
 
 function Channels() {
   // Canal con los temas desplegados (uno a la vez: la lista puede ser larga).
@@ -325,6 +268,28 @@ function Channels() {
   const rescan = async (id: number) => { await apiFetch(`/index/channel/${id}`, { method: 'POST' }); toast('Reescaneando canal'); };
   const reclass = async () => { const d = await (await apiFetch('/index/reclassify', { method: 'POST' })).json(); toast(d.status === 'already_running' ? 'Ya está en marcha' : 'Reclasificando catálogo…'); };
   const rescanAll = async () => { await apiFetch('/index/rescan', { method: 'POST' }); toast('Escaneo completo reiniciado'); };
+
+  // La relectura del contexto (services/relectura.py) va en este mismo bloque y
+  // no en uno aparte: para quien mira es lo mismo que el escaneo, leer los
+  // canales, solo que vuelve sobre lo ya indexado para ponerle su ficha y su
+  // pie. Por eso cada canal lleva su línea debajo de la de escaneo. Su sondeo
+  // va por separado porque su ritmo depende de si ella corre, no el escaneo.
+  const [rel, setRel] = useState<RelecturaEstado | null>(null);
+  const cargarRel = () => { apiFetch('/index/relectura').then(r => r.ok ? r.json() : null).then(d => d && setRel(d)).catch(() => {}); };
+  useEffect(() => { cargarRel(); }, []);
+  useEffect(() => {
+    const t = setInterval(() => { if (!document.hidden) cargarRel(); }, rel?.corriendo ? 5000 : 20000);
+    return () => clearInterval(t);
+  }, [rel?.corriendo]);
+  const releer = async () => {
+    try {
+      const r = await apiFetch('/index/relectura', { method: 'POST' });
+      const d = await r.json();
+      if (!r.ok || !d.ok) toast(d.error || d.detail || 'No se ha podido empezar', 'error');
+      else toast(d.ya_en_marcha ? 'Ya estaba en marcha' : 'Empezando la relectura…', 'ok');
+    } catch { toast('No se ha podido empezar', 'error'); }
+    setTimeout(cargarRel, 1500);
+  };
   // Mismo orden que en escritorio: primero lo indexado, luego los canales y
   // el añadir al final. En el movil estaba justo al reves.
   //
@@ -362,12 +327,19 @@ function Channels() {
           </div>
         )}
         <button onClick={reclass} className="mt-4 w-full h-11 rounded-xl bg-white/10 text-[15px] font-medium">Reclasificar catálogo</button>
+        <button onClick={releer} disabled={!!rel?.corriendo} className="mt-2 w-full h-11 rounded-xl bg-white/10 disabled:opacity-40 text-[15px] font-medium">{rel?.corriendo ? 'Releyendo el contexto…' : 'Releer ahora'}</button>
         <button onClick={rescanAll} className="mt-2 w-full h-11 rounded-xl bg-nf-red text-[15px] font-semibold">Reescanear todo</button>
+        {rel && !rel.corriendo && rel.siguiente && (
+          <p className="text-[11px] text-nf-text3 mt-2 text-center">La siguiente relectura empieza sola a las {horaCorta(rel.siguiente)}</p>
+        )}
       </section>
-      <Relectura />
       {channels.map(c => {
         const p = progress.find((x: any) => x.channel_id === c.id);
         const pct = p?.total_estimate ? Math.round((p.total_scanned / p.total_estimate) * 100) : 0;
+        const r = rel?.canales.find(x => x.channel_id === c.id);
+        const pctR = r?.total ? Math.round((r.leidos / r.total) * 100) : 100;
+        const releyendo = r?.estado === 'releyendo';
+        const fallo = r?.estado === 'fallo' || r?.estado === 'sin_resolver';
         return (
           <div key={c.id} className="rounded-2xl bg-white/5 p-4 mb-2">
             <div className="flex items-center justify-between">
@@ -378,6 +350,20 @@ function Channels() {
               </div>
             </div>
             {p && <><p className="text-[12px] text-nf-text3 mt-1">{p.total_indexed?.toLocaleString()} archivos · {p.status === 'done' ? 'completado' : `${pct} %`}</p><div className="mt-1 h-1.5 rounded-full bg-white/10 overflow-hidden"><div className={`h-full ${p.status === 'done' ? 'bg-nf-ok' : 'bg-nf-red'}`} style={{ width: `${p.status === 'done' ? 100 : pct}%` }} /></div></>}
+            {r && (
+              <>
+                <div className="flex items-baseline justify-between mt-2 text-[11px] text-nf-text3">
+                  <span className="tabular-nums truncate">Contexto leído: {r.leidos.toLocaleString('es-ES')} / {r.total.toLocaleString('es-ES')} · {r.con_ficha.toLocaleString('es-ES')} con ficha</span>
+                  {(releyendo || r.estado === 'en_cola' || fallo) && (
+                    <span className={`shrink-0 ml-2 ${releyendo ? 'text-yellow-400' : fallo ? 'text-nf-red' : ''}`}>{ESTADO_RELECTURA[r.estado]}</span>
+                  )}
+                </div>
+                <div className="mt-1 h-1 rounded-full bg-white/10 overflow-hidden">
+                  <div className={`h-full ${releyendo ? 'bg-yellow-500' : fallo ? 'bg-nf-red' : pctR >= 100 ? 'bg-nf-ok' : 'bg-white/30'}`} style={{ width: `${Math.min(pctR, 100)}%` }} />
+                </div>
+                {fallo && r.error && <p className="text-[11px] text-nf-red mt-1">{r.error}</p>}
+              </>
+            )}
             {temasDe === c.id && <TemasCanal channelId={c.id} />}
           </div>
         );
@@ -388,6 +374,301 @@ function Channels() {
         <button onClick={add} disabled={!url.trim()} className="mt-2 w-full h-11 rounded-xl bg-nf-red disabled:opacity-40 text-[15px] font-semibold">Añadir</button>
         {msg && <p className="text-[12px] text-nf-text2 mt-2">{msg}</p>}
       </section>
+    </div>
+  );
+}
+
+interface MotivoRevision { clave: string; titulo: string; descripcion: string; grupos: number; archivos: number }
+interface ResumenRevision { motivos: MotivoRevision[]; canales: { channel_id: number; nombre: string }[] }
+interface FichaActual { tmdb_id: number; media_type: TipoPeticion; title: string; year: number | null; poster: string | null }
+interface GrupoRevision {
+  clave: string; motivo: string; titulo: string; tipo: TipoPeticion; año: number | null; archivos: number;
+  canales: string[]; ejemplo: string; ficha: string | null; pie: string | null; actual: FichaActual | null;
+}
+
+const POR_PAGINA = 30;
+const num = (n: number) => n.toLocaleString('es-ES');
+const conAño = (t: string, y: number | null | undefined) => y ? `${t} (${y})` : t;
+// Una respuesta que no es JSON (un 502 del proxy) no puede tumbar la pantalla:
+// se trata como un error sin detalle y sale el texto por defecto.
+const leer = async (r: Response) => { try { return await r.json(); } catch { return {}; } };
+
+/** Texto de Telegram (ficha o pie) recortado; tocarlo lo enseña entero. */
+function TextoCanal({ etiqueta, texto }: { etiqueta: string; texto: string }) {
+  const [entero, setEntero] = useState(false);
+  return (
+    <button onClick={() => setEntero(e => !e)} className="block w-full text-left mt-2 rounded-xl bg-black/25 px-3 py-2">
+      <span className="block text-[10px] uppercase tracking-wide text-nf-text3 mb-0.5">{etiqueta}</span>
+      <span className={`block text-[12px] text-nf-text2 whitespace-pre-line break-words ${entero ? '' : 'line-clamp-3'}`}>{texto}</span>
+    </button>
+  );
+}
+
+function TarjetaRevision({ g, onCorregir, onIgnorado }: { g: GrupoRevision; onCorregir: () => void; onIgnorado: (archivos: number) => void }) {
+  // Ignorar pide confirmación en la propia tarjeta: no toca nada del catálogo,
+  // pero el grupo desaparece de la lista y no hay dónde deshacerlo.
+  const [confirmar, setConfirmar] = useState(false);
+  const [ignorando, setIgnorando] = useState(false);
+  const ignorar = async () => {
+    setIgnorando(true);
+    try {
+      const r = await apiFetch('/admin/revision/ignorar', { method: 'POST', body: JSON.stringify({ clave: g.clave }) });
+      const d = await leer(r);
+      if (!r.ok || !d.ok) throw new Error(d.detail || 'No se ha podido ignorar');
+      onIgnorado(d.archivos ?? g.archivos);
+    } catch (e) { toast(e instanceof Error ? e.message : 'No se ha podido ignorar', 'error', 6000); setIgnorando(false); }
+  };
+  return (
+    <div className="rounded-2xl bg-white/5 p-4 mb-2">
+      <p className="text-[16px] font-semibold leading-tight break-words">{g.titulo || 'Sin título'}</p>
+      <p className="text-[12px] text-nf-text3 mt-1">
+        {TIPO_PETICION[g.tipo] || g.tipo}{g.año ? ` · ${g.año}` : ''} · {num(g.archivos)} {g.archivos === 1 ? 'archivo' : 'archivos'}{g.canales.length ? ` · ${g.canales.join(', ')}` : ''}
+      </p>
+      <p className="mt-2 text-[11px] font-mono text-nf-text3 break-all line-clamp-2">{g.ejemplo}</p>
+      {g.ficha && <TextoCanal etiqueta="Ficha del canal" texto={g.ficha} />}
+      {g.pie && <TextoCanal etiqueta="Pie del archivo" texto={g.pie} />}
+      {g.actual && (
+        <div className="flex items-center mt-3 space-x-3">
+          {g.actual.poster
+            ? <img src={g.actual.poster} alt="" loading="lazy" className="w-9 h-[54px] rounded object-cover shrink-0 bg-white/10" />
+            : <div className="w-9 h-[54px] rounded shrink-0 bg-white/10" />}
+          <div className="min-w-0">
+            <p className="text-[10px] uppercase tracking-wide text-nf-text3">Ficha actual · {TIPO_PETICION[g.actual.media_type] || g.actual.media_type}</p>
+            <p className="text-[13px] truncate">{conAño(g.actual.title, g.actual.year)}</p>
+          </div>
+        </div>
+      )}
+      {confirmar ? (
+        <div className="mt-3 rounded-xl bg-white/10 p-3">
+          <p className="text-[13px]">Deja de salir en esta lista. No cambia la ficha ni quita nada del catálogo.</p>
+          <div className="flex mt-3 space-x-2">
+            <button onClick={() => setConfirmar(false)} disabled={ignorando} className="flex-1 h-11 rounded-xl bg-white/10 text-[15px] font-medium disabled:opacity-40">Cancelar</button>
+            <button onClick={ignorar} disabled={ignorando} className="flex-1 h-11 rounded-xl bg-white text-black text-[15px] font-semibold disabled:opacity-40">{ignorando ? 'Ignorando…' : 'Ignorar'}</button>
+          </div>
+        </div>
+      ) : (
+        <div className="flex mt-3 space-x-2">
+          <button onClick={onCorregir} className="tap flex-1 h-11 rounded-xl bg-nf-red text-[15px] font-semibold">Corregir</button>
+          <button onClick={() => setConfirmar(true)} className="tap flex-1 h-11 rounded-xl bg-white/10 text-[15px] font-medium">Ignorar</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Buscar en TMDB la ficha buena y ponérsela al grupo entero.
+ *
+ * Por portal en el <body> y con el armazón de `.hoja-shell`: dentro de
+ * `.app-main` un `position: fixed` no queda por encima de la barra de
+ * pestañas en iOS (ver `.player-shell` en index.css). Va por debajo de los
+ * avisos (z-60), que son los que dicen si ha salido bien o no.
+ *
+ * TMDB solo se consulta al pulsar «Buscar»: por tecla serían una docena de
+ * consultas por título, y el campo ya llega relleno con lo que hay que buscar.
+ */
+function HojaCorregir({ g, onCerrar, onHecho }: { g: GrupoRevision; onCerrar: () => void; onHecho: (archivos: number, ficha: string) => void }) {
+  const [texto, setTexto] = useState(g.titulo);
+  const [resultados, setResultados] = useState<ResultadoPeticion[] | null>(null);
+  const [buscando, setBuscando] = useState(false);
+  const [elegido, setElegido] = useState<ResultadoPeticion | null>(null);
+  const [poniendo, setPoniendo] = useState(false);
+
+  const buscar = async () => {
+    const q = texto.trim();
+    if (!q) return;
+    setBuscando(true); setElegido(null);
+    try { setResultados(await buscarParaPedir(q)); }
+    catch (e) { toast(e instanceof Error ? e.message : 'No se ha podido buscar', 'error', 6000); }
+    finally { setBuscando(false); }
+  };
+
+  const asignar = async () => {
+    if (!elegido) return;
+    setPoniendo(true);
+    try {
+      const r = await apiFetch('/admin/revision/asignar', { method: 'POST', body: JSON.stringify({ clave: g.clave, tmdb_id: elegido.tmdb_id, media_type: elegido.media_type }) });
+      const d = await leer(r);
+      if (!r.ok || !d.ok) throw new Error(d.detail || 'No se ha podido corregir');
+      onHecho(d.archivos ?? g.archivos, conAño(elegido.title, elegido.year));
+    } catch (e) { toast(e instanceof Error ? e.message : 'No se ha podido corregir', 'error', 6000); setPoniendo(false); }
+  };
+
+  return createPortal(
+    <div className="hoja-shell">
+      <div role="dialog" aria-label={`Corregir ${g.titulo}`} className="subir relative flex-1 min-h-0 flex flex-col bg-nf-bg">
+        <div className="shrink-0 px-4 pb-3 border-b border-white/10" style={{ paddingTop: 'calc(var(--safe-t) + 14px)' }}>
+          <div className="flex items-center justify-between">
+            <div className="min-w-0 pr-3">
+              <p className="text-[17px] font-semibold truncate">Corregir la ficha</p>
+              <p className="text-[12px] text-nf-text3 truncate">{conAño(g.titulo, g.año)} · {num(g.archivos)} {g.archivos === 1 ? 'archivo' : 'archivos'}</p>
+            </div>
+            <button onClick={onCerrar} aria-label="Cerrar" className="w-9 h-9 shrink-0 rounded-full bg-white/10 flex items-center justify-center">
+              <span className="w-4 h-4"><IClose /></span>
+            </button>
+          </div>
+          <form className="flex mt-3 space-x-2" onSubmit={e => { e.preventDefault(); buscar(); }}>
+            <input className={input} value={texto} onChange={e => setTexto(e.target.value)} placeholder="Título" enterKeyHint="search" />
+            <button type="submit" disabled={buscando || !texto.trim()} className="shrink-0 h-11 px-4 rounded-xl bg-white text-black text-[14px] font-semibold disabled:opacity-40">
+              {buscando ? 'Buscando…' : 'Buscar en TMDB'}
+            </button>
+          </form>
+        </div>
+        <div className="flex-1 min-h-0 overflow-y-auto px-4 py-2" style={{ overscrollBehavior: 'contain' }}>
+          {resultados === null && !buscando && <p className="text-[13px] text-nf-text3 py-4">Corrige el título si hace falta y busca: al tocar un resultado se pide confirmación antes de ponerlo.</p>}
+          {resultados?.length === 0 && <p className="text-[13px] text-nf-text3 py-4">TMDB no ha encontrado nada. Prueba con el título original o sin el año.</p>}
+          {resultados?.map(x => {
+            const sel = elegido?.tmdb_id === x.tmdb_id && elegido.media_type === x.media_type;
+            return (
+              <button key={`${x.media_type}-${x.tmdb_id}`} onClick={() => setElegido(sel ? null : x)}
+                className={`w-full flex items-start text-left py-2.5 px-2 -mx-2 rounded-xl space-x-3 ${sel ? 'bg-white/10' : ''}`}>
+                {x.poster
+                  ? <img src={x.poster} alt="" loading="lazy" className="w-12 h-[72px] rounded object-cover shrink-0 bg-white/10" />
+                  : <div className="w-12 h-[72px] rounded shrink-0 bg-white/10" />}
+                <div className="min-w-0 flex-1">
+                  <p className="text-[15px] font-medium leading-tight line-clamp-2">{x.title}</p>
+                  {x.original_title && x.original_title !== x.title && <p className="text-[12px] text-nf-text3 truncate mt-0.5">{x.original_title}</p>}
+                  <p className="text-[12px] text-nf-text3 mt-0.5">{TIPO_PETICION[x.media_type] || x.media_type}{x.year ? ` · ${x.year}` : ''}</p>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+        {elegido && (
+          <div className="shrink-0 px-4 pt-3 border-t border-white/10 bg-nf-raised" style={{ paddingBottom: 'calc(var(--safe-b) + 14px)' }}>
+            <p className="text-[13px] text-nf-text2">
+              Poner «{conAño(elegido.title, elegido.year)}» a {num(g.archivos)} {g.archivos === 1 ? 'archivo' : 'archivos'}
+            </p>
+            <div className="flex mt-3 space-x-2">
+              <button onClick={() => setElegido(null)} disabled={poniendo} className="flex-1 h-11 rounded-xl bg-white/10 text-[15px] font-medium disabled:opacity-40">Cancelar</button>
+              <button onClick={asignar} disabled={poniendo} className="flex-1 h-11 rounded-xl bg-nf-red text-[15px] font-semibold disabled:opacity-40">{poniendo ? 'Poniendo…' : 'Poner esta ficha'}</button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
+/**
+ * Revisión: lo que se ha indexado mal, agrupado por título, para corregirlo a
+ * mano (services/revision.py). Un grupo son todos los archivos que el
+ * servidor cree del mismo título, así que corregir uno los corrige todos.
+ *
+ * Cambiar de motivo, canal o búsqueda empieza la lista de cero, y cada
+ * petición lleva su número: con la búsqueda por tecla (con retardo, pero aun
+ * así) una respuesta atrasada pisaría la lista de lo que se está escribiendo.
+ */
+function Revision() {
+  const [resumen, setResumen] = useState<ResumenRevision | null>(null);
+  const [errorResumen, setErrorResumen] = useState('');
+  const [motivo, setMotivo] = useState('sin_ficha');
+  const [canal, setCanal] = useState('');
+  const [texto, setTexto] = useState('');
+  const [q, setQ] = useState('');
+  const [grupos, setGrupos] = useState<GrupoRevision[]>([]);
+  const [total, setTotal] = useState<number | null>(null);
+  const [cargando, setCargando] = useState(false);
+  const [error, setError] = useState('');
+  const [corrigiendo, setCorrigiendo] = useState<GrupoRevision | null>(null);
+  const peticion = useRef(0);
+
+  const cargarResumen = async () => {
+    try {
+      const r = await apiFetch('/admin/revision/resumen');
+      const d = await leer(r);
+      if (!r.ok) throw new Error(d.detail || 'No se ha podido leer el resumen');
+      setResumen(d); setErrorResumen('');
+    } catch (e) { setErrorResumen(e instanceof Error ? e.message : 'No se ha podido leer el resumen'); }
+  };
+  useEffect(() => { cargarResumen(); }, []);
+
+  useEffect(() => { const t = setTimeout(() => setQ(texto.trim()), 300); return () => clearTimeout(t); }, [texto]);
+
+  const cargar = async (offset: number) => {
+    const n = ++peticion.current;
+    setCargando(true);
+    if (!offset) setError('');
+    try {
+      const params = new URLSearchParams({ motivo, offset: String(offset), limit: String(POR_PAGINA) });
+      if (canal) params.set('channel_id', canal);
+      if (q) params.set('q', q);
+      const r = await apiFetch(`/admin/revision?${params}`);
+      const d = await leer(r);
+      if (n !== peticion.current) return;
+      if (!r.ok) throw new Error(d.detail || 'No se ha podido leer la lista');
+      setTotal(d.total ?? 0);
+      setGrupos(prev => offset ? [...prev, ...(d.grupos || [])] : (d.grupos || []));
+    } catch (e) {
+      if (n === peticion.current) setError(e instanceof Error ? e.message : 'No se ha podido leer la lista');
+    } finally {
+      if (n === peticion.current) setCargando(false);
+    }
+  };
+  useEffect(() => { setGrupos([]); setTotal(null); cargar(0); }, [motivo, canal, q]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Lo corregido o ignorado sale de la lista en el servidor, así que «Cargar
+  // más» sigue pidiendo desde grupos.length sin saltarse a nadie.
+  const quitar = (clave: string) => {
+    setGrupos(gs => gs.filter(x => x.clave !== clave));
+    setTotal(t => t == null ? t : Math.max(t - 1, 0));
+    cargarResumen();
+  };
+
+  const elegido = resumen?.motivos.find(m => m.clave === motivo);
+  const quedan = total != null && grupos.length < total;
+
+  return (
+    <div>
+      <div className="flex gap-2 overflow-x-auto no-scrollbar -mx-4 px-4 mb-2">
+        {(resumen?.motivos || []).map(m => (
+          <button key={m.clave} onClick={() => setMotivo(m.clave)}
+            className={`shrink-0 h-9 px-3.5 rounded-full text-[13px] font-semibold ${motivo === m.clave ? 'bg-white text-black' : 'bg-white/10 text-nf-text2'}`}>
+            {m.titulo} <span className={`tabular-nums ${motivo === m.clave ? 'text-black/60' : 'text-nf-text3'}`}>{num(m.grupos)}</span>
+          </button>
+        ))}
+      </div>
+      {!resumen && !errorResumen && <p className="text-[13px] text-nf-text3 mb-3">Repasando el catálogo… la primera vez tarda unos segundos.</p>}
+      {errorResumen && (
+        <div className="mb-3">
+          <p className="text-[13px] text-nf-red">{errorResumen}</p>
+          <button onClick={cargarResumen} className="tap mt-2 h-9 px-3 rounded-full bg-white/10 text-[13px]">Reintentar</button>
+        </div>
+      )}
+      {elegido && <p className="text-[12px] text-nf-text3 mb-3">{elegido.descripcion} {num(elegido.archivos)} archivos en total.</p>}
+      <div className="space-y-2 mb-3">
+        <select className={input} value={canal} onChange={e => setCanal(e.target.value)}>
+          <option value="">Todos los canales</option>
+          {(resumen?.canales || []).map(c => <option key={c.channel_id} value={String(c.channel_id)}>{c.nombre}</option>)}
+        </select>
+        <input className={input} type="search" placeholder="Filtrar por título o archivo" value={texto} onChange={e => setTexto(e.target.value)} />
+      </div>
+      {total != null && <p className="text-[12px] text-nf-text3 mb-2">{num(total)} {total === 1 ? 'grupo' : 'grupos'}</p>}
+      {error && (
+        <div className="mb-3">
+          <p className="text-[13px] text-nf-red">{error}</p>
+          <button onClick={() => cargar(grupos.length)} className="tap mt-2 h-9 px-3 rounded-full bg-white/10 text-[13px]">Reintentar</button>
+        </div>
+      )}
+      {cargando && !grupos.length && !error && <p className="text-[13px] text-nf-text3 py-4">Cargando…</p>}
+      {!cargando && !error && total === 0 && <p className="rounded-2xl bg-white/5 p-4 text-[13px] text-nf-text2">No hay nada que revisar aquí.</p>}
+      {grupos.map(g => (
+        <TarjetaRevision key={g.clave} g={g} onCorregir={() => setCorrigiendo(g)}
+          onIgnorado={n => { quitar(g.clave); toast(`Ignorado: ${num(n)} ${n === 1 ? 'archivo' : 'archivos'} dejan de salir aquí`, 'ok'); }} />
+      ))}
+      {quedan && !error && (
+        <button onClick={() => cargar(grupos.length)} disabled={cargando} className="mt-2 w-full h-11 rounded-xl bg-white/10 disabled:opacity-40 text-[15px] font-medium">
+          {cargando ? 'Cargando…' : `Cargar más (${num(total! - grupos.length)})`}
+        </button>
+      )}
+      {corrigiendo && (
+        <HojaCorregir g={corrigiendo} onCerrar={() => setCorrigiendo(null)}
+          onHecho={(n, ficha) => {
+            quitar(corrigiendo.clave); setCorrigiendo(null);
+            toast(`«${ficha}» puesta a ${num(n)} ${n === 1 ? 'archivo' : 'archivos'}`, 'ok', 5000);
+          }} />
+      )}
     </div>
   );
 }
@@ -1239,6 +1520,7 @@ export default function Admin() {
       {tab === 'usuarios' && <Users />}
       {tab === 'descargas' && <DownloadsAll />}
       {tab === 'canales' && <Channels />}
+      {tab === 'revision' && <Revision />}
       {tab === 'novedades' && <Novedades />}
       {tab === 'peticiones' && <Peticiones />}
       {tab === 'telegram' && <Telegram />}

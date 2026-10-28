@@ -38,13 +38,19 @@ _EP_PATTERNS = [
     re.compile(r"(?<![\dx])(\d{1,2})x(\d{1,3})(?:-\d{1,3})?(?!\d)", re.IGNORECASE),
     # S01E01, S01E009, S01 E01, T01E10, [S05.E06], [S 1 E 3]
     re.compile(r"(?<![A-Za-z])[sStT]\s*(\d{1,2})\s*[.\s]?\s*[eE]\s*(\d{1,3})(?!\d)"),
+    # T6 C07, T1 C01, T4C12: temporada y capitulo ("Homeland T6 C07").
+    re.compile(r"(?<![A-Za-z])[tT]\s*(\d{1,2})\s*[.\s]?\s*[cC]\s*(\d{1,3})(?!\d)"),
+    # S0107 pegado, sin la E: temporada 1, episodio 7 ("rms Mntrss_S0107").
+    # Solo 01-19 y nunca el 00: "Honda S2000" no es la temporada 20.
+    re.compile(r"(?<![A-Za-z])[sS](0[1-9]|1\d)(?!00)(\d{2})(?!\d)"),
     # Temporada 2 Episodio 17 / Season 2 Episode 3 / Temporada 3 [HDTV][Cap.303]
     re.compile(r"\b(?:temporada|season|temp)[\s.-]*(\d{1,2})\b.*?\b(?:episodio|episode|capitulo|capítulo|cap|ep)[\s.-]*(\d{1,3})\b", re.IGNORECASE),
 ]
 # Solo temporada: packs completos ("Vikingos - Temporada 1 (Blu-ray 1080p).zip.010")
 _SEASON_ONLY_RE = re.compile(r"\b(?:temporada|season|temp)[\s.-]*(\d{1,2})\b", re.IGNORECASE)
 # Solo episodio: "Katekyo Hitman Reborn Castellano episodio 43", "Final Season 297"
-_EPISODE_ONLY_RE = re.compile(r"\b(?:episodio|episode|capitulo|capítulo|cap|ep)[\s.-]*(\d{1,3})\b", re.IGNORECASE)
+# Las telenovelas pasan de mil: "Capítulo 1229".
+_EPISODE_ONLY_RE = re.compile(r"\b(?:episodio|episode|capitulo|capítulo|cap|ep)[\s.-]*(\d{1,4})\b", re.IGNORECASE)
 # "Final Season 297": tres cifras justo detras de la palabra no son una temporada.
 _SEASON_WORD_NUM_RE = re.compile(r"\b(?:season|temporada)\s+(\d{3})(?=\s*[\[\(.]|\s*$)", re.IGNORECASE)
 # Estilo anime/fansub, sin temporada:
@@ -94,7 +100,7 @@ def _clean(text: str) -> str:
     text = re.sub(r"\s+por\s+\w+\s*$", " ", text, flags=re.IGNORECASE)
     text = _QUALITY_RE.sub(" ", text)
     text = re.sub(r"\b(?:temporada|season|temp)[\s.-]*\d{1,2}\b", " ", text, flags=re.IGNORECASE)
-    text = re.sub(r"\b(?:episodio|episode|capitulo|capítulo|cap|ep)[\s.-]*\d{1,3}\b", " ", text, flags=re.IGNORECASE)
+    text = re.sub(r"\b(?:episodio|episode|capitulo|capítulo|cap|ep)[\s.-]*\d{1,4}\b", " ", text, flags=re.IGNORECASE)
     text = re.sub(r"(?<![A-Za-z])[sS]\d{1,2}(?![\w])", " ", text)
     return _tidy(text)
 
@@ -160,6 +166,8 @@ def parse_filename(filename: str) -> ParsedName:
     # "@La_Comunidad" hay que quitarlo entero antes de convertir "_" en espacio;
     # si no, sobrevive "Comunidad" y "Billions Comunidad" no existe en TMDB.
     base = re.sub(r"@[\w.]+", " ", base)
+    # "GHOSTLIGHT AÑO 2.025": el año con punto de los mil, como en los pies.
+    base = re.sub(r"\bA[ÑN]O\s*([12])\.(\d{3})\b", r"(\1\2)", base, flags=re.IGNORECASE)
     hint = _TMDBID_RE.search(base)
     tmdb_id_hint = int(hint.group(1)) if hint else None
     year = _extract_year(base)
@@ -259,3 +267,34 @@ def parse_filename(filename: str) -> ParsedName:
         clean_title=clean or base,
         tmdb_id_hint=tmdb_id_hint,
     )
+
+
+# Nombres que no dicen nada del titulo: lo que sale de grabar un directo o de
+# bajar un video de una web ("chunklist_b1024000 (480p_aac).mp4").
+_GENERICO_RE = re.compile(r"^(?:output|chunklist|videoplayback|video|vid|file|archivo|capitulo|capítulo|episodio)\b",
+                          re.IGNORECASE)
+
+
+def numero_suelto(filename: str) -> int | None:
+    """El numero de capitulo de un archivo que no dice de que serie es:
+    "12 - Televisatron", "063 ¡Resonancia!...", "167. Aparece el dios Ener",
+    "136_Zeny_en_la_isla...", "Fraguel_Rock_63", "Ana de nadie 46". Un año no
+    cuenta. Solo tiene sentido cuando algo mas dice que es una serie (el tema
+    del foro o la ficha de encima): "Apollo 13" tambien acaba en numero."""
+    base = _sin_simbolos(strip_extension(filename or "")).replace("_", " ").strip()
+    p = parse_filename(filename)
+    if p.episode is not None:
+        return p.episode
+    # Delante ("12 - ..."), al final del nombre, o justo antes de la calidad
+    # ("Fraguel_Rock_63_1080p.Dual_Radioactive").
+    for m in (re.match(r"^(\d{1,4})\s*(?:[-.)]|\s)\s*\S", base), re.search(r"\s(\d{2,4})$", base),
+              re.search(r"\s(\d{2,4})(?=\s+\d{3,4}p\b)", base)):
+        if m and not 1900 <= int(m.group(1)) <= 2035:
+            return int(m.group(1))
+    return None
+
+
+def es_generico(filename: str) -> bool:
+    """El nombre no dice nada que se pueda buscar ("output.mp4", "Capítulo 1229")."""
+    base = _sin_simbolos(strip_extension(filename or "")).replace("_", " ").strip()
+    return bool(_GENERICO_RE.match(base)) or not re.search(r"[^\W\d_]{3,}", base)

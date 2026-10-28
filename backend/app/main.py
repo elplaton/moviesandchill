@@ -232,6 +232,7 @@ app.include_router(auth_router)
 app.include_router(vincular_router)
 
 from app.routers.search_router import router as search_router
+from app.routers.revision_router import router as revision_router
 from app.routers.download_router import router as download_router
 from app.routers.files_router import router as files_router
 from app.routers.channels_router import router as channels_router
@@ -276,6 +277,7 @@ app.include_router(tracks_router)
 app.include_router(hls_router)
 app.include_router(favorites_router)
 app.include_router(peticiones_router)
+app.include_router(revision_router)
 app.include_router(progress_router)
 app.include_router(follows_router)
 app.include_router(push_router)

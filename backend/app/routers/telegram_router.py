@@ -455,6 +455,8 @@ def _resumen(m) -> dict:
     texto, que lleva adjunto, a que responde y los enlaces. Solo lectura."""
     from telethon.tl import types as tl
 
+    from app.services.contexto import texto_de
+
     medio = None
     doc = getattr(m, "document", None)
     if getattr(m, "photo", None):
@@ -487,7 +489,14 @@ def _resumen(m) -> dict:
     return {
         "id": m.id,
         "fecha": m.date.isoformat() if m.date else None,
-        "texto": (m.message or "")[:800],
+        # Las fichas "enriquecidas" no traen nada en `message`: su texto sale
+        # de `rich_message` (ver contexto._texto_rico).
+        "texto": (m.message or texto_de(m) or "")[:800],
+        # Para lo que llega vacio sin serlo (hay fichas que en la app de
+        # Telegram se ven enteras y aqui no traen ni texto ni adjunto): de que
+        # tipo es el mensaje y su adjunto, tal como los entiende Telethon.
+        "clase": type(m).__name__,
+        "clase_medio": type(m.media).__name__ if getattr(m, "media", None) else None,
         "medio": medio,
         "album": m.grouped_id,
         "responde_a": getattr(r, "reply_to_msg_id", None),
