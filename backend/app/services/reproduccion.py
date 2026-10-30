@@ -159,8 +159,10 @@ _armando: dict[tuple[int, int], asyncio.Lock] = {}
 
 def _downloader():
     from app.routers.download import downloader
-    if downloader is None or downloader.client is None:
-        raise NoReproducible("Telegram no esta conectado", definitivo=False)
+    # Desconectado, Telethon responde con un ConnectionError que llegaba al
+    # cliente como un 500 («el servidor no ha podido comprobarlo»).
+    if downloader is None or downloader.client is None or not downloader.client.is_connected():
+        raise NoReproducible("Telegram no esta conectado ahora mismo: prueba en un minuto", definitivo=False)
     return downloader
 
 

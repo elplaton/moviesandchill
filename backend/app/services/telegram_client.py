@@ -2,6 +2,7 @@ import asyncio
 import logging
 import os
 import re
+import time
 from datetime import datetime, timedelta
 
 from telethon import TelegramClient
@@ -54,6 +55,9 @@ class TelegramDownloader:
         self.channels = {}
         self._config_channels = config.get("channels") or []
         self.session_dir = None
+        # Lo pone stop(): apagando, el vigilante no debe volver a conectar.
+        self._parado = False
+        self._canales_intentados = 0.0
 
     def _session_path(self):
         if self.session_dir:
@@ -138,13 +142,54 @@ class TelegramDownloader:
         except Exception as e:
             logger.warning("No se pudo saber si la cuenta de Telegram es Premium: %s", e)
 
+        await self.resolver_canales()
+
+    async def resolver_canales(self) -> int:
+        """Resuelve los canales que aun no lo estan. Devuelve cuantos hay."""
+        self._canales_intentados = time.monotonic()
         for ch in self.channel_ids:
+            if ch["id"] in self.channels:
+                continue
             try:
                 ref = self._resolve_channel_id(ch["id"])
                 entity = await self.client.get_entity(ref)
                 self.channels[ch["id"]] = {"entity": entity, "name": ch["name"]}
             except Exception as e:
                 logger.warning("No se pudo resolver canal %d: %s", ch["id"], e)
+        return len(self.channels)
+
+    async def vigilar_conexion(self, cada: float = 30):
+        """Vuelve a conectar con Telegram si la conexion se ha caido.
+
+        Telethon reconecta solo tras un corte corto, pero no si el primer
+        `connect()` falla (al arrancar el servidor sin red todavia) ni cuando
+        agota sus reintentos: el cliente se queda desconectado para siempre y
+        todo lo que pasa por el falla con "Cannot send requests while
+        disconnected". Paso tras un reinicio del servidor: 16 horas sin «Ver»
+        en nada que no estuviera descargado y sin indexar lo nuevo, con el
+        cliente marcado como autorizado y 0 canales resueltos.
+        """
+        while not self._parado:
+            await asyncio.sleep(cada)
+            c = self.client
+            if c is None or self._parado:
+                continue
+            try:
+                if not c.is_connected():
+                    await c.connect()
+                    if not await c.is_user_authorized():
+                        continue
+                    logger.warning("Telegram estaba desconectado: conexion recuperada")
+                    await self.resolver_canales()
+                # Canales sin resolver con la conexion viva (uno privado, o
+                # Telegram fallando justo al resolver): se reintenta cada 10
+                # minutos, no cada vuelta.
+                elif (len(self.channels) < len(self.channel_ids)
+                      and time.monotonic() - self._canales_intentados > 600
+                      and await c.is_user_authorized()):
+                    await self.resolver_canales()
+            except Exception as e:
+                logger.warning("No se pudo reconectar con Telegram: %s", e)
 
     async def add_channel(self, ch_id, name):
         for ch in self.channel_ids:
@@ -216,6 +261,7 @@ class TelegramDownloader:
         logger.info("Escuchando mensajes nuevos en %d canales", len(self.channel_ids))
 
     async def stop(self):
+        self._parado = True
         if self.client:
             await self.client.disconnect()
 

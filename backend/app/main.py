@@ -115,6 +115,11 @@ async def startup():
     except Exception as e:
         logger.error("No se pudo conectar a Telegram: %s", e)
 
+    # Si la conexion se cae (o no llega a abrirse al arrancar), se recupera
+    # sola en vez de dejar «Ver» y el indexado en vivo muertos hasta reiniciar.
+    from app.tasks import spawn as _spawn_vigilante
+    _spawn_vigilante(downloader.vigilar_conexion(), "vigilar_telegram")
+
     from app.routers.download import init_download_router
     init_download_router(downloader, config)
 
