@@ -12,6 +12,7 @@ import Row from '../components/Row';
 import PosterCard from '../components/PosterCard';
 import TitleDetail, { type DetailInput } from '../components/TitleDetail';
 import type { Featured, SearchResult } from '../types';
+import { escucharAbrirTitulo } from '../tv/abrirTitulo';
 
 const RESULTS_X = 830;
 const DEBOUNCE_MS = 350;
@@ -37,6 +38,8 @@ export default function Search() {
   const [series, setSeries] = useState<SearchSeriesGroup[]>([]);
   const [movies, setMovies] = useState<[string, SearchResult[]][]>([]);
   const [detail, setDetail] = useState<DetailInput | null>(null);
+  // La pantalla del final del reproductor abre aqui la ficha de un relacionado.
+  useEffect(() => escucharAbrirTitulo(setDetail), []);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Numero de la peticion en vuelo: con el mando se teclea despacio y una
   // respuesta atrasada pisaba los resultados de la letra siguiente.
@@ -175,7 +178,7 @@ export default function Search() {
         </div>
       </FocusScope>
 
-      {detail && <TitleDetail input={detail} onClose={() => setDetail(null)} />}
+      {detail && <TitleDetail key={`${detail.kind}${detail.tmdbId ?? detail.meta.title}`} input={detail} onClose={() => setDetail(null)} />}
     </div>
   );
 }

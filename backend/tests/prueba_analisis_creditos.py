@@ -104,11 +104,36 @@ ver(ac.inicio_creditos([(0, "N"), (10, "N"), (20, "K"), (30, "C"), (40, "C"), (5
     "el logo del final no impide encontrar el inicio")
 ver(ac.inicio_creditos([(0, "N"), (10, "C"), (20, "N"), (30, "N"), (40, "K"), (50, "C"), (60, "C")], 15) == 40,
     "un fotograma oscuro suelto antes no cuenta")
+# Animales: creditos con trozos de imagen en medio. Cuenta el principio de la
+# zona, no el ultimo tramo.
+animales = [(t, "N") for t in range(5900, 5964, 4)] + [(5964, "K"), (5968, "C"), (5972, "C")] + \
+           [(t, "C") for t in range(5976, 6100, 4)] + [(t, "N") for t in range(6100, 6140, 4)] + \
+           [(t, "C") for t in range(6140, 6300, 4)] + [(t, "N") for t in range(6300, 6320, 4)] + \
+           [(t, "C") for t in range(6320, 6491, 4)]
+ver(ac.inicio_creditos(animales, 40) == 5964, "creditos con huecos de imagen: cuenta el principio")
+ver(ac.inicio_creditos([(t, "N") for t in range(0, 300, 5)] + [(300, "C"), (305, "C")] +
+                       [(t, "N") for t in range(310, 600, 5)], 15) is None,
+    "una escena oscura en medio de la pelicula no son los creditos")
 ver(ac.transicion([(0, "N"), (5, "N"), (10, "K"), (15, "C"), (20, "C"), (25, "N")]) == ("ok", 10),
     "comprobar: el primer paso a creditos")
 ver(ac.transicion([(0, "C"), (5, "C"), (10, "C")])[0] == "antes", "comprobar: ya eran creditos")
 ver(ac.transicion([(0, "N"), (5, "N"), (10, "C")])[0] == "despues", "comprobar: aun no han empezado")
 ver(ac.es_episodio(47 * 60) and not ac.es_episodio(110 * 60), "episodio o pelicula por la duracion")
+# Animales en MKV: fotogramas clave cada ~10 s en los creditos y una tarjeta
+# con poco texto en medio (antes salia «N» y rompia la comprobacion).
+ver(ac.transicion([(5941, "N"), (5958, "N"), (5963, "K"), (5973, "C"), (5983, "N"), (5993, "C")]) == ("ok", 5963),
+    "comprobar: con fotogramas cada 10 s basta con dos que abarquen 8 s")
+ver(ac.transicion([(0, "N"), (2, "C"), (4, "N"), (6, "N")])[0] == "despues",
+    "comprobar: un fotograma suelto no son creditos")
+ancho = ac.ANCHO * ac.ALTO
+tarjeta = bytearray(b"\x10" * ancho)
+for i in range(150):   # dos nombres pequeños: ~0,3 % de pixeles claros, casi sin bordes
+    tarjeta[ac.ANCHO * 80 + 120 + i % 75 + (i // 75) * ac.ANCHO * 6] = 220
+ver(ac.etiqueta(bytes(tarjeta)) == "C", "una tarjeta casi negra con poco texto son creditos")
+noche = bytearray(b"\x18" * ancho)
+for i in range(ancho // 10):   # una escena oscura: 10 % de la imagen con algo de luz
+    noche[i * 10] = 90
+ver(ac.etiqueta(bytes(noche)) == "N", "una escena oscura con luz repartida no son creditos")
 
 asyncio.run(main())
 shutil.rmtree(dir_, ignore_errors=True)

@@ -26,7 +26,42 @@ import type { EstadoSiguiente } from '../hooks/useSiguiente';
  */
 export default function NextUp({ sig }: { sig: EstadoSiguiente }) {
   const d = sig.decision;
+  // La pantalla del final (película o último episodio) es otra: FinTitulo.
+  if (d.tipo === 'final') return null;
   if (d.tipo === 'nada' && !sig.mensaje) return null;
+
+  // Ver el siguiente: como Netflix, dos botones sobre los créditos, y el de
+  // seguir es la cuenta atrás (se va llenando y, al llenarse, se pulsa solo).
+  if (d.tipo === 'ver') {
+    const lleno = sig.corriendo ? sig.progreso : 1;
+    return (
+      <div onMouseEnter={sig.parar}
+        className="absolute bottom-28 right-6 z-10 flex animate-slide-up flex-col items-end gap-2">
+        {sig.mensaje && (
+          <p className="rounded bg-black/70 px-3 py-1.5 text-sm text-nf-ok">{sig.mensaje}</p>
+        )}
+        <div className="flex items-center gap-3">
+          <button onClick={sig.descartar}
+            className="rounded bg-black/60 px-5 py-3 text-base font-semibold text-white ring-1 ring-white/40
+                       transition-colors hover:bg-white/20">
+            Ver créditos
+          </button>
+          <button onClick={sig.confirmar} aria-label={sig.texto}
+            className="relative overflow-hidden rounded bg-white/35 px-6 py-3 text-base font-semibold text-black
+                       shadow-panel">
+            <span className="absolute inset-y-0 left-0 bg-white"
+              style={{ width: `${Math.round(lleno * 100)}%`,
+                       transition: sig.corriendo ? 'width 120ms linear' : 'none' }} />
+            <span className="relative flex items-center gap-2 whitespace-nowrap">
+              <span className="w-5 h-5"><IconPlay /></span>
+              {d.bajar.length ? sig.texto : 'Siguiente episodio'}
+              <span className="font-normal text-black/60">{d.siguiente.label}</span>
+            </span>
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   // Cuando ya no queda nada que ofrecer pero sí algo que contar («Descargando
   // 3x09 y 3x10»), la tarjeta se queda un momento solo con el mensaje.
@@ -39,36 +74,21 @@ export default function NextUp({ sig }: { sig: EstadoSiguiente }) {
     );
   }
 
+  // Lo que queda: no hay nada descargado por delante y se ofrece bajarlo.
+  // Sin barra: lo que pasa solo es seguir viendo, no gastar disco y cuota.
   return (
     <div
-      onMouseEnter={sig.parar}
       className="absolute bottom-28 right-6 z-10 w-[26rem] max-w-[calc(100vw-3rem)]
                  animate-slide-up overflow-hidden rounded-panel border border-nf-line
                  bg-nf-surface/95 shadow-panel backdrop-blur"
     >
-      {/* La barra va arriba y al ancho completo: es la misma señal que usa
-          Netflix y se entiende sin leer nada. */}
-      {d.tipo === 'ver' && (
-        <div className="h-1 w-full bg-white/15">
-          <div
-            className="h-full bg-nf-red"
-            style={{ width: `${Math.round(sig.progreso * 100)}%`,
-                     transition: sig.corriendo ? 'width 120ms linear' : 'none' }}
-          />
-        </div>
-      )}
-
       <div className="flex items-start gap-3 p-4">
         {sig.poster && (
           <img src={sig.poster} alt="" className="h-20 w-14 shrink-0 rounded object-cover" />
         )}
         <div className="min-w-0 flex-1">
-          <p className="text-micro font-semibold uppercase tracking-wide text-nf-faint">
-            {d.tipo === 'ver' ? 'A continuación' : 'Se acaba lo descargado'}
-          </p>
-          <p className="mt-1 truncate text-md font-semibold">
-            {d.tipo === 'ver' ? d.siguiente.label : listar(d.bajar)}
-          </p>
+          <p className="text-micro font-semibold uppercase tracking-wide text-nf-faint">Se acaba lo descargado</p>
+          <p className="mt-1 truncate text-md font-semibold">{listar(d.bajar)}</p>
           <p className="truncate text-sm text-nf-dim">{sig.titulo}</p>
         </div>
         <button onClick={sig.descartar} aria-label="Cerrar"
@@ -79,24 +99,16 @@ export default function NextUp({ sig }: { sig: EstadoSiguiente }) {
 
       {sig.mensaje && <p className="px-4 pb-3 text-sm text-nf-ok">{sig.mensaje}</p>}
 
-      {d.tipo === 'bajar' && (
-        <p className="px-4 pb-3 text-xs text-nf-faint">
-          {d.bajar.map((e) => `${e.label} · ${e.size_str}`).join('  ·  ')}
-        </p>
-      )}
+      <p className="px-4 pb-3 text-xs text-nf-faint">
+        {d.bajar.map((e) => `${e.label} · ${e.size_str}`).join('  ·  ')}
+      </p>
 
       <div className="flex items-center gap-2 px-4 pb-4">
-        <Button variant={d.tipo === 'ver' ? 'light' : 'primary'} size="md"
-          className="flex-1" disabled={sig.bajando}
-          icon={d.tipo === 'ver' ? <IconPlay /> : <IconDownload />}
-          onClick={sig.confirmar}>
-          {sig.bajando && d.tipo === 'bajar' ? 'Pidiendo…'
-            : sig.corriendo ? `${sig.texto} · ${sig.restante}`
-            : sig.texto}
+        <Button variant="primary" size="md" className="flex-1" disabled={sig.bajando}
+          icon={<IconDownload />} onClick={sig.confirmar}>
+          {sig.bajando ? 'Pidiendo…' : sig.texto}
         </Button>
-        <Button variant="ghost" onClick={sig.descartar}>
-          {d.tipo === 'ver' ? 'Cancelar' : 'Ahora no'}
-        </Button>
+        <Button variant="ghost" onClick={sig.descartar}>Ahora no</Button>
       </div>
     </div>
   );

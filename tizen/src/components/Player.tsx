@@ -11,6 +11,8 @@ import { markWatched, resumePoint, setWatched } from '../tv/progress';
 import { toast } from '../tv/toast';
 import { IconPause, IconPlay } from './Icons';
 import SiguienteEp, { opcionesSiguiente } from './SiguienteEp';
+import FinTitulo, { MAX_RELACIONADOS, VIDEO_ENCOGIDO } from './FinTitulo';
+import { abrirTitulo } from '../tv/abrirTitulo';
 import { useSiguiente } from '../hooks/useSiguiente';
 
 interface Props {
@@ -151,7 +153,7 @@ export default function Player(props: Props) {
    */
   const [enTarjeta, setEnTarjeta] = useState(false);
   const sig = useSiguiente({
-    path, tmdbId,
+    path, tmdbId, mediaType,
     onVer: (siguiente) => {
       const v = videoRef.current;
       // El que se deja se marca visto **antes** de cambiar: la cuenta atras
@@ -170,6 +172,20 @@ export default function Player(props: Props) {
     pausar: () => videoRef.current?.pause(),
   });
   const opcionesSig = opcionesSiguiente(sig);
+  /**
+   * La pantalla del final (pelicula o ultimo episodio): el video se encoge y
+   * el mando es suyo desde que aparece, porque con el video pequeño no tiene
+   * sentido saltar 10 s. Fila 0 los botones, fila 1 las caratulas.
+   */
+  const final = sig.decision.tipo === 'final';
+  const [cursorFin, setCursorFin] = useState({ fila: 0, col: 0 });
+  useEffect(() => { if (final) setCursorFin({ fila: 0, col: 0 }); }, [final]);
+  const elegirRelacionado = useCallback((i: number) => {
+    const r = sig.relacionados[i];
+    if (!r) return;
+    close();
+    abrirTitulo(r);
+  }, [sig.relacionados]); // eslint-disable-line react-hooks/exhaustive-deps
   /** El mando esta en la tarjeta: porque se entro, o porque ya no hay video. */
   const mandoEnTarjeta = opcionesSig.length > 0 && (sig.alFinal || enTarjeta);
 
@@ -350,6 +366,7 @@ export default function Player(props: Props) {
   }, [audioForzado, fuente.modo, path]);
 
   useBackHandler(() => {
+    if (final) { close(); return true; }
     if (panel) { setPanel(false); return true; }
     // Con la tarjeta arriba, Atras la descarta. Si el video ya habia
     // terminado, `descartar()` cierra el reproductor por su cuenta.
@@ -360,6 +377,22 @@ export default function Player(props: Props) {
   }, true);
 
   useEffect(() => pushRawHandler((key) => {
+    if (final) {
+      const n = Math.min(sig.relacionados.length, MAX_RELACIONADOS);
+      if (key === 'up') { setCursorFin({ fila: 0, col: 0 }); return true; }
+      if (key === 'down') { if (n) setCursorFin({ fila: 1, col: 0 }); return true; }
+      if (key === 'left') { setCursorFin(c => ({ ...c, col: Math.max(0, c.col - 1) })); return true; }
+      if (key === 'right') {
+        setCursorFin(c => ({ ...c, col: Math.min(c.fila === 0 ? 1 : Math.max(0, n - 1), c.col + 1) }));
+        return true;
+      }
+      if (key === 'enter') {
+        if (cursorFin.fila === 0) { if (cursorFin.col === 0) sig.verCreditos(); else close(); }
+        else elegirRelacionado(cursorFin.col);
+        return true;
+      }
+      return true;
+    }
     // La tarjeta del siguiente episodio va primero: mientras esta arriba, el
     // mando es suyo. Lo primero que hace cualquier tecla es parar la cuenta
     // atras: si alguien esta ahi tocando botones, no se le cambia de capitulo
@@ -393,7 +426,8 @@ export default function Player(props: Props) {
     if (key === 'up' && opciones.length) { setCursor(0); setPanel(true); showOsd(); return true; }
     showOsd();
     return true;
-  }), [togglePlay, seek, showOsd, panel, opciones, cursor, aplicar, opcionesSig, cursorSig, sig, mandoEnTarjeta]);
+  }), [togglePlay, seek, showOsd, panel, opciones, cursor, aplicar, opcionesSig, cursorSig, sig, mandoEnTarjeta,
+        final, cursorFin, elegirRelacionado]);
 
   useEffect(() => pushMediaHandler((key) => {
     const v = videoRef.current;
@@ -532,8 +566,14 @@ export default function Player(props: Props) {
   return (
     <Overlay>
     <div className="fixed inset-0 z-[70]" style={{ background: '#000' }}>
-      <video ref={videoRef} src={fuente.src} autoPlay playsInline preload="auto" className="absolute inset-0 w-full h-full"
-        style={{ backgroundColor: '#000', objectFit: 'contain' }}>
+      {/* En la pantalla del final el video se encoge arriba a la izquierda.
+          Con posicion y tamaño, sin transform ni transicion: en el Fire TV el
+          video va en una capa aparte que ignora los transform de la pagina. */}
+      <video ref={videoRef} src={fuente.src} autoPlay playsInline preload="auto"
+        className={final ? 'absolute z-10 rounded-lg' : 'absolute inset-0 w-full h-full'}
+        style={{ backgroundColor: '#000', objectFit: 'contain',
+                 ...(final ? { left: VIDEO_ENCOGIDO.left, top: VIDEO_ENCOGIDO.top,
+                               width: VIDEO_ENCOGIDO.width, height: VIDEO_ENCOGIDO.height } : {}) }}>
         {tracks.subtitles.map(sub => (
           <track key={sub.path} kind="subtitles" src={subtitleUrl(sub.path)}
             srcLang={sub.language} label={sub.label} />
@@ -549,13 +589,13 @@ export default function Player(props: Props) {
           onMouseMove={showOsd} />
       )}
 
-      {buffering && (
+      {buffering && !final && (
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
           <div className="w-[72px] h-[72px] rounded-full border-[6px] border-white/20 border-t-white animate-spin" />
         </div>
       )}
 
-      {!playing && !buffering && (
+      {!playing && !buffering && !final && (
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
           <div className="w-[120px] h-[120px] rounded-full bg-black/55 flex items-center justify-center text-white">
             <span className="w-[64px] h-[64px]"><IconPause /></span>
@@ -591,12 +631,12 @@ export default function Player(props: Props) {
       )}
 
       {PUNTERO && (
-        <div className={`tv-osd ${osd ? '' : 'is-hidden'} absolute top-[40px] left-[48px]`}>
+        <div className={`tv-osd ${osd && !final ? '' : 'is-hidden'} absolute top-[40px] left-[48px]`}>
           <button className="tv-ctl inline-flex items-center justify-center space-x-3 rounded-lg px-7 h-[60px] text-body font-semibold whitespace-nowrap" onClick={close}>&#10005;&nbsp;&nbsp;Volver</button>
         </div>
       )}
 
-      <div className={`tv-osd ${osd ? '' : 'is-hidden'} absolute left-0 right-0 bottom-0 pt-[160px] pb-[64px] px-[96px]`}
+      <div className={`tv-osd ${osd && !final ? '' : 'is-hidden'} absolute left-0 right-0 bottom-0 pt-[160px] pb-[64px] px-[96px]`}
         style={{ background: 'linear-gradient(180deg, rgba(0,0,0,0) 0%, rgba(0,0,0,0.85) 100%)' }}>
         <div className="flex items-end justify-between mb-6">
           <div className="min-w-0">
@@ -644,6 +684,10 @@ export default function Player(props: Props) {
           </p>
         )}
       </div>
+
+      <FinTitulo sig={sig} titulo={title} subtitulo={subtitle}
+        fila={cursorFin.fila} columna={cursorFin.col}
+        onVerCreditos={sig.verCreditos} onSalir={close} onElegir={elegirRelacionado} />
 
       <SiguienteEp sig={sig} enfocada={mandoEnTarjeta}
         cursor={Math.min(cursorSig, Math.max(0, opcionesSig.length - 1))}

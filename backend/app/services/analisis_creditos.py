@@ -53,6 +53,15 @@ from app.services import mp4 as _mp4
 
 logger = logging.getLogger("tmd")
 
+# Version del detector. Al cambiar como se clasifica o se decide, se sube: lo
+# medido por imagen con una version anterior deja de valer como «medido» y se
+# vuelve a comprobar la proxima vez que alguien abra ese enlace (ver
+# services/creditos.consultar). La 2 reconoce tarjetas casi negras con poco
+# texto y comprobaciones con fotogramas clave escasos (Animales en MKV, que la
+# 1 dio por empezados siete minutos tarde). La 3 mide el principio de la zona
+# de creditos y no el ultimo tramo (los de Animales tienen huecos de imagen).
+VERSION = 3
+
 Lector = Callable[[int, int], Awaitable[bytes]]   # leer(desde, cuanto) -> bytes
 
 # Lo que se pide a Telegram por peticion al analizar. Un fotograma clave son
@@ -75,6 +84,10 @@ MINIMO_EPISODIO = 15
 MINIMO_PELICULA = 40
 # Comprobacion: fotogramas seguidos de negro/creditos para darla por buena.
 SEGUIDOS = 3
+# Como mucho un fotograma cada tanto al medir una pelicula: hay MP4 con un
+# fotograma clave cada 2 s, y mirarlos todos en 12 minutos costaba el doble
+# (Animales, 73 MB) sin ganar nada: los creditos duran minutos.
+CADA_PELICULA = 4.0
 
 # A la vez: peticiones a Telegram y ffmpeg decodificando.
 PETICIONES = 3
@@ -500,10 +513,19 @@ def medidas(px: bytes) -> tuple[float, float, float]:
 
 
 def etiqueta(px: bytes) -> str:
-    """'C' creditos, 'K' negro o 'N' imagen."""
+    """'C' creditos, 'K' negro o 'N' imagen.
+
+    Dos formas de ser creditos: casi todo negro (>= 92 %) con letras (bordes
+    finos), o **casi entero negro** (>= 97 %) con un poco de claro aunque
+    apenas tenga bordes: una tarjeta con dos nombres pequeños. Sin la segunda,
+    en *Animales* una tarjeta asi salia como imagen y, con un fotograma clave
+    cada 10 s, rompia la comprobacion. Las escenas oscuras que se confundian
+    rondaban el 75-90 %, asi que no llegan."""
     oscuro, claro, bordes = medidas(px)
     if oscuro >= 0.985 and claro < 0.001:
         return "K"
+    if oscuro >= 0.97 and 0.001 <= claro <= 0.05:
+        return "C"
     if oscuro >= 0.92 and 0.001 <= claro <= 0.08 and bordes >= 0.004:
         return "C"
     return "N"
@@ -534,29 +556,52 @@ async def mirar(leer: Lector, idx: Indice, desde: float, hasta: float,
     return [h for h in hechos if h]
 
 
+# Desde el inicio de los creditos hasta el final, al menos esta parte tiene
+# que ser negro o creditos.
+FRACCION_CREDITOS = 0.7
+
+
 def inicio_creditos(serie: list[tuple[float, str]], minimo: float) -> float | None:
-    """Inicio del ultimo tramo largo de negro/creditos (los finales). Lo de
-    despues da igual."""
-    tramos, actual, ultimo = [], None, None
-    for t, e in serie:
-        if e in "CK":
-            if actual and t - ultimo <= HUECO:
-                actual[1] = t
-                actual[2] += e == "C"
-            else:
-                actual = [t, t, int(e == "C")]
-                tramos.append(actual)
-            ultimo = t
-    largos = [tr for tr in tramos if tr[1] - tr[0] >= minimo and tr[2] >= 2]
-    return largos[-1][0] if largos else None
+    """Donde empiezan los creditos finales: el primer punto desde el que al
+    menos FRACCION_CREDITOS de lo que queda hasta el final es negro o
+    creditos, empezando con dos fotogramas seguidos de negro/creditos y con
+    al menos `minimo` segundos por delante. Lo de despues da igual.
+
+    Antes era «el ultimo tramo largo», y unos creditos con trozos de imagen
+    en medio (tarjetas de colores, logos: Animales) se partian y se tomaba el
+    ultimo trozo, minutos despues del principio."""
+    n = len(serie)
+    cuantos = [0] * (n + 1)   # cuantos negro/creditos hay desde i hasta el final
+    for i in range(n - 1, -1, -1):
+        cuantos[i] = cuantos[i + 1] + (serie[i][1] in "CK")
+    for i in range(n - 1):
+        if serie[i][1] not in "CK" or serie[i + 1][1] not in "CK":
+            continue
+        if i > 0 and serie[i - 1][1] in "CK":
+            continue   # no es el principio de un tramo
+        if serie[-1][0] - serie[i][0] < minimo:
+            break
+        if cuantos[i] / (n - i) >= FRACCION_CREDITOS:
+            return serie[i][0]
+    return None
+
+
+# Con fotogramas clave escasos (en unos creditos casi fijos hay uno cada 10 s)
+# tres seguidos pueden ser medio minuto: dos que abarquen esto tambien valen.
+TRAMO_MINIMO_S = 8.0
 
 
 def transicion(serie: list[tuple[float, str]], seguidos: int = SEGUIDOS) -> tuple[str, float | None]:
     """El primer paso de imagen a negro/creditos con `seguidos` fotogramas de
-    negro/creditos detras: ('ok', segundo). 'antes' si la ventana ya empieza
-    en creditos y 'despues' si no se llega a ver."""
-    for i in range(len(serie) - seguidos + 1):
-        if all(e in "CK" for _, e in serie[i:i + seguidos]):
+    negro/creditos detras (o dos que abarquen TRAMO_MINIMO_S): ('ok',
+    segundo). 'antes' si la ventana ya empieza en creditos y 'despues' si no
+    se llega a ver."""
+    for i in range(len(serie)):
+        j = i
+        while j < len(serie) and serie[j][1] in "CK":
+            j += 1
+        n = j - i
+        if n >= seguidos or (n >= 2 and serie[j - 1][0] - serie[i][0] >= TRAMO_MINIMO_S):
             return ("antes", serie[0][0]) if i == 0 else ("ok", serie[i][0])
     return "despues", None
 
@@ -577,15 +622,16 @@ async def medir(leer: Lector, tamano: int, idx: Indice | None = None) -> dict:
     ventana = VENTANA_EPISODIO if episodio else VENTANA_PELICULA
     maximo = VENTANA_EPISODIO_MAX if episodio else VENTANA_PELICULA_MAX
     minimo = MINIMO_EPISODIO if episodio else MINIMO_PELICULA
+    cada = 0.0 if episodio else CADA_PELICULA
     hasta, desde = idx.duracion, max(0.0, idx.duracion - ventana)
-    serie = await mirar(leer, idx, desde, hasta)
+    serie = await mirar(leer, idx, desde, hasta, cada)
     while True:
         inicio = inicio_creditos(serie, minimo)
         empieza_en_creditos = bool(serie) and serie[0][1] in "CK" and inicio == serie[0][0]
         if not empieza_en_creditos or idx.duracion - desde >= maximo or desde <= 0:
             break
         nuevo = max(0.0, idx.duracion - min(maximo, (idx.duracion - desde) * 2))
-        serie = await mirar(leer, idx, nuevo, desde - 0.001) + serie
+        serie = await mirar(leer, idx, nuevo, desde - 0.001, cada) + serie
         desde = nuevo
     return {"inicio": inicio, "duracion": idx.duracion, "fotogramas": len(serie),
             "serie": "".join(e for _, e in serie)}

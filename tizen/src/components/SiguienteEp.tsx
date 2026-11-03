@@ -25,10 +25,18 @@ export interface OpcionSig {
  */
 export function opcionesSiguiente(sig: EstadoSiguiente): OpcionSig[] {
   const d = sig.decision;
-  if (d.tipo === 'nada' || (d.tipo === 'bajar' && !d.bajar.length)) return [];
+  // La pantalla del final lleva su propio mando (FinTitulo).
+  if (d.tipo === 'nada' || d.tipo === 'final' || (d.tipo === 'bajar' && !d.bajar.length)) return [];
+  if (d.tipo === 'ver') {
+    return [
+      { clave: 'hacer', principal: true, onSelect: sig.confirmar,
+        texto: d.bajar.length ? sig.texto : `Siguiente episodio · ${d.siguiente.label}` },
+      { clave: 'cerrar', texto: 'Ver créditos', onSelect: sig.descartar },
+    ];
+  }
   return [
     { clave: 'hacer', texto: sig.texto, principal: true, onSelect: sig.confirmar },
-    { clave: 'cerrar', texto: d.tipo === 'ver' ? 'No' : 'Ahora no', onSelect: sig.descartar },
+    { clave: 'cerrar', texto: 'Ahora no', onSelect: sig.descartar },
   ];
 }
 
@@ -70,6 +78,7 @@ export default function SiguienteEp({ sig, cursor, enfocada, opciones }: Props) 
       <p className="text-lead text-tv-ok">{sig.mensaje}</p>
     </div>
   );
+  if (d.tipo === 'final') return null;
   if (d.tipo === 'nada') return sig.mensaje ? soloMensaje : null;
   if (!opciones.length) return soloMensaje;
 
@@ -80,12 +89,6 @@ export default function SiguienteEp({ sig, cursor, enfocada, opciones }: Props) 
       {/* La barra de la cuenta atrás, al ancho completo y arriba: es la señal
           que se entiende desde el sofá sin leer nada, y es este mismo botón
           pulsándose solo. */}
-      {d.tipo === 'ver' && (
-        <div className="h-[8px] w-full bg-white/20">
-          <div className="h-full bg-tv-red"
-            style={{ width: `${pct}%`, transition: sig.corriendo ? 'width 120ms linear' : 'none' }} />
-        </div>
-      )}
 
       <div className="px-10 pt-8 pb-9">
         <div className="flex items-start space-x-6">
@@ -115,15 +118,24 @@ export default function SiguienteEp({ sig, cursor, enfocada, opciones }: Props) 
               onMouseEnter={PUNTERO ? sig.parar : undefined}
               onClick={PUNTERO ? op.onSelect : undefined}
               disabled={op.clave === 'hacer' && sig.bajando}
-              className={`inline-flex items-center justify-center space-x-3 rounded-lg px-8 h-[64px]
+              className={`relative overflow-hidden inline-flex items-center justify-center space-x-3 rounded-lg px-8 h-[64px]
                 text-body font-semibold whitespace-nowrap
-                ${enfocada && i === cursor ? 'bg-white text-black'
-                               : op.principal ? 'bg-tv-red text-white' : 'bg-white/15 text-white'}
+                ${op.clave === 'hacer' && d.tipo === 'ver'
+                  ? `text-black ${enfocada && i === cursor ? 'bg-white/60 ring-4 ring-white' : 'bg-white/35'}`
+                  : enfocada && i === cursor ? 'bg-white text-black'
+                  : op.principal ? 'bg-tv-red text-white' : 'bg-white/15 text-white'}
                 ${PUNTERO ? ' cursor-pointer' : ''}`}>
-              {op.clave === 'hacer' && d.tipo === 'ver' && <span className="w-7 h-7"><IconPlay /></span>}
-              <span>
+              {/* Ver el siguiente: el boton se va llenando (la cuenta atras) y,
+                  al llenarse, se pulsa solo. Escala por transform, que es lo
+                  unico que se anima en la tele. */}
+              {op.clave === 'hacer' && d.tipo === 'ver' && (
+                <span className="absolute inset-0 bg-white origin-left"
+                  style={{ transform: `scaleX(${sig.corriendo ? pct / 100 : 1})`,
+                           transition: sig.corriendo ? 'transform 120ms linear' : 'none' }} />
+              )}
+              {op.clave === 'hacer' && d.tipo === 'ver' && <span className="relative w-7 h-7"><IconPlay /></span>}
+              <span className="relative">
                 {op.clave === 'hacer' && sig.bajando && d.tipo === 'bajar' ? 'Pidiendo…'
-                  : op.clave === 'hacer' && sig.corriendo ? `${op.texto} · ${sig.restante}`
                   : op.texto}
               </span>
             </button>

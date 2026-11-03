@@ -7,6 +7,7 @@ import Row from '../components/Row';
 import PosterCard from '../components/PosterCard';
 import TitleDetail, { type DetailInput } from '../components/TitleDetail';
 import type { BrowseItem, Featured } from '../types';
+import { escucharAbrirTitulo } from '../tv/abrirTitulo';
 
 function toFeatured(item: BrowseItem): Featured {
   return {
@@ -36,6 +37,8 @@ function toFeatured(item: BrowseItem): Featured {
 export default function Favorites() {
   const { items, loading, recargar } = useFavorites();
   const [detail, setDetail] = useState<DetailInput | null>(null);
+  // La pantalla del final del reproductor abre aqui la ficha de un relacionado.
+  useEffect(() => escucharAbrirTitulo(setDetail), []);
 
   useEffect(() => { recargar(); }, [recargar]);
 
@@ -76,7 +79,7 @@ export default function Favorites() {
         </div>
       )}
 
-      {detail && <TitleDetail input={detail} onClose={() => setDetail(null)} />}
+      {detail && <TitleDetail key={`${detail.kind}${detail.tmdbId ?? detail.meta.title}`} input={detail} onClose={() => setDetail(null)} />}
     </Screen>
   );
 }

@@ -13,6 +13,7 @@ import Dialog from '../components/Dialog';
 import Player from '../components/Player';
 import TitleDetail, { type DetailInput } from '../components/TitleDetail';
 import type { Batch, Featured, FileItem, SearchResult, TMDBMetadata } from '../types';
+import { escucharAbrirTitulo } from '../tv/abrirTitulo';
 
 interface Local { file: FileItem; f: Featured; meta: TMDBMetadata }
 
@@ -35,6 +36,8 @@ export default function Library() {
   const [playing, setPlaying] = useState<{ path: string; title: string; subtitle?: string; poster?: string; backdrop?: string;
                                            tmdb_id?: number | null; media_type?: 'movie' | 'series' } | null>(null);
   const [detail, setDetail] = useState<DetailInput | null>(null);
+  // La pantalla del final del reproductor abre aqui la ficha de un relacionado.
+  useEffect(() => escucharAbrirTitulo(setDetail), []);
   const [batchDialog, setBatchDialog] = useState<Batch | null>(null);
   const [pausedDialog, setPausedDialog] = useState<any | null>(null);
   const [resume, setResume] = useState<Watched[]>(() => cachedContinueWatching());
@@ -231,7 +234,7 @@ export default function Library() {
             { label: 'Volver', onSelect: () => setPausedDialog(null) },
           ]} />
       )}
-      {detail && <TitleDetail input={detail} onClose={() => setDetail(null)} />}
+      {detail && <TitleDetail key={`${detail.kind}${detail.tmdbId ?? detail.meta.title}`} input={detail} onClose={() => setDetail(null)} />}
       {playing && (
         <Player src={streamUrl(playing.path)} path={playing.path} title={playing.title} subtitle={playing.subtitle}
           poster={playing.poster} backdrop={playing.backdrop}

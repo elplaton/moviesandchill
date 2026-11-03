@@ -370,6 +370,10 @@ async def _ensure_tables():
                 actualizado  TIMESTAMP NOT NULL DEFAULT NOW()
             )
         """)
+        # La version del detector de imagen con la que se midio (ver
+        # analisis_creditos.VERSION): lo de una version vieja se recomprueba.
+        await conn.execute(
+            "ALTER TABLE creditos_enlace ADD COLUMN IF NOT EXISTS version SMALLINT NOT NULL DEFAULT 1")
         await conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_creditos_enlace_titulo "
             "ON creditos_enlace (tmdb_id, tmdb_type, temporada)")

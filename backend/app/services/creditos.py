@@ -130,8 +130,10 @@ async def guardar_medicion(ruta: str, *, inicio: float | None, duracion: float |
     if fuente not in FUENTES or estado not in ESTADOS:
         raise ValueError(f"fuente o estado no validos: {fuente}/{estado}")
     tid, tipo, temp = await _titulo(ruta, tmdb_id, tmdb_type, temporada)
+    from app.services.analisis_creditos import VERSION
     escrito = await db.guardar_enlace(ruta, inicio=inicio, duracion=duracion, estado=estado, fuente=fuente,
-                                      tmdb_id=tid, tmdb_type=tipo, temporada=temp, postcreditos=postcreditos)
+                                      tmdb_id=tid, tmdb_type=tipo, temporada=temp, postcreditos=postcreditos,
+                                      version=VERSION if fuente == "imagen" else 1)
     if not escrito or not referencia or inicio is None or not duracion or not tid or not tipo:
         return escrito
     antes = round(duracion - inicio, 2)
@@ -168,8 +170,14 @@ async def consultar(ruta: str, duracion: float | None, *, tmdb_id: int | None = 
     sabe; entonces el reproductor sigue con su regla fija."""
     from app.database import creditos as db
 
+    from app.services.analisis_creditos import VERSION
+
     vacio = {"inicio": None, "origen": None, "fuente": None, "postcreditos": False}
     medido = await db.enlace(ruta)
+    if medido and medido["fuente"] == "imagen" and (medido.get("version") or 1) < VERSION:
+        # Medido con un detector anterior: como si no se hubiera medido, para
+        # que al abrirlo se vuelva a comprobar (y lo nuevo lo sustituya).
+        medido = None
     if medido and medido["estado"] in ("medido", "verificado", "sin_creditos"):
         return {"inicio": medido["inicio"], "origen": "medido", "fuente": medido["fuente"],
                 "postcreditos": medido["postcreditos"]}

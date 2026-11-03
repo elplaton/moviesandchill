@@ -43,9 +43,17 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  AVISO_BAJAR_S, AVISO_VER_S, CUENTA_ATRAS_S, bajarSiguientes, decidir, listar, queViene,
-  resumen, type Decision, type QueViene, type SiguienteEpisodio,
+  AVISO_BAJAR_S, AVISO_VER_S, CUENTA_ATRAS_S, bajarSiguientes, creditos, decidir, listar, queViene,
+  relacionados as pedirRelacionados, resumen, type Decision, type QueViene, type Relacionado,
+  type SiguienteEpisodio,
 } from '../services/siguiente';
+
+/** Cada cuánto se vuelve a preguntar por los créditos mientras no estén
+ *  medidos: el servidor los averigua mientras se ve (un episodio en ~10 s,
+ *  una película en menos de un minuto). No vale preguntar solo «cerca del
+ *  final»: los créditos de una película pueden durar diez minutos. */
+const REPREGUNTAR_CREDITOS_MS = 60_000;
+const MAX_PREGUNTAS_CREDITOS = 5;
 
 /** Lo que se queda el mensaje en pantalla antes de quitarse de en medio. */
 const MENSAJE_MS = 3200;
@@ -53,6 +61,8 @@ const MENSAJE_MS = 3200;
 export interface OpcionesSiguiente {
   path: string;
   tmdbId?: number | null;
+  /** 'movie' o 'series': para pedir los creditos y los relacionados. */
+  mediaType?: string | null;
   /** Poner el siguiente episodio. Lo decide el reproductor, que es quien sabe
    *  cambiar de archivo sin cerrarse. */
   onVer: (siguiente: SiguienteEpisodio) => void;
@@ -90,6 +100,12 @@ export interface EstadoSiguiente {
   backdrop?: string | null;
   /** Lo que pone el botón, que es también lo que hace. */
   texto: string;
+  /** Lo que ofrecer en la pantalla del final (película o último episodio). */
+  relacionados: Relacionado[];
+  /** Segundo en que empiezan los créditos, si se sabe. */
+  inicioCreditos: number | null;
+  /** «Ver créditos»: quita la pantalla del final hasta que acabe el vídeo. */
+  verCreditos: () => void;
   mirar: (tiempo: number, duracion: number) => void;
   alTerminar: () => boolean;
   /** La única acción: ver el siguiente y/o dejar bajando lo que venga. */
@@ -121,13 +137,24 @@ export function textoDe(d: Decision): string {
   return '';
 }
 
-export function useSiguiente({ path, tmdbId, onVer, onCerrar, pausar }: OpcionesSiguiente): EstadoSiguiente {
+/**
+ * Cuándo aparece la tarjeta: al empezar los créditos si se sabe dónde
+ * empiezan (`/api/creditos`) y, si no, a `AVISO_VER_S` del final.
+ */
+export function momentoDeAviso(inicioCreditos: number | null, duracion: number): number {
+  if (inicioCreditos != null && inicioCreditos > 0 && inicioCreditos < duracion) return inicioCreditos;
+  return duracion - AVISO_VER_S;
+}
+
+export function useSiguiente({ path, tmdbId, mediaType, onVer, onCerrar, pausar }: OpcionesSiguiente): EstadoSiguiente {
   const [datos, setDatos] = useState<QueViene | null>(null);
   const [tarjeta, setTarjeta] = useState<Decision>(SIN_NADA);
   const [progreso, setProgreso] = useState(0);
   const [corriendo, setCorriendo] = useState(false);
   const [bajando, setBajando] = useState(false);
   const [mensaje, setMensaje] = useState('');
+  const [relacionados, setRelacionados] = useState<Relacionado[]>([]);
+  const [inicioCreditos, setInicioCreditos] = useState<number | null>(null);
 
   // Un candado por archivo: `mirar()` se llama en cada timeupdate y la
   // petición es una, no una por fotograma.
@@ -135,6 +162,13 @@ export function useSiguiente({ path, tmdbId, onVer, onCerrar, pausar }: Opciones
   const datosRef = useRef<QueViene | null>(null);
   const descartada = useRef(false);
   const terminado = useRef(false);
+  // Créditos: cuántas veces se ha preguntado y cuándo fue la última. Y lo
+  // que se sabe, en un ref para `mirar()`.
+  const creditosPedidos = useRef(0);
+  const creditosUltima = useRef(0);
+  const creditosRef = useRef<{ inicio: number | null; origen: string | null }>({ inicio: null, origen: null });
+  // «Ver créditos» en la pantalla del final: no vuelve a salir hasta que acaba.
+  const finalVisto = useRef(false);
   const avisoTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   datosRef.current = datos;
 
@@ -157,6 +191,12 @@ export function useSiguiente({ path, tmdbId, onVer, onCerrar, pausar }: Opciones
     pedido.current = null;
     descartada.current = false;
     terminado.current = false;
+    creditosPedidos.current = 0;
+    creditosUltima.current = 0;
+    creditosRef.current = { inicio: null, origen: null };
+    finalVisto.current = false;
+    setInicioCreditos(null);
+    setRelacionados([]);
   }, [path]);
 
   useEffect(() => () => { if (avisoTimer.current) clearTimeout(avisoTimer.current); }, []);
@@ -167,10 +207,33 @@ export function useSiguiente({ path, tmdbId, onVer, onCerrar, pausar }: Opciones
     avisoTimer.current = setTimeout(() => setMensaje(''), MENSAJE_MS);
   }, []);
 
+  const pedirCreditos = useCallback((duracion: number) => {
+    const deEste = path;
+    creditos(path, duracion, tmdbId, mediaType).then((c) => {
+      if (!c || deEste !== path) return;
+      creditosRef.current = { inicio: c.inicio, origen: c.origen };
+      setInicioCreditos(c.inicio);
+    });
+  }, [path, tmdbId, mediaType]);
+
   const mirar = useCallback((tiempo: number, duracion: number) => {
     if (!duracion || !isFinite(duracion) || descartada.current) return;
     const quedan = duracion - tiempo;
-    if (quedan > AVISO_BAJAR_S) return;
+
+    // Dónde empiezan los créditos: al empezar y, mientras no estén medidos,
+    // cada minuto (el servidor los averigua mientras se ve).
+    const ahora = Date.now();
+    if (creditosPedidos.current === 0
+        || (creditosRef.current.origen !== 'medido'
+            && creditosPedidos.current < MAX_PREGUNTAS_CREDITOS
+            && ahora - creditosUltima.current > REPREGUNTAR_CREDITOS_MS)) {
+      creditosPedidos.current += 1;
+      creditosUltima.current = ahora;
+      pedirCreditos(duracion);
+    }
+
+    const momento = momentoDeAviso(creditosRef.current.inicio, duracion);
+    if (quedan > AVISO_BAJAR_S && momento - tiempo > AVISO_BAJAR_S) return;
 
     if (pedido.current !== path) {
       pedido.current = path;
@@ -180,13 +243,27 @@ export function useSiguiente({ path, tmdbId, onVer, onCerrar, pausar }: Opciones
       });
       return;
     }
-    const d = decidir(datosRef.current);
+    const d = decidir(datosRef.current, !!tmdbId);
     if (d.tipo === 'nada') return;
-    // Lo que se puede ver se ofrece pegado a los créditos; lo que hay que
-    // descargar, en cuanto se sabe, porque bajar un capítulo tarda.
-    if (d.tipo === 'ver' && quedan > AVISO_VER_S) return;
+    // Lo que se puede ver (y la pantalla del final) se ofrece al empezar los
+    // créditos; lo que hay que descargar, en cuanto se sabe, porque bajar un
+    // capítulo tarda.
+    if ((d.tipo === 'ver' || d.tipo === 'final') && tiempo < momento) return;
+    if (d.tipo === 'final' && finalVisto.current) return;
     setTarjeta((actual) => (actual.tipo === 'nada' ? d : actual));
-  }, [path, tmdbId]);
+  }, [path, tmdbId, pedirCreditos]);
+
+  // La pantalla del final necesita sus títulos: se piden al aparecer.
+  useEffect(() => {
+    if (tarjeta.tipo !== 'final' || relacionados.length) return;
+    const q = datosRef.current;
+    const id = q?.tmdb_id || tmdbId;
+    if (!id) return;
+    const tipo = q?.kind === 'series' ? 'series' : (q?.media_type === 'tv' ? 'series' : mediaType);
+    let vivo = true;
+    pedirRelacionados(id, tipo).then((r) => { if (vivo) setRelacionados(r); });
+    return () => { vivo = false; };
+  }, [tarjeta, relacionados.length, tmdbId, mediaType]);
 
   // La cuenta atrás es el botón pulsándose solo, así que solo corre cuando lo
   // que va a hacer incluye ver algo.
@@ -214,7 +291,7 @@ export function useSiguiente({ path, tmdbId, onVer, onCerrar, pausar }: Opciones
    */
   const confirmar = useCallback(() => {
     const d = tarjeta;
-    if (d.tipo === 'nada') return;
+    if (d.tipo === 'nada' || d.tipo === 'final') return;
     setCorriendo(false);
 
     if (d.bajar.length) {
@@ -257,8 +334,23 @@ export function useSiguiente({ path, tmdbId, onVer, onCerrar, pausar }: Opciones
 
   const parar = useCallback(() => setCorriendo(false), []);
 
+  const verCreditos = useCallback(() => {
+    finalVisto.current = true;
+    setCorriendo(false);
+    setTarjeta(SIN_NADA);
+  }, []);
+
   const alTerminar = useCallback(() => {
-    const d = decidir(datosRef.current);
+    // Si el vídeo acaba antes de haber preguntado (uno muy corto, o se saltó
+    // al final), con la ficha basta para la pantalla del final.
+    const d = datosRef.current ? decidir(datosRef.current, !!tmdbId)
+                               : (tmdbId ? { tipo: 'final' } as Decision : SIN_NADA);
+    if (d.tipo === 'final') {
+      terminado.current = true;
+      ultimas.current.pausar?.();
+      setTarjeta(d);
+      return true;
+    }
     if (descartada.current || d.tipo === 'nada') return false;
     terminado.current = true;
     // El vídeo ha acabado y hay algo que preguntar: se pausa (donde eso tiene
@@ -266,7 +358,7 @@ export function useSiguiente({ path, tmdbId, onVer, onCerrar, pausar }: Opciones
     ultimas.current.pausar?.();
     setTarjeta((actual) => (actual.tipo === 'nada' ? d : actual));
     return true;
-  }, []);
+  }, [tmdbId]);
 
   return {
     decision: tarjeta,
@@ -280,6 +372,9 @@ export function useSiguiente({ path, tmdbId, onVer, onCerrar, pausar }: Opciones
     poster: datos?.poster,
     backdrop: datos?.backdrop,
     texto: textoDe(tarjeta),
+    relacionados,
+    inicioCreditos,
+    verCreditos,
     mirar,
     alTerminar,
     confirmar,

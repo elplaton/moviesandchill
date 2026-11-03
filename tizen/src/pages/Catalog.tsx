@@ -10,6 +10,7 @@ import TitleDetail, { type DetailInput } from '../components/TitleDetail';
 import Player from '../components/Player';
 import Dialog, { type DialogAction } from '../components/Dialog';
 import type { BrowseItem, BrowseRow, BrowseSeccion, BrowseTop, Featured, Peticion } from '../types';
+import { escucharAbrirTitulo } from '../tv/abrirTitulo';
 
 interface Props {
   filter?: 'movie' | 'series';
@@ -134,6 +135,8 @@ export default function Catalog({ filter, heading, fuente = 'portada' }: Props) 
   const [loading, setLoading] = useState(true);
   const [focusRow, setFocusRow] = useState(0);
   const [detail, setDetail] = useState<DetailInput | null>(null);
+  // La pantalla del final del reproductor abre aqui la ficha de un relacionado.
+  useEffect(() => escucharAbrirTitulo(setDetail), []);
   const [playing, setPlaying] = useState<Watched | null>(null);
   const [pidiendo, setPidiendo] = useState<BrowseItem | null>(null);
   const enVuelo = useRef(false);
@@ -293,7 +296,7 @@ export default function Catalog({ filter, heading, fuente = 'portada' }: Props) 
         const { text, actions } = cuadroPedir(pidiendo, () => pedir(pidiendo), cerrar);
         return <Dialog title={pidiendo.title} text={text} actions={actions} onClose={cerrar} />;
       })()}
-      {detail && <TitleDetail input={detail} onClose={() => setDetail(null)} />}
+      {detail && <TitleDetail key={`${detail.kind}${detail.tmdbId ?? detail.meta.title}`} input={detail} onClose={() => setDetail(null)} />}
       {playing && (
         <Player src={streamUrl(playing.path)} path={playing.path} title={playing.title} subtitle={playing.subtitle}
           poster={playing.poster} backdrop={playing.backdrop}

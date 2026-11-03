@@ -7,6 +7,8 @@ import { markWatched, resumePoint, setWatched } from '../utils/progress';
 import { useSiguiente } from '../hooks/useSiguiente';
 import { useFuente } from '../hooks/useFuente';
 import NextUp from './NextUp';
+import FinTitulo from './FinTitulo';
+import { useNavigate } from 'react-router-dom';
 
 interface Props {
   path: string;
@@ -100,8 +102,9 @@ export default function Player(props: Props) {
 
   // La tarjeta del final del capitulo: ver el siguiente (con la barra que
   // avanza sola) o dejar bajando los que vienen.
+  const navigate = useNavigate();
   const sig = useSiguiente({
-    path, tmdbId,
+    path, tmdbId, mediaType,
     onVer: (siguiente) => {
       const v = ref.current;
       // El que se deja se marca visto **antes** de cambiar: la cuenta atras
@@ -378,6 +381,9 @@ export default function Player(props: Props) {
     || (fuente.hlsPosible && !!tracks?.adaptable && sinAdaptar !== path);
   const hayPistas = audio.length > 1 || subs.length > 0;
 
+  // La pantalla del final: el video se encoge y se ofrecen relacionados.
+  const final = sig.decision.tipo === 'final';
+
   return (
     /* Los clics no salen del reproductor. Se monta dentro de la ficha, cuyo
        fondo cierra al pulsarlo, y en React los clics suben por el arbol de
@@ -385,9 +391,14 @@ export default function Player(props: Props) {
        minuto en la barra cerraba la ficha y, con ella, la pelicula. */
     <div ref={boxRef} className="fixed inset-0 z-[80] bg-black" onMouseMove={wake} onDoubleClick={fullscreen}
       onClick={e => e.stopPropagation()}>
-      <video ref={ref} src={src} autoPlay onClick={toggle} crossOrigin="use-credentials"
+      <video ref={ref} src={src} autoPlay crossOrigin="use-credentials"
+        onClick={final ? sig.verCreditos : toggle}
         x-webkit-airplay="allow"
-        className="h-full w-full bg-black object-contain">
+        className={`absolute bg-black object-contain transition-all duration-500 ease-out ${final
+          // Como mucho el 44 % del ancho o el 46 % del alto: en una ventana baja
+          // el video y la fila de relacionados se pisaban.
+          ? 'left-[4%] top-[10vh] z-20 aspect-video h-auto w-[min(44vw,82vh)] cursor-pointer rounded-lg shadow-panel ring-1 ring-white/10'
+          : 'left-0 top-0 h-full w-full'}`}>
         {(tracks?.external_subtitles || []).map(sub => (
           <track key={sub.path} kind="subtitles" src={subtitleUrl(sub.path, ticket || undefined)}
             srcLang={sub.language} label={sub.label} />
@@ -403,8 +414,10 @@ export default function Player(props: Props) {
       )}
 
       <NextUp sig={sig} />
+      <FinTitulo sig={sig} titulo={title} subtitulo={subtitle} onSalir={onClose}
+        onElegir={(r) => { onClose(); navigate(`/?ficha=${r.id}`); }} />
 
-      {buffering && (
+      {buffering && !final && (
         <div className="pointer-events-none absolute inset-0 grid place-items-center">
           <div className="h-14 w-14 animate-spin rounded-full border-4 border-white/20 border-t-white" />
         </div>
@@ -415,7 +428,7 @@ export default function Player(props: Props) {
         </div>
       )}
 
-      <div className={`absolute inset-x-0 top-0 flex items-start gap-4 p-5 transition-opacity duration-300 ${ui ? 'opacity-100' : 'pointer-events-none opacity-0'}`}
+      <div className={`absolute inset-x-0 top-0 flex items-start gap-4 p-5 transition-opacity duration-300 ${ui && !final ? 'opacity-100' : 'pointer-events-none opacity-0'}`}
         style={{ background: 'linear-gradient(180deg, rgba(0,0,0,0.75), transparent)' }}>
         <button onClick={onClose} className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-black/60 hover:bg-white/20" aria-label="Cerrar">
           <span className="w-5 h-5"><IconClose /></span>
@@ -426,7 +439,7 @@ export default function Player(props: Props) {
         </div>
       </div>
 
-      <div className={`absolute inset-x-0 bottom-0 px-6 pb-5 pt-16 transition-opacity duration-300 ${ui ? 'opacity-100' : 'pointer-events-none opacity-0'}`}
+      <div className={`absolute inset-x-0 bottom-0 px-6 pb-5 pt-16 transition-opacity duration-300 ${ui && !final ? 'opacity-100' : 'pointer-events-none opacity-0'}`}
         style={{ background: 'linear-gradient(180deg, transparent, rgba(0,0,0,0.85))' }}>
         <input type="range" min={0} max={100} step={0.1} value={pct} onChange={onScrub} aria-label="Posición"
           className="h-1.5 w-full cursor-pointer appearance-none rounded-full outline-none"

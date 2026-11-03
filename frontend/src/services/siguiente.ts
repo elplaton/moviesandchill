@@ -53,6 +53,7 @@ export interface Descargable {
 export interface QueViene {
   kind: 'series' | 'movie' | 'desconocido';
   tmdb_id?: number | null;
+  media_type?: string | null;
   grupo?: string;
   actual?: { season: number; episode: number; label: string };
   siguiente?: SiguienteEpisodio | null;
@@ -64,11 +65,17 @@ export interface QueViene {
   backdrop?: string | null;
 }
 
-/** Que tarjeta toca: ninguna, la de ver el siguiente, o la de descargar. */
+/**
+ * Que toca al final: nada, la tarjeta de ver el siguiente, la de descargar,
+ * o el **final**: no hay mas que ver de esto (una pelicula, o el ultimo
+ * episodio que hay), y el reproductor se encoge para ofrecer titulos
+ * relacionados, como Netflix.
+ */
 export type Decision =
   | { tipo: 'nada' }
   | { tipo: 'ver'; siguiente: SiguienteEpisodio; bajar: Descargable[] }
-  | { tipo: 'bajar'; bajar: Descargable[] };
+  | { tipo: 'bajar'; bajar: Descargable[] }
+  | { tipo: 'final' };
 
 /**
  * La decision, a partir de lo que ha dicho el servidor.
@@ -78,12 +85,67 @@ export type Decision =
  * viaja dentro de esa misma tarjeta como segundo boton. Solo cuando no hay
  * nada que ver se dedica la tarjeta a preguntar por la descarga.
  */
-export function decidir(q: QueViene | null | undefined): Decision {
-  if (!q || q.kind !== 'series') return { tipo: 'nada' };
-  const bajar = q.descargables || [];
-  if (q.siguiente) return { tipo: 'ver', siguiente: q.siguiente, bajar };
-  if (bajar.length) return { tipo: 'bajar', bajar };
-  return { tipo: 'nada' };
+export function decidir(q: QueViene | null | undefined, hayFicha = false): Decision {
+  if (!q) return { tipo: 'nada' };
+  if (q.kind === 'series') {
+    const bajar = q.descargables || [];
+    if (q.siguiente) return { tipo: 'ver', siguiente: q.siguiente, bajar };
+    if (bajar.length) return { tipo: 'bajar', bajar };
+  }
+  // Sin nada mas que ver de esto: la pantalla de relacionados, que necesita
+  // saber de que titulo se trata para buscar los suyos.
+  return hayFicha || q.tmdb_id ? { tipo: 'final' } : { tipo: 'nada' };
+}
+
+/** Donde empiezan los creditos de este archivo (ver /api/creditos). */
+export interface InfoCreditos {
+  inicio: number | null;
+  /** `medido` en este archivo, `previsto` por otro enlace del mismo titulo, o null. */
+  origen: 'medido' | 'previsto' | null;
+  postcreditos?: boolean;
+}
+
+/**
+ * Pregunta donde empiezan los creditos. Ademas de contestar, pone en marcha
+ * averiguarlo en el servidor si aun no se sabe (por eso se pregunta otra vez
+ * cerca del final: para entonces suele estar).
+ */
+export async function creditos(path: string, duracion: number, tmdbId?: number | null,
+                               mediaType?: string | null): Promise<InfoCreditos | null> {
+  try {
+    const q = new URLSearchParams({ path, duracion: String(Math.round(duracion * 10) / 10) });
+    if (tmdbId) q.set('tmdb_id', String(tmdbId));
+    if (mediaType) q.set('media_type', mediaType);
+    const res = await apiFetch(`/creditos?${q.toString()}`);
+    if (!res.ok) return null;
+    return (await res.json()) as InfoCreditos;
+  } catch {
+    return null;
+  }
+}
+
+/** Una tarjeta de la pantalla del final (la misma forma que las de la portada). */
+export interface Relacionado {
+  id: string;
+  tmdb_id: number;
+  title: string;
+  poster?: string | null;
+  backdrop?: string | null;
+  year?: number | null;
+  rating?: number | null;
+  media_type: 'movie' | 'series';
+}
+
+/** Titulos relacionados con uno, para ofrecer al acabarlo. */
+export async function relacionados(tmdbId: number, mediaType?: string | null): Promise<Relacionado[]> {
+  try {
+    const tipo = mediaType === 'series' || mediaType === 'tv' ? 'series' : 'movie';
+    const res = await apiFetch(`/browse/relacionados?tmdb_id=${tmdbId}&media_type=${tipo}&limit=18`);
+    if (!res.ok) return [];
+    return ((await res.json()).items || []) as Relacionado[];
+  } catch {
+    return [];
+  }
 }
 
 /** Que viene despues de este archivo. null si no se ha podido saber. */

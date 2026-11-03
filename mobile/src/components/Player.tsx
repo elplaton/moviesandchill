@@ -7,6 +7,8 @@ import { IAirplay, ICheck, IClose } from './Icons';
 import { markWatched, resumePoint, setWatched } from '../utils/progress';
 import { useSiguiente } from '../hooks/useSiguiente';
 import SiguienteEp from './SiguienteEp';
+import FinTitulo from './FinTitulo';
+import { useNavigate } from 'react-router-dom';
 import { useFuente } from '../hooks/useFuente';
 import { comoAbrirHls } from '../services/reproducir';
 
@@ -163,8 +165,9 @@ export default function Player(props: Props) {
     } catch { /* ya estaba fuera */ }
   };
 
+  const navigate = useNavigate();
   const sig = useSiguiente({
-    path, tmdbId,
+    path, tmdbId, mediaType,
     onVer: (siguiente) => {
       const v = ref.current;
       // El que se deja se marca visto antes de cambiar: si no, se quedaria a
@@ -419,6 +422,9 @@ export default function Player(props: Props) {
     setElegido({ path, audio: order });
   };
 
+  // La pantalla del final: el video se encoge y se ofrecen relacionados.
+  const final = sig.decision.tipo === 'final';
+
   return createPortal(
     <div className="player-shell" onTouchStart={asomar}>
       {/* preload="auto" es lo unico que se le puede pedir a iOS sobre cuanto
@@ -426,9 +432,14 @@ export default function Player(props: Props) {
           segun la velocidad que mida, y no hay forma de exigirle "carga dos
           minutos antes de empezar". Si el archivo pide mas Mbps de los que da
           la red, va a tirones y eso no se arregla aqui. */}
-      <video ref={ref} src={src} controls autoPlay playsInline preload="auto" poster={backdrop}
+      <video ref={ref} src={src} controls={!final} autoPlay playsInline preload="auto" poster={backdrop}
         crossOrigin="use-credentials" x-webkit-airplay="allow"
-        className="w-full h-full bg-black object-contain">
+        onClick={final ? sig.verCreditos : undefined}
+        // En la pantalla del final el video se encoge arriba y sigue con los
+        // creditos; tocarlo es «Ver créditos».
+        className={`bg-black object-contain transition-all duration-500 ease-out ${final
+          ? 'absolute inset-x-0 top-0 h-[38%] w-full pt-[env(safe-area-inset-top)]'
+          : 'w-full h-full'}`}>
         {subs.map(sub => (
           <track key={sub.path} kind="subtitles" src={subtitleUrl(sub.path, ticket || undefined)}
             srcLang={sub.language} label={sub.label} />
@@ -482,6 +493,16 @@ export default function Player(props: Props) {
       )}
 
       {!preparando && <SiguienteEp sig={sig} />}
+      {!preparando && (
+        <FinTitulo sig={sig} titulo={title} subtitulo={subtitle} onSalir={cerrar}
+          onElegir={(r) => {
+            // Sin «atras»: la entrada que puso el reproductor la ocupa la ficha,
+            // y asi «atras» desde la ficha vuelve a donde se estaba.
+            const conEntrada = !!history.state?.player;
+            onClose();
+            navigate(`/t/${r.media_type}/${r.tmdb_id}`, { replace: conEntrada });
+          }} />
+      )}
 
       {airplay.activo && !preparando && (
         <div className="absolute inset-0 flex flex-col items-center justify-center px-8 text-center">
