@@ -330,8 +330,13 @@ async def al_reproducir(path: str, respuesta: dict, *, tmdb_id: int | None = Non
     /api/creditos): sin dato, el proceso de su titulo o temporada; con dato
     previsto, comprobarlo. Solo enlaces de Telegram; lo descargado se mira al
     convertirlo."""
+    from app.routers.download import config
     from app.services import reproduccion
 
+    # Interruptor (TMD_CREDITOS_ANALIZAR): mientras este apagado no se pide
+    # nada a Telegram para esto; se usan los datos que ya haya.
+    if not (config or {}).get("creditos_analizar"):
+        return
     if not reproduccion.es_ruta(path):
         return
     if respuesta.get("origen") == "previsto" and respuesta.get("inicio"):

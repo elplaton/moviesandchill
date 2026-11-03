@@ -73,6 +73,12 @@ def load_config(force_reload: bool = False) -> dict:
         # Cada cuantos minutos se mira si han llegado episodios de las series
         # que alguien sigue (0 = no avisar).
         "avisos_minutos": _env_int("TMD_AVISOS_MINUTOS", 10),
+        # Averiguar los creditos mirando la imagen (services/proceso_creditos.py)
+        # al reproducir algo que no los tiene. Apagado por defecto: gasta
+        # Telegram (un episodio ~5 MB, una pelicula ~25-50 MB) y hasta que se
+        # decida no se analiza nada. Los capitulos de creditos que traiga el
+        # archivo se siguen leyendo igual: van en la misma lectura de pistas.
+        "creditos_analizar": _env_bool("TMD_CREDITOS_ANALIZAR", False),
         # Correo de contacto que va dentro de la firma de los avisos: lo exige
         # el estandar de Web Push para que el servicio de push sepa a quien
         # escribir si algo va mal. No se muestra en ningun sitio.
