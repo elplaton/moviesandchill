@@ -387,6 +387,7 @@ async def _ensure_tables():
         except Exception as e:
             logger.warning("Migracion de downloads: %s", e)
         await _migrate_tmdb_keys(conn)
+        await _columnas_busqueda(conn)
         try:
             await conn.execute("ALTER TABLE index_progress ADD COLUMN IF NOT EXISTS total_scanned INTEGER DEFAULT 0")
             await conn.execute("ALTER TABLE index_progress ADD COLUMN IF NOT EXISTS total_estimate INTEGER DEFAULT 0")
@@ -409,6 +410,32 @@ async def _ensure_tables():
             await conn.execute("CREATE INDEX IF NOT EXISTS idx_media_indexado ON media_items (indexed_at DESC)")
         except Exception:
             pass
+
+
+async def _columnas_busqueda(conn):
+    """Los titulos normalizados para el buscador (ver services/busqueda.py).
+
+    Son columnas GENERATED: PostgreSQL las calcula al escribir la fila, asi
+    que no hay que acordarse de rellenarlas en cada INSERT/UPDATE y lo ya
+    indexado sale normalizado al crearlas (reescribe la tabla una vez, unos
+    segundos con 250.000 filas). Si falla, el buscador sigue con la busqueda
+    de antes (`search_media`)."""
+    from app.services.busqueda import expr_sql
+    columnas = [
+        ("media_items", "busca", "clean_title", False),
+        ("media_items", "busca_c", "clean_title", True),
+        ("tmdb_cache", "busca", "title", False),
+        ("tmdb_cache", "busca_c", "title", True),
+        ("tmdb_cache", "busca_original", "original_title", False),
+        ("tmdb_cache", "busca_original_c", "original_title", True),
+    ]
+    for tabla, nombre, origen, pegado in columnas:
+        try:
+            await conn.execute(
+                f"ALTER TABLE {tabla} ADD COLUMN IF NOT EXISTS {nombre} TEXT "
+                f"GENERATED ALWAYS AS ({expr_sql(origen, pegado)}) STORED")
+        except Exception as e:
+            logger.error("Columna de busqueda %s.%s: %s", tabla, nombre, e)
 
 
 async def _migrate_tmdb_keys(conn):

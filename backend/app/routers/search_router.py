@@ -172,7 +172,16 @@ async def _buscar(req: SearchRequest, user: str):
             reverse=req.sort_asc, channel_ids=req.channel_ids,
         )
         indexed_ids = {(r["channel_id"], r["id"]) for r in results}
+        # La busqueda de Telegram es muy laxa (trae mensajes que solo
+        # mencionan una palabra parecida) y con `page_size` 100 se lanzaba
+        # casi siempre: era lo que metia peliculas que no tenian nada que ver
+        # con lo buscado. Solo entra lo que coincide de verdad, con las mismas
+        # reglas que el catalogo (services/busqueda.py).
+        from app.services.busqueda import coincide
         for tr in telegram_results:
+            nombre = tr.get("file_name") or tr.get("text") or ""
+            if not coincide(_strip_filename(nombre), req.query):
+                continue
             if (tr["channel_id"], tr["id"]) not in indexed_ids:
                 tr["downloaded"] = _strip_filename(tr.get("file_name") or "").lower() in existing
                 tr["clean_name"] = ""

@@ -1,4 +1,8 @@
+import logging
+
 from app.database.connection import get_pool
+
+logger = logging.getLogger("tmd")
 
 # Columnas de tmdb_cache que acompañan a cada media_item en las respuestas.
 _TMDB_COLS = """
@@ -166,12 +170,58 @@ async def mark_batch_tmdb_searched(items: list[dict]):
 
 
 async def search_media(query: str, limit: int = 50, offset: int = 0):
-    """Busca por nombre de archivo limpio y tambien por el titulo TMDB (en
-    español u original): "Como conoci a vuestra madre" encuentra los archivos
-    de "How I Met Your Mother"."""
+    """El buscador: archivos cuyo titulo (el del archivo, o el de su ficha de
+    TMDB en español u original) coincide con lo buscado, del mas parecido al
+    menos y, a igualdad, lo mas conocido primero. Como se compara y por que
+    esta en services/busqueda.py. "Como conoci a vuestra madre" encuentra los
+    archivos de "How I Met Your Mother" por la ficha."""
+    from app.services.busqueda import MIN_DENTRO, consulta, puntos_sql
+
     pool = get_pool()
     if not pool:
         return []
+    pegado, palabras = consulta(query)
+    if not pegado:
+        return []
+    # Filtro barato antes de puntuar: todo lo que coincide contiene, pegada,
+    # la palabra mas larga de lo buscado. Asi el CASE de `puntos_sql` solo se
+    # calcula sobre unas pocas filas y no sobre las 250.000.
+    clave = max(palabras, key=len)
+    ficha = (f"LEAST({puntos_sql('busca', 'busca_c')}, "
+             f"{puntos_sql('busca_original', 'busca_original_c')})")
+    archivo = puntos_sql("mi.busca", "mi.busca_c")
+    try:
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(f"""
+                WITH fichas AS (
+                    SELECT * FROM (
+                        SELECT tmdb_id, media_type, {ficha} AS puntos
+                        FROM tmdb_cache
+                        WHERE busca_c LIKE '%' || $4::text || '%'
+                           OR busca_original_c LIKE '%' || $4::text || '%'
+                    ) f WHERE puntos IS NOT NULL
+                ),
+                archivos AS (
+                    SELECT mi.*, LEAST(f.puntos,
+                               CASE WHEN mi.busca_c LIKE '%' || $4::text || '%' THEN {archivo} END
+                           ) AS relevancia
+                    FROM media_items mi
+                    LEFT JOIN fichas f ON f.tmdb_id = mi.tmdb_id AND f.media_type = mi.tmdb_type
+                    WHERE f.puntos IS NOT NULL OR mi.busca_c LIKE '%' || $4::text || '%'
+                )
+                SELECT a.*, {_TMDB_COLS}
+                FROM archivos a
+                LEFT JOIN tmdb_cache tc ON tc.tmdb_id = a.tmdb_id AND tc.media_type = a.tmdb_type
+                WHERE a.relevancia IS NOT NULL
+                ORDER BY a.relevancia, tc.vote_count DESC NULLS LAST, a.tmdb_id NULLS LAST,
+                         a.season NULLS LAST, a.episode NULLS LAST, a.message_id DESC
+                LIMIT $5 OFFSET $6
+            """, pegado, palabras, len(pegado) >= MIN_DENTRO, clave, limit, offset)
+            return [dict(r) for r in rows]
+    except Exception as e:
+        # Sin las columnas de busqueda (migracion fallida) o con un fallo en
+        # la consulta, mejor la busqueda de antes que un buscador caido.
+        logger.error("Busqueda normalizada fallo (%s); se usa la de antes", e)
     async with pool.acquire() as conn:
         rows = await conn.fetch(f"""
             SELECT mi.*, {_TMDB_COLS}
