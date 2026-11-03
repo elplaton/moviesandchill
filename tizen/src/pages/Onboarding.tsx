@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { apiFetch } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
-import { applyFocus } from '../focus/engine';
+import { applyFocus, setFocus } from '../focus/engine';
 import { FocusScope, useFocusItem } from '../focus/react';
 import TvButton from '../components/TvButton';
 import Keyboard from '../components/Keyboard';
@@ -15,20 +15,32 @@ interface Pick {
   year?: number;
 }
 
-// Dos filas es lo que entra sin tener que desplazar. Con el teclado abierto
-// caben cuatro columnas en vez de seis.
-const COLUMNAS = 6;
-const COLUMNAS_BUSCANDO = 4;
+// Con el teclado abierto caben cinco columnas en vez de ocho.
+const COLUMNAS = 8;
+const COLUMNAS_BUSCANDO = 5;
+// Alto de una fila: carátula (276) + título y año (62) + separación (24).
+const ALTO_FILA = 276 + 62 + 24;
+// Se piden tres filas cada vez, y la siguiente tanda cuando al foco le quedan
+// dos filas por debajo: con el mando se baja de fila en fila, así que da
+// tiempo a que llegue antes de alcanzar el final.
+const FILAS_POR_TANDA = 3;
+const MARGEN_FILAS = 2;
 const MINIMO = 3;
 const TOPE = 10;
 
-function Tarjeta({ item, index, marcada, onToggle }: {
+function Tarjeta({ item, index, marcada, onToggle, enfocar }: {
   item: Pick; index: number; marcada: boolean; onToggle: () => void;
+  /** Quedarse el foco al aparecer (ver `inicial` en Onboarding). */
+  enfocar?: () => void;
 }) {
   const { ref, focusKey: id } = useFocusItem<HTMLDivElement>({ index, onEnter: onToggle });
+  useEffect(() => {
+    if (enfocar) { applyFocus(id); enfocar(); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   return (
-    <div ref={ref} onMouseEnter={() => applyFocus(id)} onClick={onToggle} className="tv-card w-[248px]">
-      <div className={`relative w-[248px] h-[372px] rounded-lg overflow-hidden bg-tv-card ${
+    <div ref={ref} onMouseEnter={() => applyFocus(id)} onClick={onToggle} className="tv-card w-[184px]">
+      <div className={`relative w-[184px] h-[276px] rounded-lg overflow-hidden bg-tv-card ${
         marcada ? 'outline outline-4 outline-tv-red' : ''}`}>
         {item.poster
           ? <img src={item.poster} alt="" className="absolute inset-0 w-full h-full object-cover" />
@@ -39,7 +51,7 @@ function Tarjeta({ item, index, marcada, onToggle }: {
           </span>
         )}
       </div>
-      <p className="mt-3 text-body truncate">{item.title}</p>
+      <p className="mt-2 text-body truncate">{item.title}</p>
       {item.year && <p className="text-caption text-tv-text3">{item.year}</p>}
     </div>
   );
@@ -48,16 +60,16 @@ function Tarjeta({ item, index, marcada, onToggle }: {
 /**
  * Eleccion de gustos la primera vez, con el mando.
  *
- * Va por paginas de dos filas en vez de una lista larga: en la tele no hay
- * barra de desplazamiento y bajar fila a fila por un catalogo entero con el
- * mando es insufrible. OK marca, y los botones de abajo pasan de pagina y de
- * paso.
+ * La rejilla carga sola según se baja, sin botones de página: pasar de página
+ * con el mando era ir hasta un botón, pulsarlo y volver a subir. Como en la
+ * tele no hay barra de desplazamiento, la rejilla se mueve por `transform`
+ * siguiendo a la fila enfocada, y los botones van arriba, junto al título,
+ * porque debajo de una lista sin fin no se llegaría nunca a ellos.
  */
 export default function Onboarding() {
   const { refreshPrefs } = useAuth();
   const navigate = useNavigate();
   const [paso, setPaso] = useState<'peliculas' | 'series'>('peliculas');
-  const [pagina, setPagina] = useState(0);
   const [items, setItems] = useState<Pick[]>([]);
   const [pelis, setPelis] = useState<Set<number>>(new Set());
   const [series, setSeries] = useState<Set<number>>(new Set());
@@ -68,33 +80,57 @@ export default function Onboarding() {
   const [buscando, setBuscando] = useState(false);
   const [texto, setTexto] = useState('');
   const [busqueda, setBusqueda] = useState('');
+  // Fila enfocada: decide cuánto se desplaza la rejilla.
+  const [fila, setFila] = useState(0);
   // Cuantos hay en el catalogo sin filtrar: el minimo exigible se mide sobre
   // esto y no sobre lo que devuelva la busqueda.
   const [disponibles, setDisponibles] = useState(0);
+  // Una respuesta atrasada no puede pisar a la ultima: al pasar de peliculas
+  // a series podia llegar tarde la de peliculas y marcarse peliculas como series.
+  const peticion = useRef(0);
+  const pidiendo = useRef(false);
+  // El foco tiene que empezar en la primera carátula, que es lo que se viene a
+  // hacer aqui. Los botones se pintan antes que las carátulas (llegan por red),
+  // asi que el motor de foco se queda con «Buscar» y `autoFocus` ya no actua
+  // porque hay algo enfocado. Se hace una sola vez.
+  const [inicial, setInicial] = useState(true);
 
   const columnas = buscando ? COLUMNAS_BUSCANDO : COLUMNAS;
-  const porPagina = columnas * 2;
+  const porTanda = columnas * FILAS_POR_TANDA;
 
   const esPelis = paso === 'peliculas';
   const elegidas = esPelis ? pelis : series;
 
-  const cargar = useCallback(async (p: number) => {
+  /** `desde` = 0 empieza la lista de nuevo; si no, añade al final. */
+  const cargar = useCallback(async (desde: number) => {
+    const mia = ++peticion.current;
+    pidiendo.current = true;
     setCargando(true);
+    if (desde === 0) { setItems([]); setFila(0); setHayMas(true); }
     try {
       const q = busqueda ? `&q=${encodeURIComponent(busqueda)}` : '';
-      const res = await apiFetch(`/onboarding/picks?offset=${p * porPagina}&limit=${porPagina}${q}`);
+      const res = await apiFetch(`/onboarding/picks?offset=${desde}&limit=${porTanda}${q}`);
       const d = await res.json();
+      if (mia !== peticion.current) return;
       const nuevos: Pick[] = (esPelis ? d.movies : d.series) || [];
-      if (!busqueda && p === 0) setDisponibles(nuevos.length);
-      setItems(nuevos);
-      setHayMas(nuevos.length === porPagina);
+      if (!busqueda && desde === 0) setDisponibles(nuevos.length);
+      setItems(prev => {
+        if (desde === 0) return nuevos;
+        const ya = new Set(prev.map(p => p.id));
+        return [...prev, ...nuevos.filter(n => !ya.has(n.id))];
+      });
+      setHayMas(nuevos.length === porTanda);
     } catch {
+      if (mia !== peticion.current) return;
       setError('No se ha podido cargar el catalogo.');
-      setItems([]);
+      setHayMas(false);
     } finally {
-      setCargando(false);
+      if (mia === peticion.current) { pidiendo.current = false; setCargando(false); }
     }
-  }, [esPelis, busqueda, porPagina]);
+  }, [esPelis, busqueda, porTanda]);
+
+  // Cambiar de paso, de búsqueda o de columnas empieza la lista de nuevo.
+  useEffect(() => { cargar(0); }, [cargar]);
 
   // Con el mando se teclea despacio: medio segundo de margen va bien.
   useEffect(() => {
@@ -102,8 +138,19 @@ export default function Onboarding() {
     return () => clearTimeout(t);
   }, [texto]);
 
-  useEffect(() => { cargar(pagina); }, [cargar, pagina]);
-  useEffect(() => { setPagina(0); }, [paso, busqueda]);
+  // Al abrir la búsqueda el foco va al teclado, que es a lo que se iba.
+  useEffect(() => {
+    if (!buscando) return;
+    const raf = requestAnimationFrame(() => setFocus('onboarding-teclado'));
+    return () => cancelAnimationFrame(raf);
+  }, [buscando]);
+
+  const alEnfocar = (i: number) => {
+    const f = Math.floor(i / columnas);
+    setFila(f);
+    const filas = Math.ceil(items.length / columnas);
+    if (hayMas && !pidiendo.current && f >= filas - 1 - MARGEN_FILAS) cargar(items.length);
+  };
 
   const marcar = (tmdbId: number) => {
     const set = esPelis ? setPelis : setSeries;
@@ -133,102 +180,124 @@ export default function Onboarding() {
     }
   };
 
+  // «Cerrar busqueda» la quita; «Listo» en el teclado solo lo esconde y deja
+  // los resultados, con el foco en ellos (el teclado desaparece con el foco
+  // dentro y, si no, el mando se quedaria sin nada enfocado).
+  const cerrarBusqueda = () => { setBuscando(false); setTexto(''); };
+  const terminarDeEscribir = () => {
+    setBuscando(false);
+    requestAnimationFrame(() => setFocus('onboarding-rejilla'));
+  };
+
   // El minimo se adapta a lo que hay: con menos de tres en el catalogo,
   // exigir tres dejaba el boton apagado y no se podia terminar nunca.
   const minimo = Math.min(MINIMO, disponibles || MINIMO);
   const puedeSeguir = elegidas.size >= minimo && elegidas.size > 0;
-  const vacio = !cargando && items.length === 0 && pagina === 0 && !busqueda;
+  const vacio = !cargando && items.length === 0 && !busqueda;
   const sinResultados = !cargando && items.length === 0 && !!busqueda;
+  // La fila enfocada queda la segunda: se ve la de antes y asoma la siguiente.
+  const desplazamiento = Math.max(0, fila - 1) * ALTO_FILA;
 
   return (
-    <div className="absolute inset-0 bg-tv-bg px-[96px] py-[64px]">
-      <h1 className="text-h1 font-bold">
-        {esPelis ? 'Elige peliculas que te gusten' : 'Elige series que te gusten'}
-      </h1>
-      <p className="mt-2 text-lead text-tv-text2">
-        Marca al menos {minimo || MINIMO} con OK. Con eso se arma tu portada.
-      </p>
-      <p className="mt-2 text-body text-tv-text3">
-        {elegidas.size} de {TOPE} seleccionadas
-        {error && <span className="ml-6 text-white">{error}</span>}
-      </p>
-
+    <div className="absolute inset-0 bg-tv-bg">
       <FocusScope id="onboarding" orientation="vertical" trap as="none">
+        <div className="absolute left-[96px] right-[96px] top-[56px] flex items-end justify-between">
+          <div>
+            <h1 className="text-h1 font-bold">
+              {esPelis ? 'Elige peliculas que te gusten' : 'Elige series que te gusten'}
+            </h1>
+            <p className="mt-2 text-lead text-tv-text2">
+              Marca al menos {minimo || MINIMO} con OK. Con eso se arma tu portada.
+            </p>
+            <p className="mt-1 text-body text-tv-text3">
+              {elegidas.size} de {TOPE} seleccionadas
+              {error && <span className="ml-6 text-white">{error}</span>}
+            </p>
+          </div>
+
+          {vacio ? (
+            <FocusScope index={0} orientation="horizontal" className="flex space-x-5">
+              <TvButton index={0} primary autoFocus onClick={guardar} disabled={guardando}>
+                {guardando ? 'Entrando...' : 'Entrar de todas formas'}
+              </TvButton>
+            </FocusScope>
+          ) : (
+            <FocusScope index={0} orientation="horizontal" className="flex space-x-5">
+              <TvButton index={0} onClick={() => (buscando ? cerrarBusqueda() : setBuscando(true))}>
+                {buscando ? 'Cerrar busqueda' : 'Buscar'}
+              </TvButton>
+              {!esPelis && (
+                <TvButton index={1} onClick={() => setPaso('peliculas')} disabled={guardando}>
+                  Atras
+                </TvButton>
+              )}
+              {esPelis ? (
+                <TvButton index={2} primary onClick={() => setPaso('series')} disabled={!puedeSeguir}>
+                  Siguiente
+                </TvButton>
+              ) : (
+                <TvButton index={2} primary onClick={guardar} disabled={!puedeSeguir || guardando}>
+                  {guardando ? 'Guardando...' : 'Guardar y empezar'}
+                </TvButton>
+              )}
+            </FocusScope>
+          )}
+        </div>
+
         {vacio ? (
-          <div className="mt-16">
+          <div className="absolute left-[96px] top-[260px]">
             <p className="text-lead text-tv-text2">Todavia no hay nada que elegir.</p>
             <p className="mt-2 text-body text-tv-text3 max-w-[900px]">
               El catalogo esta vacio o aun se esta indexando. Puedes entrar ya y configurar
               tus gustos mas adelante.
             </p>
-            <div className="mt-8">
-              <TvButton index={0} primary autoFocus onClick={guardar} disabled={guardando}>
-                {guardando ? 'Entrando...' : 'Entrar de todas formas'}
-              </TvButton>
-            </div>
           </div>
         ) : (
-          <>
-            <div className="mt-8 flex items-start space-x-10">
-              <div style={{ width: buscando ? 1120 : 1728 }}>
-                {sinResultados ? (
-                  <div className="h-[372px] flex flex-col justify-center">
-                    <p className="text-lead text-tv-text2">Nada con «{busqueda}».</p>
-                    <p className="mt-2 text-body text-tv-text3">
-                      Prueba con menos palabras, o con el titulo original.
-                    </p>
-                  </div>
-                ) : (
-                  <FocusScope index={0} orientation="grid" columns={columnas}
-                    className={`grid ${buscando ? 'grid-cols-4' : 'grid-cols-6'} gap-x-6 gap-y-8`}>
+          <FocusScope index={1} orientation="horizontal"
+            className="absolute left-[72px] right-[72px] top-[182px] bottom-0 flex items-start space-x-10">
+            {/* Ventana de la rejilla: recorta lo que se ha ido hacia arriba.
+                El relleno deja sitio a la carátula enfocada, que crece un 12 %. */}
+            <div className="relative h-full overflow-hidden px-[24px] pt-[24px]"
+              style={{ width: (buscando ? 1120 : 1728) + 48 }}>
+              {sinResultados ? (
+                <div className="h-[338px] flex flex-col justify-center">
+                  <p className="text-lead text-tv-text2">Nada con «{busqueda}».</p>
+                  <p className="mt-2 text-body text-tv-text3">
+                    Prueba con menos palabras, o con el titulo original.
+                  </p>
+                </div>
+              ) : (
+                <div style={{
+                  transform: `translate3d(0, ${-desplazamiento}px, 0)`,
+                  transition: 'transform 220ms cubic-bezier(0.25, 0.46, 0.45, 0.94)',
+                }}>
+                  <FocusScope id="onboarding-rejilla" index={0} orientation="grid" columns={columnas}
+                    onChildFocus={alEnfocar}
+                    className={`grid ${buscando ? 'grid-cols-5' : 'grid-cols-8'} gap-x-6 gap-y-6`}>
                     {items.map((item, i) => (
                       <Tarjeta key={item.id} item={item} index={i}
                         marcada={elegidas.has(item.tmdb_id)}
-                        onToggle={() => marcar(item.tmdb_id)} />
+                        onToggle={() => marcar(item.tmdb_id)}
+                        enfocar={inicial && i === 0 ? () => setInicial(false) : undefined} />
                     ))}
                   </FocusScope>
-                )}
-              </div>
-
-              {buscando && (
-                <FocusScope index={1} orientation="vertical" as="none">
-                  <Keyboard index={0} value={texto} onChange={setTexto} autoFocus
-                    placeholder={esPelis ? 'Titulo de la pelicula' : 'Titulo de la serie'}
-                    onDone={() => setBuscando(false)} />
-                </FocusScope>
+                  {cargando && items.length > 0 && (
+                    <p className="mt-6 text-body text-tv-text3">Cargando mas...</p>
+                  )}
+                </div>
               )}
             </div>
 
-            <FocusScope index={buscando ? 2 : 1} orientation="horizontal" className="mt-10 flex space-x-5">
-              <TvButton index={0} onClick={() => { setBuscando(b => !b); if (buscando) { setTexto(''); } }}>
-                {buscando ? 'Cerrar busqueda' : 'Buscar'}
-              </TvButton>
-              {pagina > 0 && !buscando && (
-                <TvButton index={1} onClick={() => setPagina(p => p - 1)} disabled={cargando}>
-                  Anteriores
-                </TvButton>
-              )}
-              {hayMas && (
-                <TvButton index={2} onClick={() => setPagina(p => p + 1)} disabled={cargando}>
-                  Ver mas
-                </TvButton>
-              )}
-              {!esPelis && (
-                <TvButton index={2} onClick={() => setPaso('peliculas')} disabled={guardando}>
-                  Atras
-                </TvButton>
-              )}
-              {esPelis ? (
-                <TvButton index={3} primary onClick={() => setPaso('series')} disabled={!puedeSeguir}>
-                  Siguiente
-                </TvButton>
-              ) : (
-                <TvButton index={3} primary onClick={guardar} disabled={!puedeSeguir || guardando}>
-                  {guardando ? 'Guardando...' : 'Guardar y empezar'}
-                </TvButton>
-              )}
-            </FocusScope>
-          </>
+            {buscando && (
+              <div className="pt-[24px]">
+                <FocusScope id="onboarding-teclado" index={1} orientation="vertical" as="none">
+                  <Keyboard index={0} value={texto} onChange={setTexto}
+                    placeholder={esPelis ? 'Titulo de la pelicula' : 'Titulo de la serie'}
+                    onDone={terminarDeEscribir} />
+                </FocusScope>
+              </div>
+            )}
+          </FocusScope>
         )}
       </FocusScope>
     </div>

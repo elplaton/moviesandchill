@@ -84,6 +84,22 @@ hay que aceptar con el mando.
   que el lanzador solo enseña una esquina. Las originales están en `art/` y las
   versiones por densidad se regeneran con `sips` (banner 320×180 en xhdpi,
   icono 96×96).
+- **El icono es cuadrado o apaisado según la versión de Fire OS.** Las dos
+  versiones del lanzador pintan de forma distinta las apps instaladas a mano.
+  En Fire OS 7 (Android 9, API 28) el icono va en una tarjeta 16:9 y se encaja
+  entero, así que ahí se usa el apaisado (`mipmap-*-v28/`, el mismo arte que el
+  banner). En Fire OS 6 (el Stick 4K `AFTMM`) se encaja en **un cuadrado** en
+  medio de la tarjeta, con franjas grises a los lados que pone el propio
+  lanzador: ahí el apaisado salía estrujado, así que la base (`mipmap-*/`) es
+  el cuadrado de `art/icon-512.png`. El banner sigue la misma regla
+  (`drawable-*/` cuadrado, `drawable-*-v28/` apaisado). Las franjas no se
+  pueden quitar desde el APK: a cualquier app instalada a mano le pasa lo
+  mismo (Magis TV), y las de la Appstore rellenan la tarjeta porque Amazon les
+  sirve el arte desde su catálogo. Ojo al probarlo: la Appstore guarda su
+  propia copia del icono (`SideloadedAppManagerService`, «Entry … was not
+  inserted» en logcat) y no la cambia al actualizar ni al desinstalar. Con
+  `install -r` el icono incluso sale roto. Lo que lo refrescó fue desinstalar,
+  instalar de cero y moverla (Menú → «Mover al frente»).
 
 ## Depurar
 
