@@ -333,6 +333,47 @@ async def _ensure_tables():
             )
         """)
 
+        # Donde empiezan los creditos (ver services/creditos.py). Dos niveles:
+        # `creditos` es la referencia de un titulo (una pelicula, o una
+        # temporada de una serie; 0 = la serie entera) y se guarda como
+        # segundos ANTES DEL FINAL, porque es lo que se mantiene entre enlaces
+        # del mismo titulo (uno puede llevar un logo delante o ir un 4 % mas
+        # rapido). `creditos_enlace` es lo medido en un archivo concreto, por
+        # su ruta (`tg:<canal>:<msg>` o la relativa a la biblioteca, como en
+        # playback_progress); `inicio` NULL con estado `sin_creditos` es que
+        # se miro y no los tiene.
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS creditos (
+                tmdb_id         INTEGER NOT NULL,
+                tmdb_type       VARCHAR(10) NOT NULL,
+                temporada       INTEGER NOT NULL DEFAULT 0,
+                antes_del_final REAL NOT NULL,
+                postcreditos    BOOLEAN NOT NULL DEFAULT FALSE,
+                fuente          VARCHAR(16) NOT NULL,
+                ruta            TEXT,
+                duracion        REAL,
+                actualizado     TIMESTAMP NOT NULL DEFAULT NOW(),
+                PRIMARY KEY (tmdb_id, tmdb_type, temporada)
+            )
+        """)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS creditos_enlace (
+                ruta         TEXT PRIMARY KEY,
+                tmdb_id      INTEGER,
+                tmdb_type    VARCHAR(10),
+                temporada    INTEGER,
+                inicio       REAL,
+                duracion     REAL,
+                estado       VARCHAR(16) NOT NULL,
+                fuente       VARCHAR(16) NOT NULL,
+                postcreditos BOOLEAN NOT NULL DEFAULT FALSE,
+                actualizado  TIMESTAMP NOT NULL DEFAULT NOW()
+            )
+        """)
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_creditos_enlace_titulo "
+            "ON creditos_enlace (tmdb_id, tmdb_type, temporada)")
+
         # Donde mandar los avisos. Una cuenta tiene tantas como aparatos: el
         # telefono, la PWA instalada y el navegador del escritorio son
         # suscripciones distintas, y el `endpoint` es su identidad (por eso es

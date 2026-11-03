@@ -60,6 +60,9 @@ async def media_tracks(path: str, user: Annotated[str, Depends(get_current_user)
         datos["path"] = path
         datos["default_audio"] = mejor_audio(datos["audio"]) if datos["audio"] else None
         datos["external_subtitles"] = subtitulos_externos(target, path)
+        # Si el archivo marca sus creditos con un capitulo, se apunta de paso.
+        from app.services.creditos import recoger_capitulos
+        await recoger_capitulos(path, datos)
         return datos
 
     # No es de nadie: son los datos del archivo, iguales para todas las cuentas.

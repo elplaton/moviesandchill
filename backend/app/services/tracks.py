@@ -153,7 +153,7 @@ def _ffprobe(path: str) -> dict | None:
     try:
         r = subprocess.run(
             ["ffprobe", "-v", "error", "-print_format", "json",
-             "-show_streams", "-show_format", path],
+             "-show_streams", "-show_format", "-show_chapters", path],
             capture_output=True, text=True, timeout=60,
         )
         if r.returncode != 0:
@@ -259,7 +259,23 @@ def leer_pistas(path: str) -> dict:
     return {"ok": True, "video": video, "audio": audio, "subtitles": subs,
             "container": fmt.get("format_name", ""),
             "audio_apple": apto_audio, "audio_apple_motivo": motivo_audio,
+            "capitulos": _capitulos(datos.get("chapters") or []),
             **_peso(fmt)}
+
+
+def _capitulos(crudos: list[dict]) -> list[dict]:
+    """Los capitulos del archivo: [{start, end, title}] en segundos. Vienen
+    en la misma lectura que las pistas, asi que no cuestan nada; de ahi sale
+    donde empiezan los creditos cuando el archivo los marca (ver
+    services/creditos.py)."""
+    salida = []
+    for c in crudos:
+        try:
+            salida.append({"start": float(c.get("start_time")), "end": float(c.get("end_time")),
+                           "title": ((c.get("tags") or {}).get("title") or "").strip()})
+        except (TypeError, ValueError):
+            continue
+    return salida
 
 
 def _peso(fmt: dict) -> dict:

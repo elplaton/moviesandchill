@@ -261,6 +261,7 @@ from app.routers.push_router import router as push_router
 from app.routers.watched_router import router as watched_router
 from app.routers.state_router import router as state_router
 from app.routers.siguiente_router import router as siguiente_router
+from app.routers.creditos_router import router as creditos_router
 from app.routers.peticiones_router import router as peticiones_router
 
 app.include_router(search_router)
@@ -289,6 +290,7 @@ app.include_router(push_router)
 app.include_router(watched_router)
 app.include_router(state_router)
 app.include_router(siguiente_router)
+app.include_router(creditos_router)
 
 
 @app.get("/health")

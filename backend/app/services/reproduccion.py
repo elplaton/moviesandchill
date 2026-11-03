@@ -442,6 +442,9 @@ async def _pistas(path: str) -> dict | None:
     datos["path"] = path
     datos["default_audio"] = mejor_audio(datos["audio"]) if datos["audio"] else None
     datos["external_subtitles"] = []
+    # Si el archivo marca sus creditos con un capitulo, se apunta de paso.
+    from app.services.creditos import recoger_capitulos
+    await recoger_capitulos(path, datos)
     return datos
 
 
