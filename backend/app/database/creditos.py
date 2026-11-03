@@ -101,6 +101,46 @@ async def titulo_de_mensaje(channel_id: int, message_id: int) -> dict | None:
         return dict(r) if r else None
 
 
+async def enlaces_de_titulo(tmdb_id: int, tmdb_type: str) -> list[dict]:
+    """Los archivos del catalogo de un titulo (solo con ficha valida)."""
+    pool = get_pool()
+    if not pool:
+        return []
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT channel_id, channel_name, message_id, file_name, file_size, season, episode
+            FROM media_items
+            WHERE tmdb_id = $1 AND tmdb_type = $2 AND tmdb_valid IS TRUE
+        """, tmdb_id, tmdb_type)
+        return [dict(r) for r in rows]
+
+
+async def proceso(tmdb_id: int, tmdb_type: str, temporada: int) -> dict | None:
+    pool = get_pool()
+    if not pool:
+        return None
+    async with pool.acquire() as conn:
+        r = await conn.fetchrow("""
+            SELECT *, EXTRACT(EPOCH FROM (NOW() - intentado)) AS hace
+            FROM creditos_proceso WHERE tmdb_id = $1 AND tmdb_type = $2 AND temporada = $3
+        """, tmdb_id, tmdb_type, temporada)
+        return dict(r) if r else None
+
+
+async def marcar_proceso(tmdb_id: int, tmdb_type: str, temporada: int, estado: str,
+                         detalle: str = "") -> None:
+    pool = get_pool()
+    if not pool:
+        return
+    async with pool.acquire() as conn:
+        await conn.execute("""
+            INSERT INTO creditos_proceso (tmdb_id, tmdb_type, temporada, estado, detalle, intentado)
+            VALUES ($1, $2, $3, $4, $5, NOW())
+            ON CONFLICT (tmdb_id, tmdb_type, temporada) DO UPDATE SET
+                estado = EXCLUDED.estado, detalle = EXCLUDED.detalle, intentado = NOW()
+        """, tmdb_id, tmdb_type, temporada, estado, detalle[:500])
+
+
 async def resumen() -> dict:
     """Cifras para el panel: cuanto se sabe y de donde ha salido."""
     pool = get_pool()
@@ -111,4 +151,7 @@ async def resumen() -> dict:
             "SELECT tmdb_type, fuente, COUNT(*) AS n FROM creditos GROUP BY 1, 2 ORDER BY 1, 2")
         enlaces = await conn.fetch(
             "SELECT estado, fuente, COUNT(*) AS n FROM creditos_enlace GROUP BY 1, 2 ORDER BY 1, 2")
-        return {"titulos": [dict(r) for r in titulos], "enlaces": [dict(r) for r in enlaces]}
+        procesos = await conn.fetch(
+            "SELECT tmdb_type, estado, COUNT(*) AS n FROM creditos_proceso GROUP BY 1, 2 ORDER BY 1, 2")
+        return {"titulos": [dict(r) for r in titulos], "enlaces": [dict(r) for r in enlaces],
+                "procesos": [dict(r) for r in procesos]}

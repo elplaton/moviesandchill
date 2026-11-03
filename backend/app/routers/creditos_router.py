@@ -20,8 +20,17 @@ async def creditos(path: str, user: Annotated[str, Depends(get_current_user)],
     `tmdb_id`/`media_type`/`season` solo hacen falta para lo descargado; lo
     de Telegram ya sabe de que titulo es."""
     from app.services.creditos import consultar
+    from app.services.proceso_creditos import al_reproducir
+    from app.tasks import spawn
 
-    return await consultar(path, duracion, tmdb_id=tmdb_id, tmdb_type=media_type, temporada=season)
+    r = await consultar(path, duracion, tmdb_id=tmdb_id, tmdb_type=media_type, temporada=season)
+    # Abrir algo es lo que pone en marcha averiguar sus creditos: sin dato, el
+    # proceso de su titulo o temporada; con dato previsto, comprobarlo. En
+    # segundo plano y en una cola de uno en uno: para cuando se llegue al
+    # final ya suele estar (un episodio tarda ~10 s en medirse).
+    spawn(al_reproducir(path, r, tmdb_id=tmdb_id, tmdb_type=media_type, temporada=season),
+          "creditos-al-reproducir")
+    return r
 
 
 class Manual(BaseModel):

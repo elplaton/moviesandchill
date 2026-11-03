@@ -70,6 +70,9 @@ TTL = {
     # tarjeta de lo que no tenemos dice si esta cuenta ya lo ha pedido. La
     # invalidan el relleno de plataformas y la foto diaria de los tops.
     "plataformas": 600,
+    # Los titulos relacionados con uno (la pantalla del final del
+    # reproductor). No es de nadie: lo visto por cada cuenta se quita despues.
+    "relacionados": 3600,
 }
 
 # Espacios cuyo contenido es de una cuenta concreta. En estos, `recordar()`

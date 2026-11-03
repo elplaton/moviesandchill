@@ -65,6 +65,11 @@ class Cliente:
     def iter_download(self, doc, offset=0, request_size=rp.TROZO, file_size=None):
         return Iter(doc, offset, request_size)
 
+    # Desde que se reconecta solo (vigilar_conexion), «Ver» pregunta antes si
+    # el cliente esta conectado; el de mentira lo esta siempre.
+    def is_connected(self):
+        return True
+
 
 class Downloader:
     client = Cliente()

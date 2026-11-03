@@ -283,3 +283,13 @@ async def get_details(api_key: str, tmdb_id: int, media_type: str) -> dict | Non
     }
     _cache_set(key, result)
     return result
+
+
+async def recomendaciones(api_key: str, tmdb_id: int, media_type: str) -> list[int]:
+    """Los ids que TMDB recomienda a quien ha visto este titulo («si te ha
+    gustado...»), del mismo tipo. Para la pantalla del final del reproductor."""
+    if not api_key:
+        return []
+    data = await _get(f"/{media_type}/{tmdb_id}/recommendations",
+                      {"api_key": api_key, "language": "es-ES", "page": 1})
+    return [r["id"] for r in (data or {}).get("results") or [] if r.get("id")]

@@ -534,3 +534,47 @@ async def get_browse_movies(limit: int = 300):
 
 async def get_browse_series(limit: int = 300):
     return await get_browse_pool("tv", limit)
+
+
+async def relacionados(tmdb_id: int, tmdb_type: str, recomendados: list[int], limite: int = 24) -> list[dict]:
+    """Titulos del catalogo relacionados con uno: primero los que recomienda
+    TMDB para el (en su orden) y despues los que comparten mas generos, de
+    mejor a peor nota (la misma nota ajustada por votos de la portada). Solo
+    con ficha valida y caratula; nunca el propio titulo.
+
+    No usa el CTE de la portada (agrupa los 250.000 archivos): aqui se filtra
+    antes por los candidatos, que son pocos."""
+    return await _filas(f"""
+        WITH base AS (
+            SELECT COALESCE(genres, '{{}}') AS genres FROM tmdb_cache WHERE tmdb_id = $1 AND media_type = $2
+        ),
+        candidatos AS (
+            SELECT tc.tmdb_id, tc.media_type AS tmdb_type, tc.title AS tmdb_title, tc.year, tc.rating,
+                   tc.poster, tc.backdrop, tc.overview, tc.genres, tc.vote_count,
+                   array_position($3::int[], tc.tmdb_id) AS pos_tmdb,
+                   cardinality(ARRAY(SELECT unnest(tc.genres) INTERSECT
+                                     SELECT unnest((SELECT genres FROM base)))) AS comunes
+            FROM tmdb_cache tc
+            WHERE tc.poster IS NOT NULL
+              AND NOT (tc.tmdb_id = $1 AND tc.media_type = $2)
+              AND ((tc.media_type = $2 AND tc.tmdb_id = ANY($3::int[]))
+                   OR tc.genres && (SELECT genres FROM base))
+        ),
+        en_catalogo AS (
+            SELECT c.*, t.channel_id, t.channel_name, t.message_id, t.clean_title,
+                   t.episode_count, t.file_count
+            FROM candidatos c
+            JOIN LATERAL (
+                SELECT MIN(mi.channel_id) AS channel_id, MIN(mi.channel_name) AS channel_name,
+                       MIN(mi.message_id) AS message_id, MIN(mi.clean_title) AS clean_title,
+                       COUNT(DISTINCT CASE WHEN mi.episode IS NOT NULL
+                                           THEN COALESCE(mi.season, 0) * 1000 + mi.episode END) AS episode_count,
+                       COUNT(*) AS file_count
+                FROM media_items mi
+                WHERE mi.tmdb_id = c.tmdb_id AND mi.tmdb_type = c.tmdb_type AND mi.tmdb_valid IS TRUE
+            ) t ON t.file_count > 0
+        )
+        SELECT * FROM en_catalogo
+        ORDER BY pos_tmdb NULLS LAST, comunes DESC, {_SIN_NOTA}, {_NOTA} DESC, tmdb_id
+        LIMIT $4
+    """, tmdb_id, tmdb_type, recomendados, limite)

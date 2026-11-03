@@ -119,10 +119,12 @@ async def _titulo(ruta: str, tmdb_id: int | None, tmdb_type: str | None,
 async def guardar_medicion(ruta: str, *, inicio: float | None, duracion: float | None, fuente: str,
                            estado: str = "medido", postcreditos: bool = False,
                            tmdb_id: int | None = None, tmdb_type: str | None = None,
-                           temporada: int | None = None) -> bool:
+                           temporada: int | None = None, referencia: bool = True) -> bool:
     """Lo que se ha averiguado de un enlace. Si tiene creditos y se sabe de
     que titulo es, pasa ademas a ser la referencia de su temporada (y de la
-    serie entera, si aun no tenia) para predecir los demas enlaces."""
+    serie entera, si aun no tenia) para predecir los demas enlaces; con
+    `referencia=False` no (los episodios de referencia de una serie, cuya
+    referencia es la mediana de varios y la pone quien los mide)."""
     from app.database import creditos as db
 
     if fuente not in FUENTES or estado not in ESTADOS:
@@ -130,7 +132,7 @@ async def guardar_medicion(ruta: str, *, inicio: float | None, duracion: float |
     tid, tipo, temp = await _titulo(ruta, tmdb_id, tmdb_type, temporada)
     escrito = await db.guardar_enlace(ruta, inicio=inicio, duracion=duracion, estado=estado, fuente=fuente,
                                       tmdb_id=tid, tmdb_type=tipo, temporada=temp, postcreditos=postcreditos)
-    if not escrito or inicio is None or not duracion or not tid or not tipo:
+    if not escrito or not referencia or inicio is None or not duracion or not tid or not tipo:
         return escrito
     antes = round(duracion - inicio, 2)
     await db.guardar_referencia(tid, tipo, temp, antes_del_final=antes, fuente=fuente, ruta=ruta,

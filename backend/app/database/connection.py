@@ -373,6 +373,20 @@ async def _ensure_tables():
         await conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_creditos_enlace_titulo "
             "ON creditos_enlace (tmdb_id, tmdb_type, temporada)")
+        # Lo que ya se ha intentado por titulo (y temporada en las series):
+        # sin esto, un titulo cuyos creditos no se pueden sacar se volveria a
+        # procesar cada vez que alguien lo abre.
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS creditos_proceso (
+                tmdb_id    INTEGER NOT NULL,
+                tmdb_type  VARCHAR(10) NOT NULL,
+                temporada  INTEGER NOT NULL DEFAULT 0,
+                estado     VARCHAR(20) NOT NULL,
+                detalle    TEXT,
+                intentado  TIMESTAMP NOT NULL DEFAULT NOW(),
+                PRIMARY KEY (tmdb_id, tmdb_type, temporada)
+            )
+        """)
 
         # Donde mandar los avisos. Una cuenta tiene tantas como aparatos: el
         # telefono, la PWA instalada y el navegador del escritorio son

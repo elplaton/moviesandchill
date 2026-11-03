@@ -554,3 +554,38 @@ async def browse_genre(user: Annotated[str, Depends(get_current_user)],
     filas se paginaran. Un navegador con la versión vieja en caché sigue
     teniendo sus carriles."""
     return await browse_row(user, f"{CLAVE_GENERO}{genre}", seed, offset, limit, media_type)
+
+
+@router.get("/browse/relacionados")
+async def browse_relacionados(tmdb_id: int, media_type: str,
+                              user: Annotated[str, Depends(get_current_user)], limit: int = 18):
+    """Lo que ofrecer al terminar algo: la pantalla del final del reproductor,
+    al acabar una pelicula o el ultimo episodio de una serie.
+
+    Primero lo que TMDB recomienda a quien vio este titulo y tenemos en el
+    catalogo; despues, lo que comparte mas generos, de mejor a peor nota. Sin
+    lo que esta cuenta ya ha marcado como visto entero."""
+    from app.database.browse import relacionados
+    from app.database.users import get_user_by_username
+    from app.database.watched import titulos_vistos
+    from app.routers.download import config
+    from app.services import cache, tmdb
+
+    tipo = tipo_tmdb(media_type)
+    if not tipo:
+        return {"items": []}
+    api_key = config.get("tmdb_api_key", "") if config and config.get("tmdb_enabled") else ""
+
+    async def calcular():
+        recomendados = await cache.recordar(
+            "tmdb", ["recomendaciones", tipo, tmdb_id],
+            lambda: tmdb.recomendaciones(api_key, tmdb_id, tipo)) or []
+        filas = await relacionados(tmdb_id, tipo, recomendados, PAGE_MAX)
+        return [item_from_row(f) for f in filas]
+
+    items = await cache.recordar("relacionados", [tipo, tmdb_id], calcular) or []
+    cuenta = await get_user_by_username(user)
+    vistos = await titulos_vistos(cuenta["id"]) if cuenta else set()
+    items = [i for i in items
+             if (i["tmdb_id"], "tv" if i["media_type"] == "series" else "movie") not in vistos]
+    return {"items": items[:max(1, min(limit, PAGE_MAX))]}

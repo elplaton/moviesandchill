@@ -330,10 +330,14 @@ def _zip64(extra: bytes, original: int, comprimido: int) -> tuple[int, int]:
 
 # --- Leer de Telegram ----------------------------------------------------------
 
-async def leer(v: Virtual, desde: int, hasta: int):
+async def leer(v: Virtual, desde: int, hasta: int, bloque: int = TROZO):
     """Los bytes `desde`..`hasta` (incluidos) del video, de Telegram, a medida
     que llegan. Si la referencia del archivo caduca a mitad se rearma el
-    virtual una vez y se sigue por donde iba."""
+    virtual una vez y se sigue por donde iba.
+
+    `bloque` es lo que se pide a Telegram por peticion (y su alineacion): el
+    streaming usa 512 KB; quien solo quiere unos KB sueltos (el analisis de
+    los creditos lee fotogramas de ~70 KB) gasta mucho menos con 128 KB."""
     dl = _downloader()
     pos = desde
     refrescado = False
@@ -343,14 +347,14 @@ async def leer(v: Virtual, desde: int, hasta: int):
         if tramo is None:
             return
         local = crudo - tramo.desde
-        alineado = local - local % TROZO
+        alineado = local - local % bloque
         saltar = local - alineado
         cuanto = min(hasta - pos + 1, tramo.tamano - local)
         # El iterador se cierra siempre: salir del bucle a medias (el tramo
         # pedido acaba antes que el archivo, o el `<video>` corta la conexion)
         # sin cerrarlo deja prestada la conexion con el DC del archivo.
         it = dl.client.iter_download(tramo.documento, offset=alineado,
-                                     request_size=TROZO, file_size=tramo.tamano)
+                                     request_size=bloque, file_size=tramo.tamano)
         try:
             async for trozo in it:
                 if saltar:

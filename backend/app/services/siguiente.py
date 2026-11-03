@@ -185,6 +185,10 @@ async def que_viene(path: str, user_id: int, tmdb_id: int | None = None) -> dict
     `descargables` los que se pueden bajar. La decision de que tarjeta se
     dibuja la toma el cliente con esos cuatro datos.
     """
+    from app.services import reproduccion
+    if reproduccion.es_ruta(path):
+        return await _que_viene_streaming(path, user_id)
+
     rel = ruta_relativa(path)
     if rel is None:
         return {"kind": "desconocido"}
@@ -246,4 +250,81 @@ async def que_viene(path: str, user_id: int, tmdb_id: int | None = None) -> dict
         "title": (ficha or {}).get("title") or grupo_de(rel),
         "poster": (ficha or {}).get("poster"),
         "backdrop": (ficha or {}).get("backdrop"),
+    }
+
+
+# --- Ver sin descargar ------------------------------------------------------
+
+def elegir_enlace(enlaces: list[dict], canal: int | None, tamano: int | None) -> dict:
+    """El enlace del siguiente episodio en streaming: del mismo canal si lo
+    hay (suele ser el mismo ripeo: misma calidad, mismo idioma) y, entre los
+    posibles, el de tamaño mas parecido al que se esta viendo."""
+    def puntos(e):
+        return (e.get("channel_id") != canal, abs((e.get("file_size") or 0) - (tamano or 0)))
+    return min(enlaces, key=puntos)
+
+
+async def _que_viene_streaming(path: str, user_id: int) -> dict:
+    """Lo mismo que `que_viene` para un enlace `tg:`. Aqui no hay disco ni
+    descargas que ofrecer: el siguiente episodio es otro enlace de streaming
+    del catalogo, y se puede ver ya. Sin esto el reproductor no ofrecia nada
+    al acabar un capitulo visto sin descargar (`ruta_relativa` no entiende de
+    rutas de Telegram)."""
+    from app.database.connection import get_pool
+    from app.database.creditos import enlaces_de_titulo
+    from app.database.watched import episodios_vistos
+    from app.services import reproduccion
+
+    ids = reproduccion.leer_ruta(path)
+    pool = get_pool()
+    if not ids or not pool:
+        return {"kind": "desconocido"}
+    async with pool.acquire() as conn:
+        actual = await conn.fetchrow("""
+            SELECT mi.tmdb_id, mi.tmdb_type, mi.season, mi.episode, mi.channel_id, mi.file_size,
+                   tc.title, tc.poster, tc.backdrop
+            FROM media_items mi
+            LEFT JOIN tmdb_cache tc ON tc.tmdb_id = mi.tmdb_id AND tc.media_type = mi.tmdb_type
+            WHERE mi.channel_id = $1 AND mi.message_id = $2 AND mi.tmdb_valid IS TRUE
+            LIMIT 1
+        """, *ids)
+    if not actual or not actual["tmdb_id"]:
+        return {"kind": "desconocido"}
+    if actual["tmdb_type"] != "tv" or actual["episode"] is None:
+        return {"kind": "movie", "tmdb_id": actual["tmdb_id"], "media_type": actual["tmdb_type"]}
+
+    tid = actual["tmdb_id"]
+    temporada, episodio = actual["season"] or 0, actual["episode"]
+    vistos = await episodios_vistos(user_id, tid)
+    por_episodio: dict[tuple[int, int], list[dict]] = {}
+    for e in await enlaces_de_titulo(tid, "tv"):
+        if e.get("episode") is None or reproduccion.clasificar(e.get("file_name")) not in ("video", "partes"):
+            continue
+        clave = (e.get("season") or 0, e["episode"])
+        if clave <= (temporada, episodio) or clave in vistos:
+            continue
+        por_episodio.setdefault(clave, []).append(e)
+    delante = sorted(por_episodio)
+    siguiente = None
+    if delante:
+        ts, es = delante[0]
+        e = elegir_enlace(por_episodio[(ts, es)], actual["channel_id"], actual["file_size"])
+        siguiente = {
+            "path": reproduccion.ruta(e["channel_id"], e["message_id"]),
+            "season": ts or None,
+            "episode": es,
+            "label": etiqueta(ts or None, es),
+            "streaming": True,
+        }
+    return {
+        "kind": "series",
+        "tmdb_id": tid,
+        "actual": {"season": temporada, "episode": episodio, "label": etiqueta(temporada or None, episodio)},
+        "siguiente": siguiente,
+        # Todo lo de delante se puede ver ya: no hay nada que ofrecer bajar.
+        "pendientes": len(delante),
+        "descargables": [],
+        "title": actual["title"],
+        "poster": actual["poster"],
+        "backdrop": actual["backdrop"],
     }
