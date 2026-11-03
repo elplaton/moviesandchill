@@ -1,8 +1,37 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+import legacy from '@vitejs/plugin-legacy';
+import tailwindcss from 'tailwindcss';
+import autoprefixer from 'autoprefixer';
+import webos4 from './postcss.webos4.js';
+
+/**
+ * Las LG de 2018-2019 (webOS 4.x) llevan Chromium 53, que no sabe lo que es
+ * un `<script type="module">`: lo ignora sin decir nada y la app se queda en
+ * negro (pasó con una 32LM6380PLC). No es solo sintaxis —que esbuild bajaría—,
+ * es el formato del paquete, así que en los modos de LG se compila **dos
+ * veces**: el paquete de siempre, como módulo, y otro clásico (`nomodule`, con
+ * SystemJS, Babel y los polyfills de core-js que pida el código) que solo
+ * cargan los navegadores que no entienden módulos. Una LG con webOS 5 o más
+ * carga el módulo como hasta ahora.
+ *
+ * Solo en `webos` (el paquete de LG) y `tv-webos` (la interfaz que ese paquete
+ * se baja del servidor, en /tv-webos/). `/tv/`, Samsung, Fire TV y PS4 no
+ * cambian: ni plugin, ni objetivo, ni CSS.
+ */
+const WEBOS = ['webos', 'tv-webos'];
 
 export default defineConfig(({ mode }) => ({
-  plugins: [react()],
+  plugins: [
+    react(),
+    ...(WEBOS.includes(mode) ? [legacy({ targets: ['chrome >= 53'] })] : []),
+  ],
+  // El CSS no tiene versión «legacy»: es uno para todos, así que en los modos
+  // de LG se escribe para Chromium 53 (ver postcss.webos4.js). Sin `postcss`
+  // aquí, Vite usa postcss.config.js, que es el de siempre.
+  css: WEBOS.includes(mode)
+    ? { postcss: { plugins: [tailwindcss(), webos4(), autoprefixer()] } }
+    : undefined,
   base: './',
   resolve: {
     alias: {
@@ -34,9 +63,16 @@ export default defineConfig(({ mode }) => ({
     // El modo `tv` es el que sirve nginx en /tv/ y lo cargan TODAS las teles,
     // asi que se compila para el suelo de todas ellas (el de webOS 5 y Fire
     // OS 7), no para el de la mas moderna.
-    target: mode === 'ps4' ? 'safari11'
-      : mode === 'webos' || mode === 'firetv' || mode === 'tv' ? 'chrome68'
+    //
+    // En los modos de LG el objetivo lo pone plugin-legacy (ver WEBOS): el
+    // módulo sale para chrome64 y el clásico para chrome53. El CSS, para
+    // chrome53, o esbuild lo minifica con sintaxis de color que no entiende
+    // (`#0000001a`).
+    target: WEBOS.includes(mode) ? undefined
+      : mode === 'ps4' ? 'safari11'
+      : mode === 'firetv' || mode === 'tv' ? 'chrome68'
       : 'chrome85',
+    cssTarget: WEBOS.includes(mode) ? 'chrome53' : undefined,
   },
   server: {
     proxy: {

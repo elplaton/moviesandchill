@@ -10,6 +10,7 @@
     "test": "sh test/run.sh",
     "build:ps4": "npm run build -- --mode ps4 --outDir ../ps4/dist --emptyOutDir",
     "build:tv": "npm run build -- --mode tv --outDir ../tv/dist --emptyOutDir",
+    "build:tv-webos": "npm run build -- --mode tv-webos --outDir ../tv/dist-webos --emptyOutDir",
     "deploy": "./deploy.sh",
     "deploy:debug": "./deploy.sh --debug",
     "tv:console": "../venv/bin/python tools/debug-server.py",
@@ -26,11 +27,13 @@
   "devDependencies": {
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-legacy": "^5.4.3",
     "@vitejs/plugin-react": "^4.3.1",
     "@webos-tools/cli": "^3.2.6",
     "autoprefixer": "^10.5.4",
     "postcss": "^8.5.22",
     "tailwindcss": "^3.4.19",
+    "terser": "^5.51.2",
     "typescript": "^5.5.3",
     "vite": "^5.4.0"
   }

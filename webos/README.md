@@ -5,7 +5,7 @@ Es **la misma app que `../tizen`**: mismo código, mismas pantallas, mismo mando
 ## Se actualiza sola
 
 El paquete instalado es **solo el arranque**. Al abrir la app comprueba si el
-servidor sirve la interfaz en `http://<servidor>/tv/` y, si contesta, la carga
+servidor sirve la interfaz en `http://<servidor>/tv-webos/` y, si contesta, la carga
 de ahí: así cada vez que abres la tele tienes la última versión sin instalar
 nada. Si el servidor no contesta en un segundo y medio, se carga la copia que
 viene dentro del paquete (vieja, pero funcionando).
@@ -21,7 +21,13 @@ Ver `tv/README.md` para el montaje completo.
 
 ## Requisitos
 
-- Tele LG con webOS 5 o superior (2020+). Se compila para Chromium 68, el de webOS 5.
+- Tele LG con webOS 4 o superior (2018+). webOS 4 lleva Chromium 53, que no
+  carga `<script type="module">`: en los modos `webos` y `tv-webos` se compila
+  además un paquete clásico con polyfills (`@vitejs/plugin-legacy`), y el CSS se
+  pasa por `tizen/postcss.webos4.js` (colores `rgb(a b c / x)`, `#0000`,
+  `:where()` y la rejilla del teclado, que en Chromium 53 no existen). Probado
+  en una 32LM6380PLC (webOS 4.5). Por eso este paquete se baja la interfaz de
+  `/tv-webos/` y no de `/tv/`: así lo que cargan las demás teles no cambia.
 - El backend de `moviesandchill` accesible desde la tele por la red local.
 - Node instalado. El CLI de webOS (`@webos-tools/cli`) se instala como dependencia de `../tizen` con `npm install`; no hace falta nada global.
 

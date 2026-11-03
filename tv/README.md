@@ -19,14 +19,21 @@ aquí por comodidad.
 ## Cómo encaja
 
 ```
-tizen/src  ──┬─ modo tv      → tv/dist     → nginx /tv/    ← las teles lo cargan de aquí
+tizen/src  ──┬─ modo tv      → tv/dist     → nginx /tv/    ← Samsung y Fire TV lo cargan de aquí
+             ├─ modo tv-webos → tv/dist-webos → nginx /tv-webos/ ← el paquete de LG, de aquí
              ├─ modo ps4     → ps4/dist    → nginx /ps4/   (WebKit de la consola)
              ├─ modo tizen   → tizen/dist  → MoviesChill.wgt   \
              ├─ modo webos   → webos/dist  → MoviesChill.ipk    } solo el arranque
              └─ modo firetv  → firetv      → MoviesChill.apk   /
 ```
 
-El build de `/tv/` es el único **sin `VITE_API_BASE`**: se sirve del mismo
+**`/tv-webos/` es `/tv/` compilada también para webOS 4** (LG de 2018-2019,
+Chromium 53), que no carga módulos JavaScript: lleva además un paquete clásico
+con polyfills (`@vitejs/plugin-legacy`) y el CSS pasado por
+`tizen/postcss.webos4.js`. Va aparte para no cambiar ni un byte de lo que
+cargan las demás teles; el paquete de LG va a `/tv-webos/` y el resto a `/tv/`.
+
+Los builds servidos son los únicos **sin `VITE_API_BASE`**: se sirve del mismo
 nginx que la API, así que las peticiones van a `/api` relativo y son del mismo
 origen. Los paquetes instalados sí llevan la dirección del servidor dentro
 (`tizen/.env.*`), porque desde `file://` no hay origen al que ser relativo.

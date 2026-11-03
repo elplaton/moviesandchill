@@ -163,7 +163,7 @@ function arrancar() {
   const lista = servidores();
   // Ya estamos en la interfaz servida: no hay nada que hacer (y desde luego
   // no recargar).
-  if (!lista.length || lista.some(b => window.location.href.indexOf(`${b}/tv/`) === 0)) {
+  if (!lista.length || lista.some(b => window.location.href.indexOf(`${b}${import.meta.env.MODE === 'webos' ? '/tv-webos/' : '/tv/'}`) === 0)) {
     montar();
     return;
   }
@@ -176,7 +176,11 @@ function arrancar() {
       montar();
       return;
     }
-    const destino = `${lista[i]}/tv/`;
+    // El paquete de LG va a /tv-webos/: la misma interfaz, compilada también
+    // para las LG con webOS 4 (Chromium 53, sin módulos; ver vite.config.ts).
+    // El resto, a /tv/ como siempre. Va escrito aquí y no en una constante
+    // para que en los demás modos el paquete salga idéntico byte a byte.
+    const destino = `${lista[i]}${import.meta.env.MODE === 'webos' ? '/tv-webos/' : '/tv/'}`;
     sirveLaInterfaz(destino, i === 0 ? 1500 : 3000, (si) => {
       if (si) window.location.replace(destino);
       else probar(i + 1);
