@@ -2,7 +2,9 @@
 telethon>=1.36.0,<2
 # Descifrado de MTProto en codigo nativo. Sin el, Telethon descifra cada trozo
 # en Python puro (menos de 1 MB/s) si no encuentra la libssl del sistema.
-cryptg>=0.4
+# Fijado: la 0.6.1 salio solo como codigo fuente (sin wheel) y la imagen no
+# tiene Rust para compilarla, asi que rompia el despliegue.
+cryptg==0.6.0
 fastapi>=0.110.0
 uvicorn[standard]>=0.29.0
 jinja2>=3.1.0
