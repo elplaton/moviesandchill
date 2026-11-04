@@ -15,6 +15,10 @@ Tres cosas a tener presentes:
   entre todos los chats de la cuenta. Cada grupo tiene sus normas de formato,
   asi que la plantilla lleva huecos (`{titulo}`, `{año}`...) en vez de un
   texto fijo.
+* **Antes de pedir se busca en los canales** (`services/buscar_peticion.py`):
+  al pedir y otra vez justo antes de mandarla. Si ya estaba publicado (sin
+  ficha, con otra o sin indexar), se indexa con la ficha de TMDB de la
+  peticion y se da por pedida y conseguida sin escribir en ningun grupo.
 * **"Ha llegado" es que haya un archivo del titulo con ficha valida**
   (`tmdb_valid`), lo mismo que hace falta para salir en la portada. Lo mira
   un vigilante cada pocos minutos: cuando el archivo se indexa todavia no se
@@ -304,15 +308,35 @@ async def pedir(user_id: int, es_admin: bool, tmdb_id: int, media_type: str, api
             return {"estado": existente["estado"], "ya_pedida": True,
                     "puesto": await db.puesto(existente["id"])}
 
+    ficha = await get_details(api_key, tmdb_id, tipo) if api_key else None
+    if not ficha:
+        raise PeticionError("No se ha encontrado ese título en TMDB", 404)
+    datos = {"tmdb_id": tmdb_id, "media_type": tipo, "titulo": ficha.get("title") or "",
+             "titulo_original": ficha.get("original_title"), "year": ficha.get("year"),
+             "poster": ficha.get("poster")}
+
+    # Antes de pedir, mirar si ya esta en los canales. Fuera del candado: la
+    # busqueda en Telegram puede tardar segundos y no debe parar la cola. Lo
+    # encontrado no gasta del limite del dia (no se escribe en ningun grupo),
+    # asi que quien la pide entra sin `origen`.
+    from app.services.buscar_peticion import buscar_e_indexar
+    if await buscar_e_indexar(datos, ficha):
+        async with _envio:
+            pid = await db.encolar(datos)
+            await db.sumar(pid, user_id, origen=False)
+            await db.marcar_conseguida(pid)
+            await db.marcar_avisado(pid, user_id)
+        return {"estado": "conseguida", "ya_pedida": False, "encontrada": True, "puesto": None}
+
+    async with _envio:
+        existente = await db.de_titulo(tmdb_id, tipo)
+        if existente and existente["estado"] in PENDIENTES:
+            await db.sumar(existente["id"], user_id, origen=False)
+            return {"estado": existente["estado"], "ya_pedida": True,
+                    "puesto": await db.puesto(existente["id"])}
         if not es_admin and await db.mandadas_hoy(user_id) >= LIMITE_DIA:
             raise PeticionError(f"Ya has hecho {LIMITE_DIA} peticiones hoy; vuelve mañana", 429)
 
-        ficha = await get_details(api_key, tmdb_id, tipo) if api_key else None
-        if not ficha:
-            raise PeticionError("No se ha encontrado ese título en TMDB", 404)
-        datos = {"tmdb_id": tmdb_id, "media_type": tipo, "titulo": ficha.get("title") or "",
-                 "titulo_original": ficha.get("original_title"), "year": ficha.get("year"),
-                 "poster": ficha.get("poster")}
         pid = await db.encolar(datos)
         await db.sumar(pid, user_id, origen=True)
         puesto = await db.puesto(pid)
@@ -321,14 +345,22 @@ async def pedir(user_id: int, es_admin: bool, tmdb_id: int, media_type: str, api
     return {"estado": "en_cola", "ya_pedida": False, "puesto": puesto}
 
 
-async def _mandar_peticion(p: dict, conf: dict) -> None:
+async def _mandar_peticion(p: dict, conf: dict) -> bool:
     """Escribe en Telegram una peticion de la cola y la marca enviada o
-    fallida. Una que falla sale de la cola con su motivo: reintentarla sola
+    fallida. Devuelve False si no ha hecho falta (estaba en los canales). Una que falla sale de la cola con su motivo: reintentarla sola
     cada hora contra un chat que no deja escribir no arregla nada."""
     from app.database import peticiones as db
 
     datos = {"tmdb_id": p["tmdb_id"], "media_type": p["media_type"], "titulo": p["titulo"],
              "titulo_original": None, "year": p.get("year"), "poster": p.get("poster")}
+
+    # Justo antes de escribir en el grupo, otra busqueda en los canales: una
+    # peticion puede pasar horas en la cola. Si aparece, se indexa y `repasar`
+    # la da por conseguida y avisa a quien la esperaba, sin mandar nada.
+    if await _ya_en_canales(datos):
+        await repasar()
+        return False
+
     texto = rellenar(conf["plantilla"], datos)
     try:
         cliente = _cliente()
@@ -338,10 +370,26 @@ async def _mandar_peticion(p: dict, conf: dict) -> None:
         motivo = str(e) if isinstance(e, PeticionError) else f"Telegram no ha dejado mandarla: {str(e)[:120]}"
         logger.warning("Peticion «%s» no se pudo mandar: %s", p["titulo"], motivo)
         await db.marcar_fallida(p["id"], motivo)
-        return
+        return True
     donde = conf["chat_nombre"] + (f" › {conf['tema_nombre']}" if conf.get("tema_nombre") else "")
     await db.marcar_enviada(p["id"], conf["chat_id"], donde, getattr(mensaje, "id", None))
     logger.info("Peticion mandada a %s: %s", donde or conf["chat_id"], texto.splitlines()[0])
+    return True
+
+
+async def _ya_en_canales(datos: dict) -> bool:
+    """La busqueda de antes de pedir, con la ficha de TMDB (que trae el titulo
+    original, que la cola no guarda)."""
+    from app.routers.download import config
+    from app.services.buscar_peticion import buscar_e_indexar
+    from app.services.tmdb import get_details
+
+    api_key = config.get("tmdb_api_key", "")
+    ficha = await get_details(api_key, datos["tmdb_id"], datos["media_type"]) if api_key else None
+    if not ficha:
+        return False
+    datos = {**datos, "titulo_original": ficha.get("original_title"), "year": datos.get("year") or ficha.get("year")}
+    return bool(await buscar_e_indexar(datos, ficha))
 
 
 async def segundos_para_siguiente() -> int:
@@ -366,9 +414,9 @@ async def despachar() -> bool:
         lista = await db.cola()
         if not lista:
             return False
-        await _mandar_peticion(lista[0], conf)
+        mandada = await _mandar_peticion(lista[0], conf)
     await avisar_cola()
-    return True
+    return mandada
 
 
 async def enviar_ya(peticion_id: int) -> None:

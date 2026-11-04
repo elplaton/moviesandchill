@@ -43,6 +43,7 @@ class Base:
         self.siguiente = 1
         self.minuto = 0             # el reloj
         self.admins = [99]
+        self.en_canales = set()     # tmdb_id que la busqueda de antes de pedir encuentra
 
     def _por_id(self, pid):
         return next((p for p in self.peticiones.values() if p["id"] == pid), None)
@@ -237,6 +238,22 @@ def montar():
         return 1
     push.enviar = enviar
     sys.modules["app.services.push"] = push
+
+    # La busqueda en los canales de antes de pedir (services/buscar_peticion.py
+    # se prueba aparte): lo que "encuentra" queda en el catalogo, que es lo
+    # que hace indexarlo con su ficha.
+    bp = types.ModuleType("app.services.buscar_peticion")
+    async def buscar_e_indexar(datos, ficha):
+        if datos["tmdb_id"] in base.en_canales:
+            base.catalogo.add((datos["tmdb_id"], datos["media_type"]))
+            return 2
+        return 0
+    bp.buscar_e_indexar = buscar_e_indexar
+    sys.modules["app.services.buscar_peticion"] = bp
+    dl = types.ModuleType("app.routers.download")
+    dl.config = {"tmdb_api_key": "clave"}
+    dl.downloader = None
+    sys.modules["app.routers.download"] = dl
 
     async def ajustes():
         return {"chat_id": base.ajustes.get("chat"), "chat_nombre": "Peticiones",
@@ -435,6 +452,24 @@ comprueba("ni un mensaje", enviados, len(tg.enviados))
 base.ajustes["pausa"] = False
 comprueba("al reanudar sale la siguiente", True, despachar())
 asyncio.run(base.descartar(base.peticiones[(153, "movie")]["id"]))
+
+print("\nAntes de pedir, se busca en los canales")
+base.en_canales.add(160)
+r = pedir(5, 160)
+comprueba("si estaba publicada, no se pide: se da por conseguida", ("conseguida", True), (r["estado"], r.get("encontrada")))
+comprueba("y no gasta del limite del dia", 0, base.mandadas.get(5, 0))
+enviados = len(tg.enviados)
+base.ajustes["pausa"] = False
+esperar(120)
+comprueba("ni se escribe en el grupo", (False, enviados), (despachar(), len(tg.enviados)))
+r = pedir(5, 161)
+comprueba("lo que no esta, a la cola como siempre", "en_cola", r["estado"])
+base.en_canales.add(161)              # aparece mientras espera en la cola
+esperar(120)
+avisos.clear()
+comprueba("justo antes de mandarla se vuelve a buscar: no se manda", (False, enviados), (despachar(), len(tg.enviados)))
+comprueba("queda conseguida", "conseguida", base.peticiones[(161, "movie")]["estado"])
+comprueba("y se avisa a quien la pidio", [(5, "Titulo 161 ya se puede ver o descargar", "movie")], avisos)
 
 print(f"\n{total - len(fallos)} correctas, {len(fallos)} fallidas")
 sys.exit(1 if fallos else 0)

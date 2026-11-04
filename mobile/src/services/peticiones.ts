@@ -128,8 +128,10 @@ export async function buscarParaPedir(q: string): Promise<ResultadoPeticion[]> {
 }
 
 export interface Pedida {
-  estado: 'en_cola' | 'enviada';
+  /** `conseguida`: antes de pedirla se busca en los canales, y estaba. */
+  estado: 'en_cola' | 'enviada' | 'conseguida';
   ya_pedida: boolean;
+  encontrada?: boolean;
   puesto: number | null;
 }
 
@@ -181,6 +183,7 @@ export const ritmo = (minutos: number) => minutos === 60 ? 'una cada hora'
  * consulta mas, solo al pedir); si falla, se dice el puesto y basta.
  */
 export async function textoAlPedir(d: Pedida): Promise<string> {
+  if (d.encontrada) return 'Estaba publicada en los canales: ya está en el catálogo';
   if (d.ya_pedida) return 'Ya estaba pedida: te avisaremos también a ti';
   if (d.estado !== 'en_cola' || !d.puesto) return 'Pedida: te avisaremos cuando esté';
   let cuando = '';

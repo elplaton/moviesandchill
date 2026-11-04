@@ -67,8 +67,10 @@ export interface ColaAdmin extends RitmoCola {
 }
 
 export interface RespuestaPedir {
-  estado: 'en_cola' | 'enviada';
+  /** `conseguida`: antes de pedirla se busca en los canales, y estaba. */
+  estado: 'en_cola' | 'enviada' | 'conseguida';
   ya_pedida: boolean;
+  encontrada?: boolean;
   puesto: number | null;
 }
 
@@ -167,6 +169,7 @@ export function cuandoSale(segundos: number): string {
  * con el puesto, que es lo que de verdad dice cuanto falta.
  */
 export async function avisoAlPedir(r: RespuestaPedir): Promise<string> {
+  if (r.encontrada) return 'Estaba publicada en los canales: ya está en el catálogo';
   if (r.ya_pedida) return 'Ya estaba pedida: te avisaremos también a ti';
   if (r.estado !== 'en_cola') return 'Pedida: te avisaremos cuando esté';
   if (!r.puesto) return 'En cola: te avisaremos cuando esté';

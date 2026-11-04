@@ -19,7 +19,7 @@ function Result({ to, poster, title, meta }: { to: string; poster?: string; titl
 }
 
 /** Un título de TMDB que no tenemos, con su botón de pedirlo. */
-function Pedible({ r, onPedida }: { r: ResultadoPeticion; onPedida: (estado: 'en_cola' | 'enviada') => void }) {
+function Pedible({ r, onPedida }: { r: ResultadoPeticion; onPedida: (estado: 'en_cola' | 'enviada' | 'conseguida') => void }) {
   const [enviando, setEnviando] = useState(false);
   const p = r.peticion;
   // Una pedida que fallo se puede volver a pedir; una pedida por otro (en la
@@ -114,7 +114,7 @@ export default function Search() {
   };
 
   // Tras pedir, el botón pasa a «Pedida» sin volver a buscar.
-  const marcarPedida = (r: ResultadoPeticion, estado: 'en_cola' | 'enviada') => setFuera(p => p && { ...p, items: p.items.map(x =>
+  const marcarPedida = (r: ResultadoPeticion, estado: 'en_cola' | 'enviada' | 'conseguida') => setFuera(p => p && { ...p, items: p.items.map(x =>
     x.tmdb_id === r.tmdb_id && x.media_type === r.media_type ? { ...x, peticion: { estado, mia: true } } : x) });
 
   const g = useMemo(() => groupSearchResults(results), [results]);

@@ -204,7 +204,9 @@ export default function Catalog({ filter, heading, fuente = 'portada' }: Props) 
       }
       // Pedir ya no escribe en Telegram: entra en una cola que sale de una en
       // una cada hora, y el puesto es lo que dice cuánto falta.
-      toast(data.ya_pedida ? 'Ya estaba pedida: te avisaremos también a ti'
+      // Antes de pedirla se busca en los canales: si estaba, ya no se pide.
+      toast(data.encontrada ? 'Estaba publicada en los canales: ya está en el catálogo'
+        : data.ya_pedida ? 'Ya estaba pedida: te avisaremos también a ti'
         : data.puesto ? `En cola (puesto ${data.puesto}): te avisaremos cuando esté`
         : 'Pedida: te avisaremos cuando esté', 'ok', 5000);
       marcarPedida(item, data.estado || 'enviada');
