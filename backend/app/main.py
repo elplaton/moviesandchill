@@ -217,6 +217,11 @@ async def startup():
         from app.services.interior import vigilante as vigilante_interior
         _spawn(vigilante_interior(), "interior_comprimidos")
 
+    # La pasada completa de creditos, si estaba lanzada (un despliegue a
+    # medias no la para: se lanza y se pausa desde Admin -> Ajustes).
+    from app.services.pasada_creditos import reanudar_si_estaba
+    _spawn(reanudar_si_estaba(), "pasada_creditos_reanudar")
+
     # Lo pedido que ya ha llegado: se marca y se avisa a quien lo esperaba.
     from app.services.peticiones import vigilante as vigilante_peticiones
     _spawn(vigilante_peticiones(), "vigilante_peticiones")

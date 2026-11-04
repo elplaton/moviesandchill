@@ -3,6 +3,7 @@ import Shell from '../components/Shell';
 import { Embedded } from '../components/Shell';
 import { apiFetch } from '../services/api';
 import type { AppConfig } from '../types';
+import { cuantoQueda, estadoPasada, leerPasada, mandarPasada, resultadosPasada, type Pasada } from '../services/pasadaCreditos';
 
 interface CacheEstado {
   activa: boolean;
@@ -136,6 +137,8 @@ export default function Settings({ embedded = false }: { embedded?: boolean } = 
                   'Si no se sabe dónde empiezan, se miran los últimos fotogramas en Telegram mientras se ve')}
         </div>
 
+        <PasadaCreditos />
+
         <div className="bg-white/5 backdrop-blur-md border border-white/10 rounded-2xl p-6 mb-8 shadow-xl">
           <h2 className="text-white font-semibold mb-1">Caché</h2>
           <p className="text-nf-faint text-xs mb-4">
@@ -187,5 +190,66 @@ export default function Settings({ embedded = false }: { embedded?: boolean } = 
         </button>
       </div>
     </Wrap>
+  );
+}
+
+/**
+ * La pasada completa de créditos: lanzarla, pausarla y ver cómo va. Se
+ * pregunta cada diez segundos mientras la página está a la vista.
+ */
+function PasadaCreditos() {
+  const [p, setP] = useState<Pasada | null>(null);
+  const [mandando, setMandando] = useState(false);
+  useEffect(() => {
+    let vivo = true;
+    const leer = () => { if (!document.hidden) leerPasada().then(r => { if (vivo && r) setP(r); }); };
+    leer();
+    const t = setInterval(leer, 10_000);
+    return () => { vivo = false; clearInterval(t); };
+  }, []);
+  const mandar = async (accion: 'lanzar' | 'pausar') => {
+    setMandando(true);
+    const r = await mandarPasada(accion);
+    if (r) setP(r);
+    setMandando(false);
+  };
+  const total = p?.total || 0;
+  const hechos = p?.hechos || 0;
+  const pct = total ? Math.min(100, Math.round((hechos / total) * 100)) : 0;
+  return (
+    <div className="bg-white/5 backdrop-blur-md border border-white/10 rounded-2xl p-6 mb-8 shadow-xl">
+      <h2 className="text-white font-semibold mb-1">Pasada completa de créditos</h2>
+      <p className="text-nf-faint text-xs mb-4">
+        Mide dónde empiezan los créditos de todo el catálogo de una vez (uno o dos días), lo más visto primero.
+        Va de tres en tres, se para mientras hay una descarga y va más despacio si alguien está viendo algo.
+        Si el servidor se reinicia, sigue sola.
+      </p>
+      {!p ? (
+        <p className="text-nf-dim text-sm py-2">Consultando…</p>
+      ) : (
+        <>
+          <p className="text-white text-sm font-semibold">{estadoPasada(p)}</p>
+          {total > 0 && (
+            <>
+              <div className="mt-3 h-2 rounded-full bg-white/10 overflow-hidden">
+                <div className="h-full bg-nf-red transition-[width] duration-500" style={{ width: `${pct}%` }} />
+              </div>
+              <p className="text-nf-dim text-xs mt-2 tabular-nums">
+                {hechos.toLocaleString('es-ES')} de {total.toLocaleString('es-ES')} películas y temporadas ({pct} %)
+                {p.lanzada && p.segundos_restantes ? ` · ${cuantoQueda(p.segundos_restantes)}` : ''}
+              </p>
+            </>
+          )}
+          {!!p.actuales?.length && <p className="text-nf-faint text-xs mt-2">Midiendo: {p.actuales.join(' · ')}</p>}
+          {resultadosPasada(p) && <p className="text-nf-faint text-xs mt-1">Esta tanda: {resultadosPasada(p)}</p>}
+        </>
+      )}
+      <div className="flex gap-3 mt-4">
+        <button disabled={!p || mandando} onClick={() => mandar(p?.lanzada ? 'pausar' : 'lanzar')}
+          className="bg-white/10 hover:bg-white/20 disabled:opacity-50 text-white px-5 py-2.5 rounded-xl text-sm font-semibold transition-colors">
+          {p?.lanzada ? 'Pausar' : hechos > 0 && p?.estado !== 'terminada' ? 'Reanudar' : 'Lanzar'}
+        </button>
+      </div>
+    </div>
   );
 }

@@ -3,6 +3,7 @@ import logging
 import os
 import re
 import shutil
+import time
 from typing import Annotated
 
 import aiofiles
@@ -281,7 +282,13 @@ def _rango(range_header: str | None, file_size: int) -> tuple[int, int, bool]:
     return start, end, True
 
 
-async def _stream_tg(request: Request, path: str):
+# Cuando se sirvio por ultima vez un tramo de Telegram a alguien de verdad
+# (no al usuario `sistema`, que es ffprobe mirando pistas o creditos). La
+# pasada de creditos lo mira para no quitarle linea a quien esta viendo.
+ultimo_tramo_visto = 0.0
+
+
+async def _stream_tg(request: Request, path: str, de_alguien: bool = True):
     """Lo mismo que /api/stream pero leyendo de Telegram (ver
     services/reproduccion.py): ver sin descargar."""
     from app.services import reproduccion
@@ -304,8 +311,11 @@ async def _stream_tg(request: Request, path: str):
     async def desde_telegram():
         enviados = 0
         try:
+            global ultimo_tramo_visto
             async for trozo in reproduccion.leer(v, start, end):
                 enviados += len(trozo)
+                if de_alguien:
+                    ultimo_tramo_visto = time.monotonic()
                 yield trozo
         except Exception as e:
             # La respuesta ya ha empezado: solo queda cortarla y dejar rastro.
@@ -332,7 +342,7 @@ async def stream(request: Request, path: str = "", user: Annotated[str, Depends(
     from app.services import reproduccion
 
     if reproduccion.es_ruta(path):
-        return await _stream_tg(request, path)
+        return await _stream_tg(request, path, de_alguien=user != "sistema")
 
     base = os.path.realpath(config["extract_path"])
     target = os.path.realpath(os.path.join(base, path))

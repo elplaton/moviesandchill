@@ -65,6 +65,29 @@ async def creditos_a_mano(req: Manual, user: Annotated[str, Depends(get_current_
     return {"ok": True}
 
 
+class Pasada(BaseModel):
+    accion: str     # "lanzar" | "pausar"
+
+
+@router.get("/admin/creditos/pasada")
+async def ver_pasada(user: Annotated[str, Depends(get_current_admin)]):
+    """Como va la pasada completa de creditos (services/pasada_creditos.py)."""
+    from app.services import pasada_creditos
+    return await pasada_creditos.resumen()
+
+
+@router.post("/admin/creditos/pasada")
+async def mandar_pasada(req: Pasada, user: Annotated[str, Depends(get_current_admin)]):
+    """Lanzar o pausar la pasada completa. Lanzada, sigue sola tras un
+    reinicio; pausada, termina lo que tenia a medias y para."""
+    from app.services import pasada_creditos
+    if req.accion == "lanzar":
+        return await pasada_creditos.lanzar()
+    if req.accion == "pausar":
+        return await pasada_creditos.pausar()
+    raise HTTPException(status_code=400, detail="Acción desconocida")
+
+
 @router.get("/admin/creditos/resumen")
 async def creditos_resumen(user: Annotated[str, Depends(get_current_admin)]):
     """Cuantos titulos y enlaces tienen el dato, y de donde ha salido."""

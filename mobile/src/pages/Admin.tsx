@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate, useParams } from 'react-router-dom';
 import { apiFetch } from '../services/api';
+import { cuantoQueda, estadoPasada, leerPasada, mandarPasada, resultadosPasada, type Pasada } from '../services/pasadaCreditos';
 import { useAuth } from '../contexts/AuthContext';
 import { toast } from '../utils/toast';
 import { IClose } from '../components/Icons';
@@ -769,6 +770,7 @@ function Server() {
         <Toggle k="delete_archives_after_extract" label="Borrar comprimidos tras extraer" />
         <Toggle k="creditos_analizar" label="Averiguar los créditos al ver" help="Si no se sabe dónde empiezan, se miran en Telegram mientras se ve" />
       </section>
+      <PasadaCreditos />
       <Cache />
       <Pantalla />
       <p className="text-[12px] text-nf-text3">Las rutas y el resto de ajustes se editan desde la web de escritorio o en el archivo .env del servidor.</p>
@@ -820,6 +822,58 @@ function Cache() {
           <button onClick={vaciar} className="h-10 px-4 rounded-xl bg-white/10 text-[14px] font-semibold active:bg-white/20">Vaciar</button>
         )}
       </div>
+    </section>
+  );
+}
+
+/** La pasada completa de créditos: lanzarla, pausarla y ver cómo va. */
+function PasadaCreditos() {
+  const [p, setP] = useState<Pasada | null>(null);
+  const [mandando, setMandando] = useState(false);
+  useEffect(() => {
+    let vivo = true;
+    const leer = () => { if (!document.hidden) leerPasada().then(r => { if (vivo && r) setP(r); }); };
+    leer();
+    const t = setInterval(leer, 10_000);
+    return () => { vivo = false; clearInterval(t); };
+  }, []);
+  const mandar = async (accion: 'lanzar' | 'pausar') => {
+    setMandando(true);
+    const r = await mandarPasada(accion);
+    if (r) setP(r);
+    setMandando(false);
+  };
+  const total = p?.total || 0;
+  const hechos = p?.hechos || 0;
+  const pct = total ? Math.min(100, Math.round((hechos / total) * 100)) : 0;
+  return (
+    <section className="rounded-2xl bg-white/5 p-4 mb-4">
+      <p className="text-[13px] font-semibold text-nf-text2 mb-1">Pasada completa de créditos</p>
+      <p className="text-[12px] text-nf-text3 mb-2">
+        Todo el catálogo de una vez (uno o dos días). De tres en tres; se para si hay una descarga. Sigue sola tras un reinicio.
+      </p>
+      {!p ? <p className="text-[14px] text-nf-text3">Consultando…</p> : (
+        <>
+          <p className="text-[14px] font-semibold">{estadoPasada(p)}</p>
+          {total > 0 && (
+            <>
+              <div className="mt-2 h-2 rounded-full bg-white/10 overflow-hidden">
+                <div className="h-full bg-nf-red" style={{ width: `${pct}%` }} />
+              </div>
+              <p className="text-[12px] text-nf-text2 mt-1.5 tabular-nums">
+                {hechos.toLocaleString('es-ES')} de {total.toLocaleString('es-ES')} ({pct} %)
+                {p.lanzada && p.segundos_restantes ? ` · ${cuantoQueda(p.segundos_restantes)}` : ''}
+              </p>
+            </>
+          )}
+          {!!p.actuales?.length && <p className="text-[12px] text-nf-text3 mt-1.5">Midiendo: {p.actuales.join(' · ')}</p>}
+          {resultadosPasada(p) && <p className="text-[12px] text-nf-text3 mt-1">Esta tanda: {resultadosPasada(p)}</p>}
+        </>
+      )}
+      <button disabled={!p || mandando} onClick={() => mandar(p?.lanzada ? 'pausar' : 'lanzar')}
+        className="mt-3 h-10 px-4 rounded-xl bg-white/10 text-[14px] font-semibold active:bg-white/20 disabled:opacity-50">
+        {p?.lanzada ? 'Pausar' : hechos > 0 && p?.estado !== 'terminada' ? 'Reanudar' : 'Lanzar'}
+      </button>
     </section>
   );
 }
