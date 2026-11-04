@@ -5,6 +5,7 @@ import { useAirplay } from '../hooks/useAirplay';
 import { IconAirplay, IconClose, IconExpand, IconMute, IconPause, IconPlay, IconSubtitles, IconVolume } from './ui/Icon';
 import { markWatched, resumePoint, setWatched } from '../utils/progress';
 import { useSiguiente } from '../hooks/useSiguiente';
+import SiguesAhi from './SiguesAhi';
 import { useFuente } from '../hooks/useFuente';
 import { useReintento } from '../hooks/useReintento';
 import NextUp from './NextUp';
@@ -119,6 +120,8 @@ export default function Player(props: Props) {
       setActual((a) => ({ ...a, path: siguiente.path, subtitle: siguiente.label }));
     },
     onCerrar: onClose,
+    // Para «¿Sigues ahí?»: el capitulo no sigue corriendo detras de la pregunta.
+    pausar: () => ref.current?.pause(),
   });
 
   // El `src` espera a la entrada de reproducción: el token de acceso caduca a
@@ -418,6 +421,7 @@ export default function Player(props: Props) {
       )}
 
       <NextUp sig={sig} />
+      <SiguesAhi sig={sig} titulo={title} />
       <FinTitulo sig={sig} titulo={title} subtitulo={subtitle} onSalir={onClose}
         onElegir={(r) => { onClose(); navigate(`/?ficha=${r.id}`); }} />
 

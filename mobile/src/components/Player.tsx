@@ -6,6 +6,7 @@ import { useAirplay } from '../hooks/useAirplay';
 import { IAirplay, ICheck, IClose } from './Icons';
 import { markWatched, resumePoint, setWatched } from '../utils/progress';
 import { useSiguiente } from '../hooks/useSiguiente';
+import SiguesAhi from './SiguesAhi';
 import SiguienteEp from './SiguienteEp';
 import FinTitulo from './FinTitulo';
 import { useNavigate } from 'react-router-dom';
@@ -187,7 +188,7 @@ export default function Player(props: Props) {
 
   // Si la tarjeta aparece con alguien dentro de la pantalla completa nativa,
   // hay que salir: es el unico sitio donde no se puede dibujar encima.
-  const hayTarjeta = sig.decision.tipo !== 'nada';
+  const hayTarjeta = sig.decision.tipo !== 'nada' || !!sig.sigues;
   useEffect(() => {
     if (hayTarjeta) salirDePantallaCompleta();
   }, [hayTarjeta]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -503,6 +504,7 @@ export default function Player(props: Props) {
       )}
 
       {!preparando && <SiguienteEp sig={sig} />}
+      <SiguesAhi sig={sig} titulo={title} />
       {!preparando && (
         <FinTitulo sig={sig} titulo={title} subtitulo={subtitle} onSalir={cerrar}
           onElegir={(r) => {

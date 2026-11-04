@@ -15,6 +15,7 @@ import SiguienteEp, { opcionesSiguiente } from './SiguienteEp';
 import FinTitulo, { MAX_RELACIONADOS, VIDEO_ENCOGIDO } from './FinTitulo';
 import { abrirTitulo } from '../tv/abrirTitulo';
 import { useSiguiente } from '../hooks/useSiguiente';
+import SiguesAhi from './SiguesAhi';
 
 interface Props {
   /** Ya no se usa: la URL la monta el reproductor (`useFuente`) con la
@@ -173,6 +174,10 @@ export default function Player(props: Props) {
     pausar: () => videoRef.current?.pause(),
   });
   const opcionesSig = opcionesSiguiente(sig);
+  // «¿Sigues ahí?» (ver `useSiguiente`): 0 = Seguir viendo, 1 = Salir.
+  const [cursorSigues, setCursorSigues] = useState(0);
+  const preguntando = !!sig.sigues;
+  useEffect(() => { if (preguntando) setCursorSigues(0); }, [preguntando]);
   /**
    * La pantalla del final (pelicula o ultimo episodio): el video se encoge y
    * el mando es suyo desde que aparece, porque con el video pequeño no tiene
@@ -372,6 +377,7 @@ export default function Player(props: Props) {
   }, [audioForzado, fuente.modo, path]);
 
   useBackHandler(() => {
+    if (preguntando) { sig.salir(); return true; }
     if (final) { close(); return true; }
     if (panel) { setPanel(false); return true; }
     // Con la tarjeta arriba, Atras la descarta. Si el video ya habia
@@ -383,6 +389,14 @@ export default function Player(props: Props) {
   }, true);
 
   useEffect(() => pushRawHandler((key) => {
+    // La pregunta va antes que todo: el video esta en pausa y lo unico que
+    // queda por hacer es contestar.
+    if (preguntando) {
+      if (key === 'left') { setCursorSigues(0); return true; }
+      if (key === 'right') { setCursorSigues(1); return true; }
+      if (key === 'enter') { if (cursorSigues === 0) sig.seguirViendo(); else sig.salir(); return true; }
+      return true;
+    }
     if (final) {
       const n = Math.min(sig.relacionados.length, MAX_RELACIONADOS);
       if (key === 'up') { setCursorFin({ fila: 0, col: 0 }); return true; }
@@ -433,7 +447,7 @@ export default function Player(props: Props) {
     showOsd();
     return true;
   }), [togglePlay, seek, showOsd, panel, opciones, cursor, aplicar, opcionesSig, cursorSig, sig, mandoEnTarjeta,
-        final, cursorFin, elegirRelacionado]);
+        final, cursorFin, elegirRelacionado, preguntando, cursorSigues]);
 
   useEffect(() => pushMediaHandler((key) => {
     const v = videoRef.current;
@@ -698,6 +712,7 @@ export default function Player(props: Props) {
         fila={cursorFin.fila} columna={cursorFin.col}
         onVerCreditos={sig.verCreditos} onSalir={close} onElegir={elegirRelacionado} />
 
+      <SiguesAhi sig={sig} cursor={cursorSigues} titulo={title} />
       <SiguienteEp sig={sig} enfocada={mandoEnTarjeta}
         cursor={Math.min(cursorSig, Math.max(0, opcionesSig.length - 1))}
         opciones={opcionesSig} />

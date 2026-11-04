@@ -35,7 +35,13 @@
  *    al pulsar «ver y descargar» el reproductor cambia de archivo al instante
  *    y todo lo demás se reinicia, así que si el aviso se fuera con ello nadie
  *    llegaría a leer que la descarga ha empezado.
- * 4. **Al terminar el vídeo la tarjeta se queda.** Si no, el reproductor se
+ * 4. **Al cuarto capítulo seguido sin tocar nada, se pregunta «¿Sigues
+ *    ahí?»** antes de empezar el quinto (`sigues`), como Netflix: tres saltos
+ *    solos de la barra y el cuarto ya no salta. Cualquier señal de que hay
+ *    alguien —pulsar «Siguiente», una tecla, el mando, un toque o un clic—
+ *    pone la cuenta a cero. Si la tarjeta iba a descargar algo, no se
+ *    descarga hasta que se contesta «Seguir viendo».
+ * 5. **Al terminar el vídeo la tarjeta se queda.** Si no, el reproductor se
  *    cerraría y la pregunta desaparecería justo cuando toca contestarla; por
  *    eso `alTerminar()` devuelve si hay algo que enseñar y el reproductor
  *    decide no cerrarse. Y si lo que se contesta es «descarga», al acabar ya
@@ -57,6 +63,11 @@ const MAX_PREGUNTAS_CREDITOS = 5;
 
 /** Lo que se queda el mensaje en pantalla antes de quitarse de en medio. */
 const MENSAJE_MS = 3200;
+
+/** Capítulos que pasan solos antes de preguntar «¿Sigues ahí?»: tres saltos
+ *  automáticos, o sea, con el cuarto visto sin tocar nada se pregunta antes
+ *  de empezar el quinto. */
+export const SALTOS_SIN_PREGUNTAR = 3;
 
 export interface OpcionesSiguiente {
   path: string;
@@ -115,6 +126,12 @@ export interface EstadoSiguiente {
    *  al tocar la pantalla o al mover el mando: si alguien está ahí, no se le
    *  cambia de capítulo en medio). */
   parar: () => void;
+  /** El capítulo que vendría, si hay que preguntar «¿Sigues ahí?»; null si no. */
+  sigues: SiguienteEpisodio | null;
+  /** «Seguir viendo»: lo que iba a hacer la tarjeta, y la cuenta a cero. */
+  seguirViendo: () => void;
+  /** «Salir»: cierra el reproductor. */
+  salir: () => void;
 }
 
 const SIN_NADA: Decision = { tipo: 'nada' };
@@ -171,6 +188,13 @@ export function useSiguiente({ path, tmdbId, mediaType, onVer, onCerrar, pausar 
   const finalVisto = useRef(false);
   // De qué archivo se ha avisado ya de que empezaron los créditos.
   const creditosAvisados = useRef<string | null>(null);
+  // Saltos automáticos seguidos (la barra llenándose sola). No se reinicia al
+  // cambiar de episodio: es justo lo que cuenta. Y la pregunta, con lo que la
+  // tarjeta iba a hacer, para hacerlo si se contesta «Seguir viendo».
+  const seguidos = useRef(0);
+  const [pregunta, setPregunta] = useState<Decision | null>(null);
+  const preguntaRef = useRef<Decision | null>(null);
+  preguntaRef.current = pregunta;
   const avisoTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   datosRef.current = datos;
 
@@ -199,7 +223,19 @@ export function useSiguiente({ path, tmdbId, mediaType, onVer, onCerrar, pausar 
     finalVisto.current = false;
     setInicioCreditos(null);
     setRelacionados([]);
+    setPregunta(null);
   }, [path]);
+
+  // Cualquier señal de que hay alguien delante pone la cuenta a cero. Teclas
+  // (el mando de la tele llega como teclas), clics y toques; `mousedown` y no
+  // `pointerdown`, que Chromium 53 (webOS 4) no tiene. El movimiento del ratón
+  // no cuenta: un ratón que se mueve solo no es nadie mirando.
+  useEffect(() => {
+    const hayAlguien = () => { seguidos.current = 0; };
+    const eventos = ['keydown', 'mousedown', 'touchstart'];
+    for (const e of eventos) document.addEventListener(e, hayAlguien, true);
+    return () => { for (const e of eventos) document.removeEventListener(e, hayAlguien, true); };
+  }, []);
 
   useEffect(() => () => { if (avisoTimer.current) clearTimeout(avisoTimer.current); }, []);
 
@@ -219,7 +255,7 @@ export function useSiguiente({ path, tmdbId, mediaType, onVer, onCerrar, pausar 
   }, [path, tmdbId, mediaType]);
 
   const mirar = useCallback((tiempo: number, duracion: number) => {
-    if (!duracion || !isFinite(duracion) || descartada.current) return;
+    if (!duracion || !isFinite(duracion) || descartada.current || preguntaRef.current) return;
     const quedan = duracion - tiempo;
 
     // Dónde empiezan los créditos: al empezar y, mientras no estén medidos,
@@ -298,10 +334,23 @@ export function useSiguiente({ path, tmdbId, mediaType, onVer, onCerrar, pausar 
    * porque hacer esperar a que el servidor conteste para poner el capítulo
    * siguiente sería justo lo contrario de lo que se busca aquí.
    */
-  const confirmar = useCallback(() => {
-    const d = tarjeta;
+  const ejecutar = useCallback((d: Decision, solo: boolean) => {
     if (d.tipo === 'nada' || d.tipo === 'final') return;
     setCorriendo(false);
+
+    // La barra iba a saltar sola por cuarta vez seguida: antes de empezar
+    // otro capítulo, se pregunta si queda alguien. Sin descargar nada todavía.
+    if (solo && d.tipo === 'ver') {
+      if (seguidos.current >= SALTOS_SIN_PREGUNTAR) {
+        setTarjeta(SIN_NADA);
+        setPregunta(d);
+        ultimas.current.pausar?.();
+        return;
+      }
+      seguidos.current += 1;
+    } else if (!solo) {
+      seguidos.current = 0;
+    }
 
     if (d.bajar.length) {
       setBajando(true);
@@ -326,13 +375,27 @@ export function useSiguiente({ path, tmdbId, mediaType, onVer, onCerrar, pausar 
       // el «Descargando 3x09 y 3x10».
       setTarjeta({ ...d, bajar: [] });
     }
-  }, [tarjeta, path, tmdbId, avisar]);
+  }, [path, tmdbId, avisar]);
+
+  /** Pulsar el botón de la tarjeta: alguien está ahí, la cuenta vuelve a cero. */
+  const confirmar = useCallback(() => ejecutar(tarjeta, false), [ejecutar, tarjeta]);
 
   // El salto se dispara desde un efecto y no desde el intervalo: llamar a
   // `confirmar()` dentro del propio setState dejaría el render a medias.
   useEffect(() => {
-    if (corriendo && progreso >= 1) confirmar();
-  }, [corriendo, progreso, confirmar]);
+    if (corriendo && progreso >= 1) ejecutar(tarjeta, true);
+  }, [corriendo, progreso, ejecutar, tarjeta]);
+
+  const seguirViendo = useCallback(() => {
+    const d = preguntaRef.current;
+    setPregunta(null);
+    if (d) ejecutar(d, false);
+  }, [ejecutar]);
+
+  const salir = useCallback(() => {
+    setPregunta(null);
+    ultimas.current.onCerrar?.();
+  }, []);
 
   const descartar = useCallback(() => {
     descartada.current = true;
@@ -350,6 +413,8 @@ export function useSiguiente({ path, tmdbId, mediaType, onVer, onCerrar, pausar 
   }, []);
 
   const alTerminar = useCallback(() => {
+    // Preguntando «¿Sigues ahí?» el reproductor se queda abierto esperando.
+    if (preguntaRef.current) return true;
     // Si el vídeo acaba antes de haber preguntado (uno muy corto, o se saltó
     // al final), con la ficha basta para la pantalla del final.
     const d = datosRef.current ? decidir(datosRef.current, !!tmdbId)
@@ -389,5 +454,8 @@ export function useSiguiente({ path, tmdbId, mediaType, onVer, onCerrar, pausar 
     confirmar,
     descartar,
     parar,
+    sigues: pregunta && pregunta.tipo === 'ver' ? pregunta.siguiente : null,
+    seguirViendo,
+    salir,
   };
 }
