@@ -104,8 +104,9 @@ Browser :80 → nginx (frontend) → proxy /api/* → :8000 (FastAPI backend)
 | `backend/app/routers/telegram_router.py` | Alta de la sesión de Telegram por HTTP: `/api/admin/telegram/status`, `send-code`, `sign-in` |
 | `frontend/src/pages/admin/AdminTelegram.tsx` | Pestaña «Telegram» del panel: pide el código y lo canjea |
 | `frontend/src/pages/admin/AdminRevision.tsx` | Pestaña «Revisión»: los cuatro motivos con sus cifras, filtro por canal y texto, y por grupo «Corregir» (busca en TMDB al pulsar y pide confirmación) o «Ignorar» |
-| `frontend/src/pages/Admin.tsx` | Panel de administración (Usuarios · Descargas · Canales · Revisión · Novedades · Peticiones · Telegram · Créditos · Ajustes · Registros); solo admin |
-| `mobile/src/pages/Admin.tsx` | El mismo panel en el teléfono, con las mismas secciones y en el mismo orden |
+| `frontend/src/pages/Admin.tsx` | Panel de administración, solo admin: menú lateral agrupado (Resumen · Catálogo: Canales, Revisión, Novedades · Reproducción: Créditos · Personas: Usuarios, Descargas, Peticiones · Sistema: Telegram, Ajustes, Registros) y se entra por el Resumen |
+| `backend/app/routers/resumen_router.py` | `GET /api/admin/resumen`: el estado de todo para la portada del panel y los avisos que piden atención, cada uno con la sección que lo arregla. Cada parte por separado (lo que falla va a null) y nada pesado: la revisión solo si ya está calculada |
+| `mobile/src/pages/Admin.tsx` | El mismo panel en el teléfono, con los mismos grupos y secciones en el mismo orden: se entra por el Resumen, con el menú agrupado debajo |
 | `backend/app/routers/favorites_router.py` | `/api/favorites`: la lista de la cuenta, y marcar/desmarcar |
 | `backend/app/routers/progress_router.py` | `/api/progress`: por donde va cada cuenta en cada video, y la fila «Continuar viendo» |
 | `backend/app/services/continuar.py` | Arma la fila: una tarjeta por titulo y, al terminar un episodio, el siguiente que haya en disco |

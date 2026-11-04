@@ -99,31 +99,12 @@ export default function Settings({ embedded = false }: { embedded?: boolean } = 
 
   return (
     <Wrap>
-      <div className={embedded ? "max-w-2xl" : "px-6 md:px-14 pt-24 pb-20 max-w-2xl mx-auto"}>
+      <div className={embedded ? "max-w-3xl" : "px-6 md:px-14 pt-24 pb-20 max-w-3xl mx-auto"}>
         {toast && (
           <div className="fixed top-24 right-6 z-50 bg-green-600/90 backdrop-blur-xl border border-green-400/20 text-white px-5 py-3 rounded-2xl shadow-2xl text-sm font-medium animate-slide-up">
             {toast}
           </div>
         )}
-
-        <div className="bg-white/5 backdrop-blur-md border border-white/10 rounded-2xl p-6 mb-6 shadow-xl">
-          <h2 className="text-white font-semibold mb-3">Telegram API</h2>
-          {field('API ID', 'api_id', 'number')}
-          {field('API Hash', 'api_hash')}
-          {field('Telefono', 'phone')}
-        </div>
-
-        <div className="bg-white/5 backdrop-blur-md border border-white/10 rounded-2xl p-6 mb-6 shadow-xl">
-          <h2 className="text-white font-semibold mb-3">Almacenamiento</h2>
-          {field('Ruta descargas', 'download_path')}
-          {field('Ruta extraccion', 'extract_path')}
-        </div>
-
-        <div className="bg-white/5 backdrop-blur-md border border-white/10 rounded-2xl p-6 mb-6 shadow-xl">
-          <h2 className="text-white font-semibold mb-3">Servidor</h2>
-          {field('Host', 'server_host')}
-          {field('Puerto', 'server_port', 'number')}
-        </div>
 
         <div className="bg-white/5 backdrop-blur-md border border-white/10 rounded-2xl p-6 mb-8 shadow-xl">
           <h2 className="text-white font-semibold mb-3">Comportamiento</h2>
@@ -178,6 +159,25 @@ export default function Settings({ embedded = false }: { embedded?: boolean } = 
             )}
           </div>
         </div>
+
+        {/* Lo que casi nunca se toca y puede dejar el servidor sin arrancar va
+            plegado y al final. Las claves de Telegram ya no estan aqui: viven
+            en la seccion Telegram, que es donde se inicia la sesion. */}
+        <details className="bg-white/5 backdrop-blur-md border border-white/10 rounded-2xl p-6 mb-8 shadow-xl group">
+          <summary className="cursor-pointer list-none flex items-center justify-between">
+            <span className="text-white font-semibold">Avanzado</span>
+            <span className="text-nf-faint text-xs group-open:hidden">Rutas del disco, host y puerto</span>
+          </summary>
+          <p className="text-nf-faint text-xs mt-3 mb-2">
+            Cambiar esto mal puede dejar el servidor sin arrancar o sin encontrar la biblioteca. Se aplica al guardar.
+          </p>
+          <h3 className="text-nf-dim text-sm font-semibold mt-4">Almacenamiento</h3>
+          {field('Ruta descargas', 'download_path')}
+          {field('Ruta extraccion', 'extract_path')}
+          <h3 className="text-nf-dim text-sm font-semibold mt-4">Servidor</h3>
+          {field('Host', 'server_host')}
+          {field('Puerto', 'server_port', 'number')}
+        </details>
 
         <button onClick={save} className="bg-nf-red hover:bg-nf-red-dark text-white px-8 py-3.5 rounded-xl font-semibold transition-all hover:scale-105 shadow-lg shadow-nf-red/20">
           Guardar configuracion

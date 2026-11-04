@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { apiFetch } from '../services/api';
 import { botonPasada, cuantoQueda, estadoPasada, leerPasada, mandarPasada, resultadosPasada, type Pasada } from '../services/pasadaCreditos';
 import { useAuth } from '../contexts/AuthContext';
 import { toast } from '../utils/toast';
-import { IClose } from '../components/Icons';
+import { IBack, IClose } from '../components/Icons';
 import { buscarParaPedir, chatsDestino, enCuanto, enviarYa, ESTADO_TEXTO, guardarAjustes, moverEnCola, peticionesAdmin, probarPeticion,
          quitarDeCola, ritmo, segundosHastaPuesto, temasDe, TIPO_PETICION, vistaPrevia, volverALaCola,
          type AjustesPeticiones, type ChatDestino, type ResultadoPeticion, type TipoPeticion, type EstadoCola, type TemaForo, type PeticionAdmin } from '../services/peticiones';
@@ -13,13 +13,24 @@ import { buscarParaPedir, chatsDestino, enCuanto, enviarYa, ESTADO_TEXTO, guarda
 const GB = 1024 ** 3;
 const fmt = (b: number | null | undefined) => b == null ? 'Sin límite' : `${(b / GB).toFixed(b >= GB * 10 ? 0 : 1)} GB`;
 const input = 'w-full h-11 rounded-xl bg-white/10 border border-white/10 px-4 text-[16px] outline-none focus:border-white/40';
-// Mismo orden y mismas secciones que el panel de escritorio.
-const TABS = [
-  ['usuarios', 'Usuarios'], ['descargas', 'Descargas'], ['canales', 'Canales'], ['revision', 'Revisión'],
-  ['novedades', 'Novedades'], ['peticiones', 'Peticiones'], ['telegram', 'Telegram'],
-  ['creditos', 'Créditos'], ['servidor', 'Ajustes'],
-  ['registros', 'Registros'],
+/*
+ * Las secciones del panel, agrupadas por lo que tocan. Mismos grupos, mismo
+ * orden y mismos ids que el panel de escritorio: se pidio que los dos se
+ * recorran igual. En diez pestañas sueltas no se veia por donde empezar; en
+ * cuatro grupos se sabe donde buscar sin abrirlas todas. El Resumen no esta
+ * aqui porque no es una seccion mas: es la portada, y el menu va debajo.
+ */
+const GRUPOS = [
+  { titulo: 'Catálogo', secciones: [['canales', 'Canales'], ['revision', 'Revisión'], ['novedades', 'Novedades']] },
+  { titulo: 'Reproducción', secciones: [['creditos', 'Créditos']] },
+  { titulo: 'Personas', secciones: [['usuarios', 'Usuarios'], ['descargas', 'Descargas'], ['peticiones', 'Peticiones']] },
+  { titulo: 'Sistema', secciones: [['telegram', 'Telegram'], ['servidor', 'Ajustes'], ['registros', 'Registros']] },
 ] as const;
+
+/** id de sección → su grupo y su nombre, para la cabecera. */
+const SECCION: Record<string, { grupo: string; nombre: string }> = Object.fromEntries(
+  GRUPOS.flatMap(g => g.secciones.map(([id, nombre]) => [id, { grupo: g.titulo, nombre }])),
+);
 
 interface U { id: number; username: string; role: string; active: boolean; quota_bytes: number | null; used_bytes: number; downloads: number }
 
@@ -747,8 +758,7 @@ function Pantalla() {
 
 function Server() {
   const [cfg, setCfg] = useState<any>(null);
-  const [status, setStatus] = useState<any>(null);
-  useEffect(() => { apiFetch('/config').then(r => r.json()).then(d => setCfg(d.config)).catch(() => {}); apiFetch('/status').then(r => r.json()).then(setStatus).catch(() => {}); }, []);
+  useEffect(() => { apiFetch('/config').then(r => r.json()).then(d => setCfg(d.config)).catch(() => {}); }, []);
   const set = async (k: string, v: any) => { setCfg({ ...cfg, [k]: v }); await apiFetch('/config', { method: 'POST', body: JSON.stringify({ [k]: v }) }); toast('Guardado', 'ok'); };
   if (!cfg) return <p className="text-[14px] text-nf-text3">Cargando…</p>;
   const Toggle = ({ k, label, help }: { k: string; label: string; help?: string }) => (
@@ -759,13 +769,14 @@ function Server() {
   );
   return (
     <div>
-      <section className="rounded-2xl bg-white/5 p-4 mb-4">
-        <p className="text-[13px] font-semibold text-nf-text2 mb-1">Estado</p>
-        <p className="text-[14px]">Espacio libre: {status?.disk_free || '—'} · Descargas activas: {status?.active_batches?.length ?? 0}</p>
-        <p className="text-[12px] text-nf-text3 mt-1">Telegram: {cfg.phone || '—'} · TMDB: {cfg.tmdb_api_key ? 'configurado' : 'sin clave'}</p>
-      </section>
+      {/* Aqui habia un recuadro «Estado» con el disco libre, las descargas
+          activas y el telefono de Telegram: lo primero ya esta en el Resumen
+          y lo segundo en Telegram. De el solo queda lo que no sale en otro
+          sitio, que es si falta la clave de TMDB, y va donde se nota: en el
+          interruptor que sin ella no hace nada. */}
       <section className="rounded-2xl bg-white/5 px-4 py-1 mb-4">
-        <Toggle k="tmdb_enabled" label="Metadatos de TMDB" help="Carátulas, sinopsis y clasificación" />
+        <Toggle k="tmdb_enabled" label="Metadatos de TMDB"
+          help={cfg.tmdb_api_key ? 'Carátulas, sinopsis y clasificación' : 'Sin clave de TMDB (TMD_TMBD_API_KEY): no se buscan fichas'} />
         <Toggle k="convert_dts_to_ac3" label="Convertir a MP4 al descargar" help="Necesario para iPhone y para las teles" />
         <Toggle k="delete_archives_after_extract" label="Borrar comprimidos tras extraer" />
       </section>
@@ -1603,16 +1614,243 @@ function Registros() {
   );
 }
 
-export default function Admin() {
-  const { tab = 'usuarios' } = useParams();
-  const navigate = useNavigate();
+/** Lo que devuelve `GET /api/admin/resumen`. Cada parte puede venir a null:
+ *  fallo al calcularla o (la revision) todavia se esta calculando. */
+interface ResumenAdmin {
+  avisos: { nivel: 'error' | 'aviso'; texto: string; seccion: string }[];
+  telegram: { conectado: boolean; autorizado: boolean; premium: boolean | null; canales: number; canales_activos: number } | null;
+  catalogo: { total: number; con_ficha: number; peliculas: number; series: number; escaneando: number; releyendo: boolean } | null;
+  revision: { archivos: number; grupos: number; por_motivo: Record<string, number> } | null;
+  descargas: { activas: number; disco_libre: number } | null;
+  peticiones: { en_cola: number; pausadas: boolean; chat: string | null } | null;
+  creditos: { al_ver: boolean; pasada: { estado: string; lanzada: boolean; hechos: number | null; total: number | null; cediendo: string | null } } | null;
+  comprimidos: { revisados: number; ver: number } | null;
+  usuarios: { total: number; activos: number } | null;
+}
+
+/** Disco libre: en TB a partir de uno, que «3.412 GB» se lee peor que «3,3 TB». */
+const disco = (b: number) => b >= 1024 ** 4
+  ? `${(b / 1024 ** 4).toLocaleString('es-ES', { maximumFractionDigits: 1 })} TB`
+  : `${Math.round(b / GB).toLocaleString('es-ES')} GB`;
+
+const plural = (n: number, uno: string, varios: string) => n === 1 ? uno : varios;
+
+/** La pasada de créditos en dos palabras: en la tarjeta no cabe la frase entera
+ *  de `estadoPasada()`, que está en la sección. */
+function pasadaCorta(p: { estado: string; lanzada: boolean; cediendo: string | null }): string {
+  if (p.estado === 'en_marcha') return p.cediendo ? 'Esperando' : 'En marcha';
+  if (p.estado === 'pausada') return p.lanzada ? 'En marcha' : 'En pausa';
+  if (p.estado === 'terminada') return 'Terminada';
+  if (p.estado === 'error') return 'Parada por un error';
+  return 'Sin lanzar';
+}
+
+function IAdelante() {
+  return <span className="block w-4 h-4 shrink-0 rotate-180 text-nf-text3"><IBack /></span>;
+}
+
+/** Una tarjeta del Resumen. Sin `onClick` no lleva a ninguna parte, y entonces
+ *  no se pinta como si se pudiera tocar. */
+function Tarjeta({ titulo, valor, unidad, lineas, tono, onClick }: {
+  titulo: string; valor: string; unidad?: string; lineas: (string | false | null | undefined)[];
+  tono?: 'ok' | 'aviso' | 'mal'; onClick?: () => void;
+}) {
+  const punto = tono === 'ok' ? 'bg-nf-ok' : tono === 'aviso' ? 'bg-amber-400' : tono === 'mal' ? 'bg-nf-red' : '';
+  const dentro = (
+    <>
+      <p className="flex items-center gap-1.5 text-[11px] uppercase tracking-wide text-nf-text3 font-semibold">
+        {punto && <span className={`w-2 h-2 rounded-full ${punto}`} />}{titulo}
+      </p>
+      <p className="mt-1 text-[20px] leading-tight font-semibold tabular-nums truncate">
+        {valor}{unidad && <span className="text-[12px] font-normal text-nf-text3"> {unidad}</span>}
+      </p>
+      {lineas.filter(Boolean).map((l, i) => (
+        <p key={i} className="text-[12px] leading-snug text-nf-text2 mt-0.5 line-clamp-2 break-words">{l}</p>
+      ))}
+    </>
+  );
+  const clase = 'min-w-0 rounded-2xl bg-white/5 p-3.5 text-left';
+  return onClick
+    ? <button onClick={onClick} className={`${clase} tap active:bg-white/10`}>{dentro}</button>
+    : <div className={clase}>{dentro}</div>;
+}
+
+/**
+ * La portada del panel: el estado de todo de un vistazo.
+ *
+ * Existe porque para saber si algo iba mal habia que abrir las pestañas una
+ * por una (Telegram para ver si estaba conectado, Peticiones para ver si
+ * estaban en pausa, Ajustes para el disco). Arriba van los avisos, que son lo
+ * que pide hacer algo, y cada tarjeta lleva a la sección que la explica. Lo
+ * que no se pudo calcular sale como «—»: esta pantalla tiene que abrir
+ * aunque una parte este rota, que es justo cuando mas se mira.
+ */
+function Resumen({ ir }: { ir: (id: string) => void }) {
+  const [r, setR] = useState<ResumenAdmin | null>(null);
+  const [fallo, setFallo] = useState(false);
+
+  useEffect(() => {
+    let vivo = true;
+    const leer = () => {
+      if (document.hidden) return;
+      apiFetch('/admin/resumen')
+        .then(x => x.ok ? x.json() : Promise.reject(x.status))
+        .then(d => { if (vivo) { setR(d); setFallo(false); } })
+        .catch(() => { if (vivo) setFallo(true); });
+    };
+    leer();
+    // Cada 20 s y al volver a la app: con la pantalla apagada no se pregunta,
+    // y al encenderla se quiere lo de ahora, no lo de hace 20 s.
+    const t = setInterval(leer, 20_000);
+    const alVolver = () => { if (!document.hidden) leer(); };
+    document.addEventListener('visibilitychange', alVolver);
+    return () => { vivo = false; clearInterval(t); document.removeEventListener('visibilitychange', alVolver); };
+  }, []);
+
+  if (!r) {
+    return (
+      <p className="rounded-2xl bg-white/5 p-4 text-[14px] text-nf-text3 mb-2">
+        {fallo ? 'No se ha podido cargar el resumen. Las secciones de abajo siguen funcionando.' : 'Cargando…'}
+      </p>
+    );
+  }
+
+  const n = (v: number | null | undefined) => v == null ? '—' : v.toLocaleString('es-ES');
+  const { telegram: tg, catalogo: cat, revision: rev, descargas: des, peticiones: pet,
+          creditos: cre, comprimidos: com, usuarios: usu } = r;
+  const conFicha = cat && cat.total ? Math.round((cat.con_ficha / cat.total) * 100) : null;
+  const pas = cre?.pasada;
+  const pctPasada = pas?.total ? Math.min(100, Math.round(((pas.hechos || 0) / pas.total) * 100)) : null;
+
   return (
-    <div className="px-4 pb-6" style={{ paddingTop: 'calc(var(--safe-t) + 20px)' }}>
-      <h1 className="text-[28px] font-bold mb-3">Administración</h1>
-      <div className="flex gap-2 overflow-x-auto no-scrollbar mb-4 -mx-4 px-4">
-        {TABS.map(([id, label]) => (
-          <button key={id} onClick={() => navigate(`/admin/${id}`)} className={`shrink-0 h-9 px-4 rounded-full text-[13px] font-semibold ${tab === id ? 'bg-white text-black' : 'bg-white/10 text-nf-text2'}`}>{label}</button>
-        ))}
+    <div>
+      {!!r.avisos?.length && (
+        <div className="space-y-2 mb-3">
+          {r.avisos.map((a, i) => (
+            <button key={i} onClick={() => ir(a.seccion)}
+              className={`tap w-full flex items-center gap-3 rounded-2xl border px-4 py-3 text-left text-[14px] leading-snug ${
+                a.nivel === 'error' ? 'bg-nf-red/15 border-nf-red/40 text-red-100' : 'bg-amber-400/10 border-amber-400/30 text-amber-100'}`}>
+              <span className={`w-2 h-2 rounded-full shrink-0 ${a.nivel === 'error' ? 'bg-nf-red' : 'bg-amber-400'}`} />
+              <span className="flex-1 min-w-0">{a.texto}</span>
+              <IAdelante />
+            </button>
+          ))}
+        </div>
+      )}
+
+      <div className="grid grid-cols-2 gap-2">
+        <Tarjeta titulo="Telegram" onClick={() => ir('telegram')}
+          valor={!tg ? '—' : !tg.conectado ? 'Desconectado' : !tg.autorizado ? 'Sin sesión' : 'Conectado'}
+          tono={!tg ? undefined : tg.conectado && tg.autorizado ? 'ok' : 'mal'}
+          lineas={tg ? [tg.premium != null && (tg.premium ? 'Premium' : 'Sin Premium'),
+                        `${n(tg.canales)} de ${n(tg.canales_activos)} canales`] : ['No disponible']} />
+
+        <Tarjeta titulo="Catálogo" onClick={() => ir('canales')}
+          valor={n(cat?.total)} unidad={cat ? 'archivos' : undefined}
+          tono={cat ? (cat.escaneando || cat.releyendo ? 'aviso' : 'ok') : undefined}
+          lineas={cat ? [conFicha != null && `${conFicha} % con ficha`,
+                         cat.escaneando ? `Escaneando ${cat.escaneando} ${plural(cat.escaneando, 'canal', 'canales')}`
+                           : cat.releyendo ? 'Releyendo' : 'Al día'] : ['No disponible']} />
+
+        <Tarjeta titulo="Revisión" onClick={() => ir('revision')}
+          valor={rev ? n(rev.archivos) : 'Calculando…'} unidad={rev ? plural(rev.archivos, 'archivo', 'archivos') : undefined}
+          lineas={rev ? [rev.archivos ? `${n(rev.grupos)} ${plural(rev.grupos, 'grupo', 'grupos')} por revisar` : 'Nada por revisar']
+                      : ['Se mira en segundo plano']} />
+
+        <Tarjeta titulo="Descargas" onClick={() => ir('descargas')}
+          valor={n(des?.activas)} unidad={des ? plural(des.activas, 'activa', 'activas') : undefined}
+          lineas={des ? [`${disco(des.disco_libre)} libres`] : ['No disponible']} />
+
+        <Tarjeta titulo="Peticiones" onClick={() => ir('peticiones')}
+          valor={n(pet?.en_cola)} unidad={pet ? 'en cola' : undefined}
+          tono={pet?.pausadas ? 'aviso' : undefined}
+          lineas={pet ? [pet.pausadas ? 'En pausa' : pet.chat ? `Publicando en ${pet.chat}` : 'Sin chat elegido'] : ['No disponible']} />
+
+        <Tarjeta titulo="Créditos" onClick={() => ir('creditos')}
+          valor={pctPasada != null ? `${pctPasada} %` : '—'}
+          tono={pas?.estado === 'error' ? 'aviso' : undefined}
+          lineas={cre ? [!!pas?.total && `${n(pas.hechos ?? 0)} de ${n(pas.total)}`, pas && pasadaCorta(pas),
+                         `Al ver: ${cre.al_ver ? 'encendido' : 'apagado'}`] : ['No disponible']} />
+
+        {/* Como en la web: lo que importa es cuántos se pueden ver, y lleva a
+            Canales, que es donde vive lo indexado (no tiene sección propia). */}
+        <Tarjeta titulo="Comprimidos" onClick={() => ir('canales')}
+          valor={n(com?.ver)} unidad={com ? 'con «Ver»' : undefined}
+          lineas={com ? [`de ${n(com.revisados)} revisados`] : ['No disponible']} />
+
+        <Tarjeta titulo="Usuarios" onClick={() => ir('usuarios')}
+          valor={n(usu?.activos)} unidad={usu ? plural(usu.activos, 'activo', 'activos') : undefined}
+          lineas={usu ? [`de ${n(usu.total)} ${plural(usu.total, 'cuenta', 'cuentas')}`] : ['No disponible']} />
+      </div>
+    </div>
+  );
+}
+
+/** El menú de secciones, debajo del Resumen: grupos y filas como los Ajustes del iPhone. */
+function Menu({ ir }: { ir: (id: string) => void }) {
+  return (
+    <nav className="mt-2">
+      {GRUPOS.map(g => (
+        <div key={g.titulo}>
+          <p className="mt-6 mb-2 px-1 text-[12px] uppercase tracking-wider font-semibold text-nf-text3">{g.titulo}</p>
+          <div className="rounded-2xl bg-white/5 overflow-hidden">
+            {g.secciones.map(([id, nombre]) => (
+              <button key={id} onClick={() => ir(id)}
+                className="w-full h-12 flex items-center justify-between px-4 text-left text-[16px] border-b border-white/5 last:border-0 active:bg-white/10">
+                <span>{nombre}</span>
+                <IAdelante />
+              </button>
+            ))}
+          </div>
+        </div>
+      ))}
+    </nav>
+  );
+}
+
+/**
+ * El panel en el teléfono: sin sección, la portada (Resumen + menú); con
+ * sección (`/admin/:tab`), esa sección a todo el ancho con su cabecera.
+ *
+ * La sección sigue en la ruta, así que los enlaces directos siguen valiendo
+ * (el aviso de peticiones abre `/m/admin/peticiones`). Volver tiene dos casos:
+ * si se llegó desde la portada se hace `navigate(-1)`, que devuelve la
+ * portada con el scroll donde estaba (el armazón lo recupera en los POP); si
+ * se entró directo, no hay portada detrás en el historial y «atrás» sacaría
+ * de la app, así que se sustituye la entrada por la portada.
+ */
+export default function Admin() {
+  const { tab } = useParams();
+  const navigate = useNavigate();
+  const location = useLocation();
+  const ir = (id: string) => navigate(`/admin/${id}`, { state: { desdePortada: true } });
+  const sec = tab ? SECCION[tab] : undefined;
+
+  if (!sec) {
+    return (
+      <div className="px-4 pb-8" style={{ paddingTop: 'calc(var(--safe-t) + 20px)' }}>
+        <h1 className="text-[28px] font-bold mb-3">Administración</h1>
+        <Resumen ir={ir} />
+        <Menu ir={ir} />
+      </div>
+    );
+  }
+
+  const volver = () => {
+    if ((location.state as any)?.desdePortada) navigate(-1);
+    else navigate('/admin', { replace: true });
+  };
+
+  return (
+    <div className="px-4 pb-6" style={{ paddingTop: 'calc(var(--safe-t) + 12px)' }}>
+      <div className="flex items-center gap-3 mb-4">
+        <button onClick={volver} aria-label="Volver al panel"
+          className="tap w-10 h-10 -ml-1 shrink-0 rounded-full bg-white/10 flex items-center justify-center">
+          <span className="w-5 h-5"><IBack /></span>
+        </button>
+        <h1 className="min-w-0 truncate text-[22px] font-bold">
+          <span className="text-nf-text3 font-semibold">{sec.grupo} › </span>{sec.nombre}
+        </h1>
       </div>
       {tab === 'usuarios' && <Users />}
       {tab === 'descargas' && <DownloadsAll />}
