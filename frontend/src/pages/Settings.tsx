@@ -131,6 +131,9 @@ export default function Settings({ embedded = false }: { embedded?: boolean } = 
           {toggle('Borrar comprimidos tras extraer', 'delete_archives_after_extract')}
           {/* La clave sigue llamandose asi por el .env; hoy lo que hace es dejarlo todo en MP4. */}
           {toggle('Convertir a MP4 al descargar', 'convert_dts_to_ac3', 'Necesario para iPhone y para las teles')}
+          {/* Se guarda en la base de datos: sobrevive a reinicios y despliegues. */}
+          {toggle('Averiguar los créditos al ver', 'creditos_analizar',
+                  'Si no se sabe dónde empiezan, se miran los últimos fotogramas en Telegram mientras se ve')}
         </div>
 
         <div className="bg-white/5 backdrop-blur-md border border-white/10 rounded-2xl p-6 mb-8 shadow-xl">

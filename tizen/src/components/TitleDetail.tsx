@@ -14,6 +14,7 @@ import { soloPuntero } from '../tv/platform';
 import TvButton from './TvButton';
 import { IconCheck, IconDownload, IconHeart, IconPlay, IconStar, IconTrash } from './Icons';
 import { audioQueNoSuena, comprobarReproduccion, motivoNoSeVe } from '../services/reproducir';
+import { useWatched, type Capitulo } from '../hooks/useWatched';
 import { groupEpisodes, groupVersions, seasonLabel, episodeLabel, type Episode, type Version } from '../utils/versions';
 import type { DownloadState, Featured, SearchResult } from '../types';
 
@@ -65,9 +66,11 @@ function DownloadButton({ focusKey, onDownload }: { focusKey: string; onDownload
 
 function DeleteButton({ focusKey, onDelete }: { focusKey: string; onDelete: () => void }) {
   const { ref, focusKey: id } = useFocusItem<HTMLDivElement>({ index: 1, focusKey, onEnter: onDelete });
+  // Mismo ancho que Descargar: con la casilla de visto detras, los checks de
+  // todas las filas quedan en la misma columna.
   return (
     <div ref={ref} onMouseEnter={() => applyFocus(id)} onClick={(e) => { e.stopPropagation(); onDelete(); }}
-      className="tv-row-item shrink-0 w-[84px] h-[84px] rounded-lg mb-[10px] flex flex-col items-center justify-center text-tv-text2">
+      className="tv-row-item shrink-0 w-[96px] h-[84px] rounded-lg mb-[10px] flex flex-col items-center justify-center text-tv-text2">
       <span className="w-7 h-7"><IconTrash /></span>
       <span className="text-[14px] font-semibold mt-1">Borrar</span>
     </div>
@@ -75,21 +78,57 @@ function DeleteButton({ focusKey, onDelete }: { focusKey: string; onDelete: () =
 }
 
 /**
- * Fila de episodio o version. Es un carril horizontal de una o dos casillas:
- * la accion principal (reproducir, ver o descargar) y al lado Borrar si el
- * archivo esta en disco, o Descargar si se puede ver sin bajarlo. Arriba y
- * abajo cambian de fila; izquierda y derecha, de casilla.
+ * Casilla de "visto" de un episodio. Es una casilla y no una marca dentro de
+ * la fila porque el mando necesita algo que enfocar para cambiarla, y asi el
+ * estado se ve en todas las filas sin tener que entrar en ninguna.
  */
-function ListRow({ index, focusKey, label, title, meta, state, variants, onEnter, onDelete, onDownload, autoFocus }: {
+function VistoCell({ focusKey, visto, onToggle }: { focusKey: string; visto: boolean; onToggle: () => void }) {
+  const { ref, focusKey: id } = useFocusItem<HTMLDivElement>({ index: 2, focusKey, onEnter: onToggle });
+  return (
+    <div ref={ref} onMouseEnter={() => applyFocus(id)} onClick={(e) => { e.stopPropagation(); onToggle(); }}
+      className="tv-row-item shrink-0 w-[96px] h-[84px] rounded-lg mb-[10px] flex flex-col items-center justify-center">
+      <span className={`w-7 h-7 ${visto ? 'tv-visto' : 'tv-dim text-tv-text3'}`}><IconCheck /></span>
+      <span className={`text-[14px] font-semibold mt-1 ${visto ? 'tv-visto' : 'tv-dim text-tv-text2'}`}>{visto ? 'Visto' : 'Sin ver'}</span>
+    </div>
+  );
+}
+
+/**
+ * Fila de episodio o version. Es un carril horizontal de hasta tres casillas:
+ * la accion principal (reproducir, ver o descargar), al lado Borrar si el
+ * archivo esta en disco o Descargar si se puede ver sin bajarlo, y al final
+ * el visto del episodio. Arriba y abajo cambian de fila; izquierda y
+ * derecha, de casilla.
+ */
+function ListRow({ index, focusKey, label, title, meta, state, variants, onEnter, onDelete, onDownload, autoFocus, visto, onVisto }: {
   index: number; focusKey: string; label: string; title: string; meta: string; state: RowState; variants: number;
   onEnter: () => void; onDelete?: () => void; onDownload?: () => void; autoFocus?: boolean;
+  visto?: boolean; onVisto?: () => void;
 }) {
+  const borrar = state.status === 'ready' && onDelete;
+  const bajar = state.status === 'stream' && onDownload;
   return (
     <FocusScope index={index} orientation="horizontal" className="flex items-stretch space-x-[10px]">
       <MainCell focusKey={focusKey} label={label} title={title} meta={meta} state={state} variants={variants} onEnter={onEnter} autoFocus={autoFocus} />
-      {state.status === 'ready' && onDelete && <DeleteButton focusKey={`${focusKey}-del`} onDelete={onDelete} />}
-      {state.status === 'stream' && onDownload && <DownloadButton focusKey={`${focusKey}-dl`} onDownload={onDownload} />}
+      {borrar && <DeleteButton focusKey={`${focusKey}-del`} onDelete={onDelete} />}
+      {bajar && <DownloadButton focusKey={`${focusKey}-dl`} onDownload={onDownload} />}
+      {/* Sin Borrar ni Descargar se guarda su hueco, o el check de esta fila
+          no caeria debajo del de las demas. */}
+      {onVisto && !borrar && !bajar && <div className="shrink-0 w-[96px]" />}
+      {onVisto && <VistoCell focusKey={`${focusKey}-visto`} visto={!!visto} onToggle={onVisto} />}
     </FocusScope>
+  );
+}
+
+/** Marcar o desmarcar la temporada que se esta viendo, de golpe. */
+function VistoTemporada({ visto, texto, onToggle }: { visto: boolean; texto: string; onToggle: () => void }) {
+  const { ref, focusKey: id } = useFocusItem<HTMLButtonElement>({ index: 0, focusKey: 'detail-visto-temporada', onEnter: onToggle });
+  return (
+    <button ref={ref} onMouseEnter={() => applyFocus(id)} onClick={onToggle}
+      className="tv-btn shrink-0 inline-flex items-center space-x-3 rounded-full px-6 h-[48px] text-caption font-semibold whitespace-nowrap">
+      <span className={`w-6 h-6 ${visto ? 'tv-visto' : ''}`}><IconCheck /></span>
+      <span className={visto ? 'tv-visto' : ''}>{texto}</span>
+    </button>
   );
 }
 
@@ -138,6 +177,14 @@ function MainCell({ focusKey, label, title, meta, state, variants, onEnter, auto
 
 const LIST_VIEW = 720;   // alto visible de la lista
 
+/** El texto del visto por temporada. `seasonLabel` da "Episodios" (sin
+ *  temporada) y "Especiales" (la 0), que no concuerdan con "vista". */
+function textoTemporada(s: number | null | undefined, visto: boolean): string {
+  if (s === null || s === undefined) return visto ? 'Todos vistos' : 'Marcar todos como vistos';
+  if (s === 0) return visto ? 'Especiales vistos' : 'Marcar especiales como vistos';
+  return visto ? `Temporada ${s} vista` : `Marcar temporada ${s} como vista`;
+}
+
 /**
  * Ficha a pantalla completa de una pelicula o serie.
  *
@@ -151,10 +198,16 @@ export default function TitleDetail({ input, onClose }: Props) {
   const { meta, kind } = input;
   const { downloadStates, download, cancelBatch, pauseBatch, rutaDe, rutaEpisodio, recargar } = useDownloadsCtx();
   const { esFavorito, alternar } = useFavorites();
+  // Lo visto es de la cuenta y vive en el servidor: lo marcado aqui sale
+  // igual en la web y en el movil, y al reves.
+  const visto = useWatched(input.tmdbId, kind);
+  const recargarVisto = visto.recargar;
   const [playing, setPlaying] = useState<{ path: string; title: string; subtitle?: string } | null>(null);
   // Estable a proposito: si cambia en cada render, el efecto del reproductor
   // se vuelve a montar con el y reanuda el video otra vez (ver Player.tsx).
-  const cerrarPlayer = useCallback(() => setPlaying(null), []);
+  // Al cerrarlo se vuelve a preguntar que esta visto: el servidor marca solo
+  // el capitulo que se termina.
+  const cerrarPlayer = useCallback(() => { setPlaying(null); recargarVisto(); }, [recargarVisto]);
   const [dialog, setDialog] = useState<{
     title: string; text?: string; actions: { label: string; onSelect: () => void; primary?: boolean }[];
     /** Version cuyo progreso se enseña en vivo; si deja de estar en curso, el cuadro se cierra. */
@@ -192,6 +245,12 @@ export default function TitleDetail({ input, onClose }: Props) {
   }, [episodes]);
   const activeSeason = season === undefined ? seasons[0] : season;
   const shown = useMemo(() => (kind === 'series' ? episodes.filter((e) => e.season === activeSeason) : []), [episodes, activeSeason, kind]);
+  // Los capitulos que conoce la ficha: el visto por temporada los marca de
+  // golpe, y quitar uno de una serie marcada entera necesita saber cuales son
+  // "los demas" para dejarlos vistos (ver useWatched).
+  const todosCaps = useMemo(() => episodes.map((e) => [e.season, e.episode] as Capitulo), [episodes]);
+  const capsTemporada = useMemo(() => todosCaps.filter(([s]) => s === activeSeason), [todosCaps, activeSeason]);
+  const temporadaVista = visto.temporadaVista(capsTemporada);
 
   // Nombres de episodio de TMDB por temporada.
   useEffect(() => {
@@ -439,12 +498,24 @@ export default function TitleDetail({ input, onClose }: Props) {
                 {marcado ? 'En favoritos' : 'Favorito'}
               </TvButton>
             ) : null}
-            {readyCount > 0 && (
-              <span className="inline-flex items-center space-x-2 text-caption text-tv-ok font-semibold">
-                <span className="w-5 h-5"><IconCheck /></span><span>{readyCount} en disco</span>
-              </span>
-            )}
+            {/* "Ya me la he visto" es del titulo, no del archivo: vale aunque
+                no haya nada descargado. Pelicula y serie son femeninas, asi
+                que "vista" sirve para las dos. */}
+            {input.tmdbId ? (
+              <TvButton index={2} focusKey="detail-visto"
+                icon={<span className={`w-full h-full ${visto.entero ? 'tv-visto' : ''}`}><IconCheck /></span>}
+                onClick={visto.alternarTitulo}>
+                <span className={visto.entero ? 'tv-visto' : ''}>{visto.entero ? 'Vista' : 'Marcar vista'}</span>
+              </TvButton>
+            ) : null}
           </FocusScope>
+          {/* Debajo y no al lado de los botones: con Visto ya no cabe en la
+              fila sin pisar la columna de la derecha. */}
+          {readyCount > 0 && (
+            <p className="mt-5 inline-flex items-center space-x-2 text-caption text-tv-ok font-semibold">
+              <span className="w-5 h-5"><IconCheck /></span><span>{readyCount} en disco</span>
+            </p>
+          )}
           {versions.length === 0 && (
             <p className="mt-10 text-body text-tv-text3">No hay archivos indexados para este título.</p>
           )}
@@ -462,12 +533,20 @@ export default function TitleDetail({ input, onClose }: Props) {
           {kind === 'series' && seasons.length === 1 && (
             <p className="text-row font-semibold mb-6">{seasonLabel(seasons[0])}</p>
           )}
+          {/* En su propia linea y no al lado de los chips: con muchas
+              temporadas los chips ya llenan el ancho y se taparian. */}
+          {kind === 'series' && input.tmdbId && capsTemporada.length > 0 && (
+            <FocusScope index={1} orientation="horizontal" className="flex mb-5">
+              <VistoTemporada visto={temporadaVista} texto={textoTemporada(activeSeason, temporadaVista)}
+                onToggle={() => visto.alternarTemporada(capsTemporada, todosCaps)} />
+            </FocusScope>
+          )}
           {kind === 'movie' && versions.length > 0 && (
             <p className="text-row font-semibold mb-6">Versiones disponibles</p>
           )}
 
           <div className="relative overflow-hidden" style={{ height: LIST_VIEW }}>
-            <FocusScope index={1} orientation="vertical" onChildFocus={onListFocus} as="none">
+            <FocusScope index={2} orientation="vertical" onChildFocus={onListFocus} as="none">
               <div ref={listRef} className="tv-list-track" style={{ transform: 'translate3d(0,0,0)' }}>
                 {kind === 'series' && shown.map((e, i) => {
                   const best = mejorVariante(e);
@@ -479,7 +558,9 @@ export default function TitleDetail({ input, onClose }: Props) {
                       meta={`${best.quality} · ${best.sizeStr}${best.channelName ? ` · ${best.channelName}` : ''}`}
                       state={st} variants={e.variants.length} onEnter={() => onEpisode(e)} autoFocus={i === 0 && !playable}
                       onDelete={st.status === 'ready' ? () => askDelete(st.path, `${episodeLabel(e)} · ${name}`) : undefined}
-                      onDownload={st.status === 'stream' ? () => descargar(best) : undefined} />
+                      onDownload={st.status === 'stream' ? () => descargar(best) : undefined}
+                      visto={visto.esVisto(e.season, e.episode)}
+                      onVisto={input.tmdbId ? () => visto.alternarEpisodio(e.season, e.episode, todosCaps) : undefined} />
                   );
                 })}
                 {kind === 'movie' && versions.map((v, i) => (
@@ -496,8 +577,10 @@ export default function TitleDetail({ input, onClose }: Props) {
           </div>
           <p className="mt-3 text-caption text-tv-text3">
             {soloPuntero()
-              ? 'Pulsa una fila: se reproduce si está en disco, se ve sin descargar si se puede y si no se descarga'
-              : 'OK: reproducir, ver sin descargar o descargar · ▶ Descargar · Atrás: volver'}
+              ? `Pulsa una fila: se reproduce si está en disco, se ve sin descargar si se puede y si no se descarga${kind === 'series' && input.tmdbId ? ' · ✓ marca el episodio como visto' : ''}`
+              : kind === 'series' && input.tmdbId
+                ? 'OK: reproducir, ver sin descargar o descargar · ▶ Descargar y Visto · Atrás: volver'
+                : 'OK: reproducir, ver sin descargar o descargar · ▶ Descargar · Atrás: volver'}
           </p>
         </FocusScope>
       </FocusScope>

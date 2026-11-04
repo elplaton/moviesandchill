@@ -145,6 +145,35 @@ r = continuar_viendo([fila("tg:5:101", 600, 2700, 1, season=1, episode=2, **tg),
 comprueba("las tarjetas siguen en el orden de lo ultimo que se toco de cada titulo",
           ["tg:5:101", "Dune (2021)/Dune (2021) - 1080p.mp4"], [t["path"] for t in r])
 
+print("\nEl siguiente sin descargar, del catalogo")
+# Lo que arma progress_router: por serie, los capitulos que se pueden ver.
+cat = {1396: [(1, 2, "tg:5:101"), (1, 3, "tg:5:102"), (1, 4, "tg:5:103"), (2, 1, "tg:5:109")]}
+r = continuar_viendo([fila("tg:5:102", 2700, 2700, 1, season=1, episode=3, **tg)], catalogo=cat)
+comprueba("terminado el 1x03 (en los creditos), se ofrece el 1x04 desde el principio",
+          [("tg:5:103", True, 0.0)], [(t["path"], t["next_episode"], t["position"]) for t in r])
+comprueba("con su etiqueta recalculada", "1x04", r[0]["subtitle"] if r else None)
+r = continuar_viendo([fila("tg:5:103", 2700, 2700, 1, season=1, episode=4, **tg)], catalogo=cat,
+                     marcados={1396: {(2, 1)}})
+comprueba("lo marcado como visto no se ofrece", [], [t["path"] for t in r])
+r = continuar_viendo([fila("tg:5:103", 2700, 2700, 1, season=1, episode=4, **tg),
+                      fila("tg:5:109", 2700, 2700, 3, season=2, episode=1, **tg)], catalogo=cat)
+comprueba("con el ultimo visto y nada nuevo, la serie no sale", [], [t["path"] for t in r])
+cat[1396].append((2, 2, "tg:5:120"))
+r = continuar_viendo([fila("tg:5:103", 2700, 2700, 1, season=1, episode=4, **tg),
+                      fila("tg:5:109", 2700, 2700, 3, season=2, episode=1, **tg)], catalogo=cat)
+comprueba("en cuanto llega el capitulo nuevo, vuelve con el nuevo", ["tg:5:120"], [t["path"] for t in r])
+r = continuar_viendo([fila("Suits/Temporada 3/3x07.mp4", 2399, 2400, 1, tmdb_id=37680, tmdb_type="tv")],
+                     catalogo={37680: [(3, 8, "tg:9:1")]})
+comprueba("si el siguiente esta en disco, manda el disco", ["Suits/Temporada 3/3x08.mp4"], [t["path"] for t in r])
+r = continuar_viendo([fila("Suits/Temporada 4/4x02.mp4", 2399, 2400, 1, tmdb_id=37680, tmdb_type="tv")],
+                     catalogo={37680: [(4, 3, "tg:9:2")]})
+comprueba("y si en disco no hay mas, el del catalogo", ["tg:9:2"], [t["path"] for t in r])
+
+r = continuar_viendo([fila("tg:5:102", 2500, 2700, 1, season=1, episode=3, **tg)], catalogo=cat,
+                     marcados={1396: {(1, 3)}})
+comprueba("marcado en los creditos y guardado despues un poco antes del final: sigue terminado",
+          ["tg:5:103"], [t["path"] for t in r])
+
 print()
-print(f"{9 + 9 + 3 + 6 - len(fallos)} correctas, {len(fallos)} fallidas")
+print(f"{9 + 9 + 3 + 6 + 8 - len(fallos)} correctas, {len(fallos)} fallidas")
 sys.exit(1 if fallos else 0)

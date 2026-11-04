@@ -1,4 +1,4 @@
-import { useEffect, useState, type RefObject } from 'react';
+import { useEffect, useRef, useState, type RefObject } from 'react';
 import type Hls from 'hls.js';
 import { comoAbrirHls, modoDeReproduccion, type Modo } from '../services/reproducir';
 
@@ -34,13 +34,20 @@ export interface Fuente {
  * otra. Si el navegador no sabe HLS de ninguna forma, se queda en directo.
  */
 export function useFuente(ref: RefObject<HTMLVideoElement>, path: string, ticket: string | null,
-                          audio?: number | null): Fuente {
+                          audio?: number | null, reintento?: { intento: number; fallo: () => void }): Fuente {
+  // El aviso de fallo, por referencia: cambia con la ruta y no debe rehacer
+  // el hls.js.
+  const falloRef = useRef(reintento?.fallo);
+  falloRef.current = reintento?.fallo;
+  const intento = reintento?.intento ?? 0;
   const [modo, setModo] = useState<{ path: string; modo: Modo } | null>(null);
+  // Con cada intento se vuelve a preguntar: si la primera vez fallo la
+  // consulta de pistas, el modo que salio (`directo`) puede no ser el bueno.
   useEffect(() => {
     let vivo = true;
     modoDeReproduccion(path).then(m => { if (vivo) setModo({ path, modo: m }); });
     return () => { vivo = false; };
-  }, [path]);
+  }, [path, intento]);
 
   // Que HLS sabe este navegador. Va aparte del modo del archivo para que, al
   // elegir idioma, la fuente nueva se sepa en el mismo render: sin esperar a
@@ -58,7 +65,7 @@ export function useFuente(ref: RefObject<HTMLVideoElement>, path: string, ticket
   const base = modo?.path === path ? modo.modo : null;
   const m = conAudio ? nav : base;
   const consulta = ticket === null ? '' : `path=${encodeURIComponent(path)}&token=${encodeURIComponent(ticket)}`
-    + (conAudio ? `&audio=${audio}` : '');
+    + (conAudio ? `&audio=${audio}` : '') + (intento ? `&intento=${intento}` : '');
   const listo = ticket !== null && m !== null;
 
   // El fallo es de una consulta concreta: con otra (otra pista, otro archivo)
@@ -82,6 +89,16 @@ export function useFuente(ref: RefObject<HTMLVideoElement>, path: string, ticket
         if (conAudio && (d.details === H.ErrorDetails.MANIFEST_LOAD_ERROR
                          || d.details === H.ErrorDetails.MANIFEST_PARSING_ERROR)) {
           setFallida(consulta);
+          return;
+        }
+        // La lista inicial no ha llegado (el servidor tardaba en arrancar
+        // ffmpeg, o Telegram fallo una vez): `startLoad()` no la vuelve a
+        // pedir y la pantalla se quedaba en negro hasta salir y entrar. Se
+        // rehace desde fuera con otro intento (`useReintento`).
+        if (d.details === H.ErrorDetails.MANIFEST_LOAD_ERROR
+            || d.details === H.ErrorDetails.MANIFEST_LOAD_TIMEOUT
+            || d.details === H.ErrorDetails.MANIFEST_PARSING_ERROR) {
+          falloRef.current?.();
           return;
         }
         // Lo de red se reintenta (un trozo que tardo demasiado: el servidor

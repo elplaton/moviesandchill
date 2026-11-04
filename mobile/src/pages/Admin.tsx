@@ -767,6 +767,7 @@ function Server() {
         <Toggle k="tmdb_enabled" label="Metadatos de TMDB" help="Carátulas, sinopsis y clasificación" />
         <Toggle k="convert_dts_to_ac3" label="Convertir a MP4 al descargar" help="Necesario para iPhone y para las teles" />
         <Toggle k="delete_archives_after_extract" label="Borrar comprimidos tras extraer" />
+        <Toggle k="creditos_analizar" label="Averiguar los créditos al ver" help="Si no se sabe dónde empiezan, se miran en Telegram mientras se ve" />
       </section>
       <Cache />
       <Pantalla />

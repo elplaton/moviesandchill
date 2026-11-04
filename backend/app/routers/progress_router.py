@@ -116,7 +116,54 @@ async def get_progress_list(user: Annotated[str, Depends(get_current_user)], lim
         list_progress(uid), titulos_vistos(uid), episodios_vistos_todos(uid))
     filas = [f for f in filas
              if (f.get("tmdb_id"), f.get("tmdb_type")) not in vistos]
-    return {"items": continuar_viendo(filas, limit, marcados)}
+    catalogo = await _episodios_en_catalogo(filas)
+    return {"items": continuar_viendo(filas, limit, marcados, catalogo)}
+
+
+async def _episodios_en_catalogo(filas: list[dict]) -> dict[int, list[tuple[int, int, str]]]:
+    """De cada serie del historial, los episodios del catalogo que se pueden
+    ver sin descargar: (temporada, episodio, ruta tg:), uno por capitulo.
+
+    Es lo que deja ofrecer el capitulo siguiente aunque no este descargado, y
+    lo que hace que una serie al dia vuelva a la fila sola en cuanto llega el
+    capitulo nuevo. De cada capitulo, el enlace del canal en el que se iba
+    viendo si lo hay (suele ser el mismo ripeo)."""
+    from app.database.connection import get_pool
+    from app.services import interior, reproduccion
+    from app.services.siguiente import elegir_enlace
+
+    series = {f["tmdb_id"] for f in filas if f.get("tmdb_id") and f.get("tmdb_type") == "tv"}
+    pool = get_pool()
+    if not series or not pool:
+        return {}
+    try:
+        async with pool.acquire() as conn:
+            enlaces = [dict(r) for r in await conn.fetch("""
+                SELECT tmdb_id, channel_id, message_id, file_name, file_size, season, episode
+                FROM media_items
+                WHERE tmdb_type = 'tv' AND tmdb_valid IS TRUE AND episode IS NOT NULL
+                  AND tmdb_id = ANY($1::int[])
+            """, list(series))]
+        ver = await interior.ver_de(enlaces)
+    except Exception:
+        # Sin catalogo la fila sale como antes (solo lo descargado).
+        return {}
+    canal_de: dict[int, int] = {}
+    for f in filas:
+        ids = reproduccion.leer_ruta(f["path"])
+        if ids and f.get("tmdb_id") in series:
+            canal_de.setdefault(f["tmdb_id"], ids[0])
+    por_capitulo: dict[tuple[int, int, int], list[dict]] = {}
+    for e in enlaces:
+        if reproduccion.se_puede_intentar(e["file_name"]) or (e["channel_id"], e["message_id"]) in ver:
+            por_capitulo.setdefault((e["tmdb_id"], e["season"] or 0, e["episode"]), []).append(e)
+    salida: dict[int, list[tuple[int, int, str]]] = {}
+    for (tid, t, ep), opciones in por_capitulo.items():
+        e = elegir_enlace(opciones, canal_de.get(tid), None)
+        salida.setdefault(tid, []).append((t, ep, reproduccion.ruta(e["channel_id"], e["message_id"])))
+    for lista in salida.values():
+        lista.sort()
+    return salida
 
 
 @router.get("/progress/point")
@@ -148,6 +195,50 @@ async def post_progress(req: ProgressRequest, user: Annotated[str, Depends(get_c
     if uid is None:
         return {"saved": False}
     return {"saved": await _guardar(uid, req)}
+
+
+@router.post("/progress/creditos")
+async def al_empezar_los_creditos(req: ProgressRequest, user: Annotated[str, Depends(get_current_user)]):
+    """Han empezado los creditos: el capitulo o la pelicula se da por visto.
+
+    Es el momento en que la gente deja de mirar, y esperar al `ended` (o al
+    95 %) dejaba lo visto a medias en "Continuar viendo" en cuanto alguien
+    cerraba en los creditos. Se hacen dos cosas:
+
+    - el progreso queda **terminado** (posicion = duracion): de una serie,
+      "Continuar viendo" ofrece el capitulo siguiente desde el principio;
+    - se **marca visto** en `user_watched`: el capitulo (con lo que la ficha
+      pinta el visto y, completa la temporada, la temporada entera) o la
+      pelicula entera, que sale de "Continuar viendo". Las dos cosas suman a
+      las recomendaciones (`gustos_por_lo_visto`).
+
+    Lo llama el reproductor una vez por archivo, al aparecer la tarjeta de
+    los creditos (`useSiguiente`)."""
+    from app.database.progress import get_progress
+    from app.database.watched import marcar_visto
+    from app.services import cache
+
+    uid = await _user_id(user)
+    if uid is None or not req.duration or req.duration <= 0:
+        return {"visto": False}
+    req.position = req.duration
+    if not await _guardar(uid, req):
+        return {"visto": False}
+    # Que es lo dice la fila guardada: la ficha que mando el cliente o, si
+    # no, la del catalogo (lo visto sin descargar), y el capitulo igual.
+    fila = await get_progress(uid, ruta_relativa(req.path)) or {}
+    tmdb_id, tipo = fila.get("tmdb_id"), fila.get("tmdb_type")
+    if not tmdb_id or tipo not in ("movie", "tv"):
+        return {"visto": False, "motivo": "sin ficha"}
+    if tipo == "movie":
+        await marcar_visto(uid, tmdb_id, "movie")
+    elif fila.get("episode") is not None:
+        await marcar_visto(uid, tmdb_id, "tv", fila.get("season") or 0, fila["episode"])
+    else:
+        return {"visto": False, "motivo": "no se sabe que capitulo es"}
+    cache.cambio_de_cuenta(uid)
+    return {"visto": True, "tmdb_id": tmdb_id, "media_type": tipo,
+            "season": fila.get("season"), "episode": fila.get("episode")}
 
 
 @router.delete("/progress")

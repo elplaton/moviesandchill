@@ -110,6 +110,25 @@ export interface InfoCreditos {
  * averiguarlo en el servidor si aun no se sabe (por eso se pregunta otra vez
  * cerca del final: para entonces suele estar).
  */
+/**
+ * Han empezado los créditos: el servidor da el capítulo o la película por
+ * vista. Queda terminada en «Continuar viendo» (de una serie se ofrece el
+ * capítulo siguiente desde el principio; una película sale de la fila) y se
+ * marca vista, que es lo que pinta el visto en la ficha y mueve las
+ * recomendaciones. Una vez por archivo; si falla no pasa nada grave: al
+ * acabar el vídeo se guarda como terminado igualmente.
+ */
+export async function alEmpezarCreditos(path: string, duracion: number, tmdbId?: number | null,
+                                        mediaType?: string | null): Promise<void> {
+  try {
+    await apiFetch('/progress/creditos', {
+      method: 'POST',
+      body: JSON.stringify({ path, position: duracion, duration: duracion,
+                             tmdb_id: tmdbId ?? null, media_type: mediaType ?? null }),
+    });
+  } catch { /* se queda como estaba: al acabar el vídeo se marca igual */ }
+}
+
 export async function creditos(path: string, duracion: number, tmdbId?: number | null,
                                mediaType?: string | null): Promise<InfoCreditos | null> {
   try {

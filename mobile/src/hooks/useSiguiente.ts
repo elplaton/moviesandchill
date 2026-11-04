@@ -43,7 +43,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  AVISO_BAJAR_S, AVISO_VER_S, CUENTA_ATRAS_S, bajarSiguientes, creditos, decidir, listar, queViene,
+  AVISO_BAJAR_S, AVISO_VER_S, CUENTA_ATRAS_S, alEmpezarCreditos, bajarSiguientes, creditos, decidir, listar, queViene,
   relacionados as pedirRelacionados, resumen, type Decision, type QueViene, type Relacionado,
   type SiguienteEpisodio,
 } from '../services/siguiente';
@@ -169,6 +169,8 @@ export function useSiguiente({ path, tmdbId, mediaType, onVer, onCerrar, pausar 
   const creditosRef = useRef<{ inicio: number | null; origen: string | null }>({ inicio: null, origen: null });
   // «Ver créditos» en la pantalla del final: no vuelve a salir hasta que acaba.
   const finalVisto = useRef(false);
+  // De qué archivo se ha avisado ya de que empezaron los créditos.
+  const creditosAvisados = useRef<string | null>(null);
   const avisoTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   datosRef.current = datos;
 
@@ -233,6 +235,13 @@ export function useSiguiente({ path, tmdbId, mediaType, onVer, onCerrar, pausar 
     }
 
     const momento = momentoDeAviso(creditosRef.current.inicio, duracion);
+    // Al empezar los créditos el capítulo o la película se da por visto (ver
+    // `alEmpezarCreditos`): es cuando la gente deja de mirar, y esperar al
+    // final dejaba lo visto a medias si se cerraba en los créditos.
+    if (tiempo >= momento && creditosAvisados.current !== path) {
+      creditosAvisados.current = path;
+      alEmpezarCreditos(path, duracion, tmdbId, mediaType);
+    }
     if (quedan > AVISO_BAJAR_S && momento - tiempo > AVISO_BAJAR_S) return;
 
     if (pedido.current !== path) {
@@ -251,7 +260,7 @@ export function useSiguiente({ path, tmdbId, mediaType, onVer, onCerrar, pausar 
     if ((d.tipo === 'ver' || d.tipo === 'final') && tiempo < momento) return;
     if (d.tipo === 'final' && finalVisto.current) return;
     setTarjeta((actual) => (actual.tipo === 'nada' ? d : actual));
-  }, [path, tmdbId, pedirCreditos]);
+  }, [path, tmdbId, mediaType, pedirCreditos]);
 
   // La pantalla del final necesita sus títulos: se piden al aparecer.
   useEffect(() => {

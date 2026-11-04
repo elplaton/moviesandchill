@@ -10,10 +10,14 @@ simple ORDER BY:
    manda el capitulo mas avanzado (temporada y episodio mas altos), no el
    ultimo que se toco: volver a ver el 2x03 no puede tapar que vas por el 4x08.
 
-2. **Al terminar un episodio se ofrece el siguiente.** Por eso el historial no
-   se borra al acabar: una fila terminada es justo lo que permite saber por
-   donde seguir. Si el siguiente no esta en disco, el titulo desaparece de la
-   fila (no se ofrece algo que no se puede reproducir).
+2. **Al terminar un episodio se ofrece el siguiente, desde el principio.**
+   Por eso el historial no se borra al acabar: una fila terminada es justo lo
+   que permite saber por donde seguir. El siguiente sale del disco si esta
+   descargado y, si no, del catalogo si se puede ver sin descargar
+   (`catalogo`, lo arma `progress_router`). Si no hay ninguno, el titulo
+   desaparece de la fila (no se ofrece algo que no se puede reproducir)... y
+   vuelve solo cuando llega el capitulo nuevo, porque la fila se calcula en
+   cada visita con lo que haya entonces en el catalogo.
 """
 import os
 import re
@@ -185,6 +189,12 @@ def clave_titulo(fila: dict) -> tuple:
 
 
 def _terminada(f: dict) -> bool:
+    # Marcado como visto (lo hace el reproductor al empezar los creditos) es
+    # terminado aunque la posicion diga otra cosa: tras el aviso el reproductor
+    # sigue guardando cada pocos segundos, y unos creditos de mas del 5 % del
+    # capitulo lo dejarian "a medias" otra vez.
+    if f.get("marcado"):
+        return True
     duracion = float(f.get("duration") or 0)
     return duracion > 0 and float(f.get("position") or 0) / duracion >= FIN
 
@@ -216,20 +226,41 @@ def _mas_avanzada(filas: list[dict]) -> dict | None:
     return max(con_capitulo, key=lambda f: (f.get("season") or 0, f["episode"]))
 
 
+def siguiente_en_catalogo(fila: dict, episodios: list[tuple[int, int, str]] | None,
+                          vistos: set[tuple[int, int]]) -> dict | None:
+    """El episodio que va despues del de `fila` entre los que se pueden ver sin
+    descargar: `episodios` son (temporada, episodio, ruta tg:) ordenados.
+    Se salta lo ya visto (terminado o marcado)."""
+    t, e = fila.get("season"), fila.get("episode")
+    if e is None or not episodios:
+        return None
+    actual = (t or 0, e)
+    for ts, es, ruta in episodios:
+        if (ts, es) > actual and (ts, es) not in vistos:
+            return {"path": ruta, "season": ts, "episode": es}
+    return None
+
+
 def continuar_viendo(filas: list[dict], limite: int = 20,
-                     marcados: dict[int, set[tuple[int, int]]] | None = None) -> list[dict]:
+                     marcados: dict[int, set[tuple[int, int]]] | None = None,
+                     catalogo: dict[int, list[tuple[int, int, str]]] | None = None) -> list[dict]:
     """Las tarjetas de la fila, a partir del historial de la cuenta.
 
     `filas` llega ya ordenada de lo mas reciente a lo mas viejo: las tarjetas
     salen en el orden de lo ultimo que se toco de cada titulo, y de cada uno
     el capitulo mas avanzado (`_mas_avanzada`). `marcados` son los episodios que la
     cuenta ha marcado como vistos a mano, por tmdb_id: no se ofrecen como
-    siguiente aunque esten en disco y sin reproducir.
+    siguiente aunque esten en disco y sin reproducir. `catalogo` son, por
+    tmdb_id de serie, los episodios que se pueden ver sin descargar: de ahi
+    sale el siguiente cuando no esta en disco.
     """
     tarjetas: list[dict] = []
-    terminados = {f["path"] for f in filas
-                  if (f.get("duration") or 0) > 0
-                  and float(f["position"]) / float(f["duration"]) >= FIN}
+    for f in filas:
+        vistos_t = (marcados or {}).get(f.get("tmdb_id"))
+        if (vistos_t and f.get("tmdb_type") == "tv" and f.get("episode") is not None
+                and ((f.get("season") or 0), f["episode"]) in vistos_t):
+            f["marcado"] = True
+    terminados = {f["path"] for f in filas if _terminada(f)}
 
     # Por titulo, en el orden de lo ultimo que se toco de cada uno.
     por_titulo: dict[tuple, list[dict]] = {}
@@ -249,10 +280,17 @@ def continuar_viendo(filas: list[dict], limite: int = 20,
         if not _terminada(fila):
             tarjetas.append(_tarjeta(fila, rel, posicion, duracion, temporada, episodio, False))
         else:
-            sig = siguiente_episodio(rel, terminados,
-                                     (marcados or {}).get(fila.get("tmdb_id")))
+            marcados_t = (marcados or {}).get(fila.get("tmdb_id")) or set()
+            sig = siguiente_episodio(rel, terminados, marcados_t)
+            if not sig and fila.get("tmdb_id") and fila.get("tmdb_type") == "tv":
+                # Lo terminado de esta serie, por capitulo: lo visto sin
+                # descargar no tiene "3x05" en la ruta, lo tiene la fila.
+                vistos = set(marcados_t) | {
+                    ((f.get("season") or 0), f["episode"]) for f in grupo_filas
+                    if f.get("episode") is not None and _terminada(f)}
+                sig = siguiente_en_catalogo(fila, (catalogo or {}).get(fila["tmdb_id"]), vistos)
             if not sig:
-                continue  # pelicula terminada, o serie sin mas episodios en disco
+                continue  # pelicula terminada, o serie sin mas episodios que ver
             tarjetas.append(_tarjeta(fila, sig["path"], 0.0, 0.0,
                                      sig["season"], sig["episode"], True))
 

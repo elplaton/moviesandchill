@@ -1,4 +1,4 @@
-import { useEffect, useState, type RefObject } from 'react';
+import { useEffect, useRef, useState, type RefObject } from 'react';
 import type Hls from 'hls.js';
 import { comoAbrirHls, modoDeReproduccion, type Modo } from '../services/reproducir';
 
@@ -21,7 +21,13 @@ import { comoAbrirHls, modoDeReproduccion, type Modo } from '../services/reprodu
  * para lo descargado. Si este aparato no sabe abrir HLS se queda en directo.
  */
 export function useFuente(ref: RefObject<HTMLVideoElement>, path: string, ticket: string | null,
-                          audio: number | null = null): string | undefined {
+                          audio: number | null = null, reintento?: { intento: number; fallo: () => void }): string | undefined {
+  // El aviso de fallo, por referencia: cambia con la ruta y no debe rehacer
+  // el hls.js.
+  const falloRef = useRef(reintento?.fallo);
+  falloRef.current = reintento?.fallo;
+  const intento = reintento?.intento ?? 0;
+
   // El modo va atado a la ruta **y** a la pista: el de otro episodio, o el de
   // antes de cambiar de idioma, no vale.
   const clave = `${audio ?? ''}|${path}`;
@@ -31,12 +37,13 @@ export function useFuente(ref: RefObject<HTMLVideoElement>, path: string, ticket
     const pedir = audio === null ? modoDeReproduccion(path) : comoAbrirHls();
     pedir.then(m => { if (vivo) setModo({ clave: `${audio ?? ''}|${path}`, modo: m }); });
     return () => { vivo = false; };
-  }, [path, audio]);
+  }, [path, audio, intento]);
 
   const m = modo?.clave === clave ? modo.modo : null;
   const base = ticket === null ? '' : `path=${encodeURIComponent(path)}&token=${encodeURIComponent(ticket)}`;
   // La pista solo la entiende la version adaptada; el archivo tal cual es uno.
-  const consulta = audio !== null && m !== 'directo' ? `${base}&audio=${audio}` : base;
+  const consulta = (audio !== null && m !== 'directo' ? `${base}&audio=${audio}` : base)
+    + (intento && base ? `&intento=${intento}` : '');
   const listo = ticket !== null && m !== null;
 
   useEffect(() => {
@@ -49,6 +56,16 @@ export function useFuente(ref: RefObject<HTMLVideoElement>, path: string, ticket
       hls = new H(CONFIG);
       hls.on(H.Events.ERROR, (_e, d) => {
         if (!d.fatal || !hls) return;
+        // La lista inicial no ha llegado (el servidor tardaba en arrancar
+        // ffmpeg, o Telegram fallo una vez): `startLoad()` no la vuelve a
+        // pedir y la pantalla se quedaba en negro hasta salir y entrar. Se
+        // rehace desde fuera con otro intento (`useReintento`).
+        if (d.details === H.ErrorDetails.MANIFEST_LOAD_ERROR
+            || d.details === H.ErrorDetails.MANIFEST_LOAD_TIMEOUT
+            || d.details === H.ErrorDetails.MANIFEST_PARSING_ERROR) {
+          falloRef.current?.();
+          return;
+        }
         // Lo de red se reintenta (un trozo que tardo demasiado: el servidor
         // lo estaba fabricando); lo del decodificador se recupera una vez.
         if (d.type === H.ErrorTypes.NETWORK_ERROR) hls.startLoad();

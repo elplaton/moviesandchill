@@ -1,4 +1,4 @@
-import { useEffect, useState, type RefObject } from 'react';
+import { useEffect, useRef, useState, type RefObject } from 'react';
 import type Hls from 'hls.js';
 import { getApiBase } from '../services/api';
 import { comoAbrirHls, modoDeReproduccion, type Modo } from '../services/reproducir';
@@ -31,13 +31,18 @@ export interface Fuente {
  * primera pista, como antes): el reproductor lo comprueba antes de pedirlo.
  */
 export function useFuente(ref: RefObject<HTMLVideoElement>, path: string, ticket: string | null,
-                          audio: number | null = null): Fuente {
+                          audio: number | null = null, reintento?: { intento: number; fallo: () => void }): Fuente {
+  // El aviso de fallo, por referencia: cambia con la ruta y no debe rehacer
+  // el hls.js.
+  const falloRef = useRef(reintento?.fallo);
+  falloRef.current = reintento?.fallo;
+  const intento = reintento?.intento ?? 0;
   const [modo, setModo] = useState<{ path: string; modo: Modo } | null>(null);
   useEffect(() => {
     let vivo = true;
     modoDeReproduccion(path).then(m => { if (vivo) setModo({ path, modo: m }); });
     return () => { vivo = false; };
-  }, [path]);
+  }, [path, intento]);
 
   // Como abre este aparato la version adaptada. Solo se pregunta si hace
   // falta: importar hls.js para nada le cuesta memoria a un Fire TV Stick.
@@ -55,7 +60,8 @@ export function useFuente(ref: RefObject<HTMLVideoElement>, path: string, ticket
   // La pista solo viaja si se va por HLS: al archivo tal cual no le dice nada.
   const pista = forzar && m !== 'directo' ? `&audio=${audio}` : '';
   const consulta = ticket === null ? ''
-    : `path=${encodeURIComponent(path)}&token=${encodeURIComponent(ticket)}${pista}`;
+    : `path=${encodeURIComponent(path)}&token=${encodeURIComponent(ticket)}${pista}`
+      + (intento ? `&intento=${intento}` : '');
   const listo = ticket !== null && m !== null;
   const base = getApiBase();
 
@@ -69,6 +75,16 @@ export function useFuente(ref: RefObject<HTMLVideoElement>, path: string, ticket
       hls = new H(CONFIG);
       hls.on(H.Events.ERROR, (_e, d) => {
         if (!d.fatal || !hls) return;
+        // La lista inicial no ha llegado (el servidor tardaba en arrancar
+        // ffmpeg, o Telegram fallo una vez): `startLoad()` no la vuelve a
+        // pedir y la pantalla se quedaba en negro hasta salir y entrar. Se
+        // rehace desde fuera con otro intento (`useReintento`).
+        if (d.details === H.ErrorDetails.MANIFEST_LOAD_ERROR
+            || d.details === H.ErrorDetails.MANIFEST_LOAD_TIMEOUT
+            || d.details === H.ErrorDetails.MANIFEST_PARSING_ERROR) {
+          falloRef.current?.();
+          return;
+        }
         // Lo de red se reintenta (un trozo que tardo demasiado: el servidor
         // lo estaba fabricando); lo del decodificador se recupera una vez.
         if (d.type === H.ErrorTypes.NETWORK_ERROR) hls.startLoad();

@@ -5,6 +5,7 @@ import { pushMediaHandler, pushRawHandler } from '../focus/keys';
 import { audioLabel, fetchTracks, subtitleUrl, type MediaTracks } from '../services/tracks';
 import { apiFetch, streamTicket } from '../services/api';
 import { useFuente } from '../hooks/useFuente';
+import { useReintento } from '../hooks/useReintento';
 import { comoAbrirHls } from '../services/reproducir';
 import { plataforma, soloPuntero } from '../tv/platform';
 import { markWatched, resumePoint, setWatched } from '../tv/progress';
@@ -284,7 +285,12 @@ export default function Player(props: Props) {
   // capitulo nuevo con la pista del anterior, que puede no tener tantas).
   const [audioElegido, setAudioElegido] = useState<{ path: string; n: number } | null>(null);
   const audioForzado = audioElegido?.path === path ? audioElegido.n : null;
-  const fuente = useFuente(videoRef, path, ticket?.path === path ? ticket.t : null, audioForzado);
+  // Si no llega a arrancar (pasa sobre todo al pulsar «Siguiente episodio»
+  // viendo sin descargar), se vuelve a pedir solo: ver `useReintento`.
+  const reintento = useReintento(videoRef, path);
+  const reintentoRef = useRef(reintento);
+  reintentoRef.current = reintento;
+  const fuente = useFuente(videoRef, path, ticket?.path === path ? ticket.t : null, audioForzado, reintento);
   ultimas.current.modo = fuente.modo ?? '';
   // Un salto de idioma a medias no sobrevive a cambiar de episodio.
   useEffect(() => { cambioAudio.current = null; }, [path]);
@@ -512,6 +518,9 @@ export default function Player(props: Props) {
       // Sin fuente puesta todavia (espera a la entrada y a saber si va por
       // HLS) un error no dice nada del archivo.
       if (!v.error || !v.currentSrc) return;
+      // Se va a volver a pedir solo (`useReintento`): avisar de un error que
+      // se arregla en unos segundos asusta para nada.
+      if (reintentoRef.current.vaAReintentar()) return;
       // El codigo va en el aviso y al log del servidor: en la PS4 y en las
       // teles no hay consola donde mirarlo, y sin el no se sabe si fue la red
       // (2), el decodificador (3) o un formato que el aparato no admite (4).

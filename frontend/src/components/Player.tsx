@@ -6,6 +6,7 @@ import { IconAirplay, IconClose, IconExpand, IconMute, IconPause, IconPlay, Icon
 import { markWatched, resumePoint, setWatched } from '../utils/progress';
 import { useSiguiente } from '../hooks/useSiguiente';
 import { useFuente } from '../hooks/useFuente';
+import { useReintento } from '../hooks/useReintento';
 import NextUp from './NextUp';
 import FinTitulo from './FinTitulo';
 import { useNavigate } from 'react-router-dom';
@@ -125,7 +126,10 @@ export default function Player(props: Props) {
   const [ticket, setTicket] = useState<string | null>(null);
   // Viendo sin descargar, un audio AC-3/DTS (que Chrome no decodifica) o un
   // MKV en Safari se piden en la version que el servidor adapta al vuelo (HLS).
-  const fuente = useFuente(ref, path, ticket, audioPedido?.path === path ? audioPedido.n : null);
+  // Si no llega a arrancar (pasa sobre todo al pulsar «Siguiente episodio»
+  // viendo sin descargar), se vuelve a pedir solo: ver `useReintento`.
+  const reintento = useReintento(ref, path);
+  const fuente = useFuente(ref, path, ticket, audioPedido?.path === path ? audioPedido.n : null, reintento);
   const { src } = fuente;
 
   useEffect(() => {

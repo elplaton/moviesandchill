@@ -157,6 +157,8 @@ def _env_json(key: str, default):
 # tipo Coolify el .env lo regenera la plataforma en cada redespliegue, asi que
 # lo guardado en la base de datos es lo ultimo que dijo el usuario.
 SAVED_SETTING_KEYS = ("api_id", "api_hash", "phone")
+# Interruptores del panel que se guardan igual ("1"/"0").
+SAVED_BOOL_KEYS = ("creditos_analizar",)
 
 
 async def apply_saved_settings(cfg: dict) -> dict:
@@ -177,6 +179,9 @@ async def apply_saved_settings(cfg: dict) -> dict:
                 continue
         else:
             cfg[key] = value
+    for key in SAVED_BOOL_KEYS:
+        if key in saved:
+            cfg[key] = saved[key] == "1"
     if saved:
         logger.info("Ajustes cargados desde la BD: %s", ", ".join(sorted(saved)))
     return cfg

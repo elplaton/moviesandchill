@@ -25,6 +25,7 @@ class ConfigUpdateRequest(BaseModel):
     download_parallel: int | None = None
     convert_dts_to_ac3: bool | None = None
     tmdb_enabled: bool | None = None
+    creditos_analizar: bool | None = None
 
 
 SECRET_KEYS = ("jwt_secret", "database_url")
@@ -70,6 +71,14 @@ async def save_config(req: ConfigUpdateRequest, user: Annotated[str, Depends(get
 
     for k, v in data.items():
         config[k] = v
+
+    # Los que se guardan en `app_settings` sobreviven al reinicio y mandan
+    # sobre el .env (en Coolify el .env se regenera en cada despliegue).
+    from app.config import SAVED_BOOL_KEYS
+    guardar = {k: ("1" if v else "0") for k, v in data.items() if k in SAVED_BOOL_KEYS}
+    if guardar:
+        from app.database.connection import set_app_settings
+        await set_app_settings(guardar)
 
     logger.info("Configuracion actualizada via API por %s: %s", user, list(data.keys()))
     return {"status": "saved", "message": "Cambios aplicados en memoria. Para persistir, edita .env"}

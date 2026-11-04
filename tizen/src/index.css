@@ -173,6 +173,12 @@ body.has-pointer { cursor: default; }
 .tv-chip.is-focused { background: #fff; color: #000; transform: scale(1.06); }
 .tv-chip.is-focused::after { display: none; }
 
+/* "Ya lo he visto": verde en reposo para que se lea desde el sofa, y verde
+   oscuro al enfocar, porque sobre el blanco del foco el verde claro no se ve
+   y perder el estado justo al ir a cambiarlo confunde. */
+.tv-visto { color: #46D369; }
+.is-focused .tv-visto { color: #1B7F3B; }
+
 /* Elemento del rail */
 .tv-rail-item { color: #808080; transition: transform 140ms ease-out; }
 .tv-rail-item.is-active { color: #fff; }

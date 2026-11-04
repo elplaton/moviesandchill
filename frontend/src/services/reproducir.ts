@@ -35,15 +35,32 @@ export type Modo = 'directo' | 'hls' | 'hlsjs';
 
 export async function modoDeReproduccion(path: string): Promise<Modo> {
   if (!path.startsWith('tg:')) return 'directo';
+  const p = await pistasDe(path);
+  if (!p || !p.hls || abreTalCual(p)) return 'directo';
   try {
-    const res = await apiFetch(`/media/tracks?path=${encodeURIComponent(path)}`);
-    if (!res.ok) return 'directo';
-    const p: Pistas = await res.json();
-    if (!p.hls || abreTalCual(p)) return 'directo';
     return await comoAbrirHls();
   } catch {
     return 'directo';
   }
+}
+
+/**
+ * Las pistas de una ruta, con tres intentos. La primera vez que se abre algo
+ * sin descargar el servidor lo mira en Telegram y pasa ffprobe, y eso puede
+ * fallar una vez (Telegram lento, una referencia caducada); sin reintentar se
+ * abria el archivo tal cual, que con audio AC-3 en Chrome es verlo mudo, o en
+ * Safari con un MKV no verlo. Un 4xx es una respuesta de verdad: no se insiste.
+ */
+async function pistasDe(path: string): Promise<Pistas | null> {
+  for (let i = 0; i < 3; i++) {
+    try {
+      const res = await apiFetch(`/media/tracks?path=${encodeURIComponent(path)}`);
+      if (res.ok) return (await res.json()) as Pistas;
+      if (res.status < 500) return null;
+    } catch { /* red: se reintenta */ }
+    await new Promise((r) => setTimeout(r, 1500 * (i + 1)));
+  }
+  return null;
 }
 
 /**

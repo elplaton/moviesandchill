@@ -10,6 +10,7 @@ import SiguienteEp from './SiguienteEp';
 import FinTitulo from './FinTitulo';
 import { useNavigate } from 'react-router-dom';
 import { useFuente } from '../hooks/useFuente';
+import { useReintento } from '../hooks/useReintento';
 import { comoAbrirHls } from '../services/reproducir';
 
 interface Props {
@@ -198,7 +199,12 @@ export default function Player(props: Props) {
   // Viendo sin descargar, lo que el aparato no abre tal cual (un MKV en el
   // iPhone, el audio AC-3/DTS en cualquier navegador) se pide en la version
   // que el servidor adapta al vuelo (HLS). Lo decide `useFuente`.
-  const src = useFuente(ref, path, ticket, audio);
+  // Si no llega a arrancar (pasa sobre todo al pulsar «Siguiente episodio»
+  // viendo sin descargar), se vuelve a pedir solo: ver `useReintento`.
+  const reintento = useReintento(ref, path);
+  const reintentoRef = useRef(reintento);
+  reintentoRef.current = reintento;
+  const src = useFuente(ref, path, ticket, audio, reintento);
 
   // El selector de subtítulos lo pone el reproductor del sistema; aquí solo
   // hay que colgarle las pistas que haya.
@@ -321,7 +327,11 @@ export default function Player(props: Props) {
      * abre, lo dice el reproductor del sistema con su propio icono, que es la
      * unica señal que no puede equivocarse.
      */
-    const onError = () => { if (v.getAttribute('src')) setPreparando(false); };
+    // Si se va a volver a pedir solo, la espera se queda: es lo que se esta
+    // haciendo.
+    const onError = () => {
+      if (v.getAttribute('src') && !reintentoRef.current.vaAReintentar()) setPreparando(false);
+    };
     // Red de seguridad: si el vídeo no arranca (archivo a medio convertir, un
     // codec que el telefono no abre) mas vale ver el reproductor y sus
     // controles que quedarse en una espera eterna.
