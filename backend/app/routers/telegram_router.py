@@ -535,16 +535,11 @@ async def temas_de_canal(user: Annotated[str, Depends(get_current_admin)], chann
         raise HTTPException(status_code=e.codigo, detail=str(e))
 
 
-@router.post("/muestra-comprimidos")
-async def empezar_muestra_comprimidos(user: Annotated[str, Depends(get_current_admin)], n: int = 300):
-    """Lee la cabecera de una muestra de lo que solo esta comprimido para saber
-    cuanto va almacenado (se podria ver sin descargar), comprimido o con
-    contraseña. **Solo lee**: unos KB por archivo. Ver `services/muestra_comprimidos.py`."""
-    from app.services import muestra_comprimidos
-    return muestra_comprimidos.empezar(max(1, min(n, 2000)))
 
-
-@router.get("/muestra-comprimidos")
-async def ver_muestra_comprimidos(user: Annotated[str, Depends(get_current_admin)]):
-    from app.services import muestra_comprimidos
-    return muestra_comprimidos.estado()
+@router.get("/interior")
+async def interior_de_comprimidos(user: Annotated[str, Depends(get_current_admin)]):
+    """Como va la revision de los comprimidos (services/interior.py): cuantos
+    se han mirado, de que clase, y de los titulos que solo se podian
+    descargar cuantos tienen ahora «Ver». **Solo lee**."""
+    from app.services import interior
+    return await interior.resumen()

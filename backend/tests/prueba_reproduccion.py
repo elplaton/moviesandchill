@@ -1,19 +1,17 @@
 """Comprueba `services/reproduccion.py`: ver sin descargar.
 
 Lo que se vigila es que los bytes que llegan al `<video>` sean exactamente los
-del video, cuando el archivo esta partido en varios mensajes (un tramo que
-cruza de una parte a la siguiente) o metido en un zip sin comprimir (hay que
-saltarse la cabecera y lo que vaya delante), y que lo comprimido de verdad se
-mande a descargar en vez de servir basura.
+del video cuando el archivo esta partido en varios mensajes (un tramo que
+cruza de una parte a la siguiente) o cuando cada mensaje aporta solo un
+tramo suyo (los datos de cada volumen de un rar, detras de su cabecera). Lo
+de mirar dentro de los comprimidos esta en `prueba_interior.py`.
 
     PYTHONPATH=backend <venv con telethon>/bin/python backend/tests/prueba_reproduccion.py
 """
 import asyncio
-import io
 import os
 import random
 import sys
-import zipfile
 
 from app.routers import download
 from app.services import reproduccion as rp
@@ -127,41 +125,24 @@ async def main():
               video[-100:], await leer(v, len(video) - 100, len(video) - 1))
     comprueba("se cierran todas las lecturas", True, all(i.cerrado for i in abiertos))
 
-    print("Zip sin comprimir, en partes")
-    mkv = os.urandom(rp.TROZO * 3 + 777)
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w") as z:
-        z.writestr("leeme.nfo", b"subido por alguien " * 50, compress_type=zipfile.ZIP_DEFLATED)
-        z.writestr("Peli (2024)/Peli (2024).mkv", mkv, compress_type=zipfile.ZIP_STORED)
-    zipdatos = buf.getvalue()
-    borrador = virtual_de(partir(zipdatos, 3), ext="zip")
-    nombre, inicio, tamano = await rp._video_en_zip(borrador)
-    comprueba("encuentra el video detras del .nfo", "Peli (2024)/Peli (2024).mkv", nombre)
-    comprueba("y mide lo que mide", len(mkv), tamano)
-    v = virtual_de(partir(zipdatos, 3), inicio=inicio, tamano=tamano)
-    comprueba("los bytes son los del video", mkv, await leer(v, 0, tamano - 1))
-    comprueba("un tramo del medio", mkv[1000:rp.TROZO * 2], await leer(v, 1000, rp.TROZO * 2 - 1))
-
-    print("Zip que comprime el video")
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w") as z:
-        z.writestr("Peli.mkv", b"a" * 50000, compress_type=zipfile.ZIP_DEFLATED)
-    try:
-        await rp._video_en_zip(virtual_de([buf.getvalue()], ext="zip"))
-        comprueba("se manda a descargar", True, False)
-    except rp.NoReproducible as e:
-        comprueba("se manda a descargar", True, "comprime" in str(e))
-
-    print("Zip sin video")
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w") as z:
-        z.writestr("fotos.jpg", b"x" * 100)
-    try:
-        await rp._video_en_zip(virtual_de([buf.getvalue()], ext="zip"))
-        comprueba("se dice que no hay video", True, False)
-    except rp.NoReproducible as e:
-        comprueba("se dice que no hay video", True, "ningun video" in str(e))
-
+    print("Un tramo de cada mensaje (los datos de cada volumen de un rar)")
+    random.seed(11)
+    cabeceras = [os.urandom(random.randrange(20, 3000)) for _ in range(3)]
+    colas = [os.urandom(random.randrange(0, 500)) for _ in range(3)]
+    trozos = partir(os.urandom(rp.TROZO * 4 + 999), 3)
+    tramos, desde = [], 0
+    for cab, t, cola in zip(cabeceras, trozos, colas):
+        tramos.append(rp.Tramo(1, 200 + len(tramos), Doc(cab + t + cola), len(t), desde, len(cab)))
+        desde += len(t)
+    v = rp.Virtual("x.mkv", tramos, 0, desde, "mkv")
+    video = b"".join(trozos)
+    comprueba("el video entero, sin cabeceras ni colas", video, await leer(v, 0, len(video) - 1))
+    bien = True
+    for _ in range(40):
+        a = random.randrange(len(video))
+        b = random.randrange(a, len(video))
+        bien = bien and (await leer(v, a, b)) == video[a:b + 1]
+    comprueba("40 tramos al azar", True, bien)
 
 asyncio.run(main())
 print()

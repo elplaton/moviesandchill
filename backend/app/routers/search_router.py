@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 from app.auth.dependencies import get_current_user
-from app.services import reproduccion
+from app.services import interior, reproduccion
 from app.services.layout import video_en
 from app.services.title_parser import parse_filename
 
@@ -61,7 +61,8 @@ def _de_la_ficha(r: dict) -> dict:
             "tmdb_overview": sinopsis or None, "de_ficha": True}
 
 
-def _row_to_result(r: dict, existing: set, done: dict | None = None, me: dict | None = None) -> dict:
+def _row_to_result(r: dict, existing: set, done: dict | None = None, me: dict | None = None,
+                   ver: set | None = None) -> dict:
     # Lo descargado se sabe por la tabla de descargas (ruta final, dueño), no
     # adivinando por el nombre del archivo.
     d = (done or {}).get((r["channel_id"], r["message_id"]))
@@ -88,9 +89,11 @@ def _row_to_result(r: dict, existing: set, done: dict | None = None, me: dict | 
         "tmdb_poster": r.get("tmdb_poster"),
         "tmdb_backdrop": r.get("tmdb_backdrop"), "tmdb_overview": r.get("tmdb_overview"),
         "tmdb_genres": r.get("tmdb_genres") or [],
-        # "Ver" en vez de "Descargar", por la extension: un video suelto o
-        # partes sin comprimir (.mkv.001...). Zip, rar y 7z se descargan.
-        "streamable": reproduccion.se_puede_intentar(r.get("file_name")),
+        # "Ver" en vez de "Descargar": un video suelto o partes sin comprimir
+        # (.mkv.001...), por la extension; un rar, 7z o zip, si ya se ha
+        # mirado por dentro y guarda el video tal cual (services/interior.py).
+        "streamable": reproduccion.se_puede_intentar(r.get("file_name"))
+                      or (r["channel_id"], r["message_id"]) in (ver or ()),
         # Sin ficha de TMDB, lo que dice la ficha del canal (titulo, año,
         # caratula, sinopsis). `de_ficha` lo marca.
         **_de_la_ficha(r),
@@ -163,8 +166,9 @@ async def _buscar(req: SearchRequest, user: str):
     from app.database.users import get_user_by_username
     if get_pool():
         rows = await search_media(req.query.strip(), max(req.page_size, 100) + 1, req.offset)
-        done, me = await asyncio.gather(downloads_by_message(), get_user_by_username(user))
-        results = [_row_to_result(r, existing, done, me) for r in rows]
+        done, me, ver = await asyncio.gather(downloads_by_message(), get_user_by_username(user),
+                                             interior.ver_de(rows))
+        results = [_row_to_result(r, existing, done, me, ver) for r in rows]
 
     if len(results) < req.page_size:
         telegram_results = await downloader.search_messages(
@@ -234,7 +238,8 @@ async def _ficha(tmdb_id: int, user: str, media_type: str | None):
     existing = await _descargados(config.get("extract_path", "."))
     rows, tmdb, done, me = await asyncio.gather(get_media_by_tmdb(tmdb_id, media_type), get_tmdb_cached(tmdb_id, media_type),
                                                downloads_by_message(), get_user_by_username(user))
-    results = [_row_to_result(r, existing, done, me) for r in rows]
+    ver = await interior.ver_de(rows)
+    results = [_row_to_result(r, existing, done, me, ver) for r in rows]
     meta = None
     if tmdb:
         meta = {

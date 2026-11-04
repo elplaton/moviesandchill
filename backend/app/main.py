@@ -209,6 +209,11 @@ async def startup():
     from app.services.relectura import relectura_de_fondo
     _spawn(relectura_de_fondo(downloader, api_key_tmdb), "relectura_contexto")
 
+    # Que hay dentro de cada comprimido: lo que guarda el video tal cual se
+    # puede ver sin descargar. Despacio y en segundo plano; luego, lo nuevo.
+    from app.services.interior import vigilante as vigilante_interior
+    _spawn(vigilante_interior(), "interior_comprimidos")
+
     # Lo pedido que ya ha llegado: se marca y se avisa a quien lo esperaba.
     from app.services.peticiones import vigilante as vigilante_peticiones
     _spawn(vigilante_peticiones(), "vigilante_peticiones")

@@ -185,7 +185,7 @@ async def que_viene(path: str, user_id: int, tmdb_id: int | None = None) -> dict
     `descargables` los que se pueden bajar. La decision de que tarjeta se
     dibuja la toma el cliente con esos cuatro datos.
     """
-    from app.services import reproduccion
+    from app.services import interior, reproduccion
     if reproduccion.es_ruta(path):
         return await _que_viene_streaming(path, user_id)
 
@@ -297,8 +297,13 @@ async def _que_viene_streaming(path: str, user_id: int) -> dict:
     temporada, episodio = actual["season"] or 0, actual["episode"]
     vistos = await episodios_vistos(user_id, tid)
     por_episodio: dict[tuple[int, int], list[dict]] = {}
-    for e in await enlaces_de_titulo(tid, "tv"):
-        if e.get("episode") is None or reproduccion.clasificar(e.get("file_name")) not in ("video", "partes"):
+    enlaces = await enlaces_de_titulo(tid, "tv")
+    # Un rar que guarda el episodio tal cual tambien se puede ver ya.
+    ver = await interior.ver_de(enlaces)
+    for e in enlaces:
+        if e.get("episode") is None:
+            continue
+        if not reproduccion.se_puede_intentar(e.get("file_name")) and (e["channel_id"], e["message_id"]) not in ver:
             continue
         clave = (e.get("season") or 0, e["episode"])
         if clave <= (temporada, episodio) or clave in vistos:

@@ -207,6 +207,25 @@ async def _ensure_tables():
                 PRIMARY KEY (channel_id, message_id)
             )
         """)
+        # Que hay dentro de cada rar, 7z o zip, mirado una vez en su cabecera
+        # (services/interior.py): si guarda el video tal cual (`clase` 'ver')
+        # y en que tramos de que volumenes esta. La clave es el primer
+        # volumen; `volumenes` los lleva todos, para encontrarlo desde
+        # cualquiera (la ficha pinta «Ver» en cada parte).
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS interior (
+                channel_id    BIGINT NOT NULL,
+                message_id    INTEGER NOT NULL,
+                volumenes     INTEGER[] NOT NULL,
+                version       INTEGER NOT NULL,
+                clase         VARCHAR(20) NOT NULL,
+                datos         JSONB,
+                comprobado_en TIMESTAMP DEFAULT NOW(),
+                PRIMARY KEY (channel_id, message_id)
+            )
+        """)
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS interior_volumenes ON interior USING GIN (volumenes)")
         # En que plataformas de pago esta cada titulo en España y cuando
         # salio lo ultimo (el ultimo episodio, en una serie). Lo rellena
         # services/plataformas.py. Una lista vacia es "no esta en ninguna",

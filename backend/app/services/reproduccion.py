@@ -13,10 +13,11 @@ comprobacion que lee unos KB del archivo (`comprobar`), guardada en la tabla
 - un video suelto (`.mp4`, `.mkv`...) se sirve tal cual;
 - unas partes sin comprimir (`Peli.mkv.001`, `.002`...) se sirven como si
   fueran un solo archivo, pidiendo a cada parte su tramo;
-- un zip (`Peli.zip`, `Peli.zip.001`...) solo si guarda el video **sin
-  comprimir**, que es lo normal con video (no gana nada comprimiendolo): el
-  video esta entero en algun punto de las partes y la cabecera dice donde;
-- lo comprimido de verdad (rar, 7z, zip con deflate) hay que descargarlo.
+- un rar, 7z o zip solo si guarda el video **sin comprimir** (modo
+  «almacenar»): el video esta tal cual en tramos de sus volumenes, y cuales
+  son lo dice la cabecera. Eso lo mira y lo guarda `services/interior.py`,
+  que es tambien quien decide si la ficha ofrece «Ver»;
+- lo comprimido de verdad hay que descargarlo.
 
 Que el aparato entienda el video (MP4 en el iPhone, AAC y no AC-3...) se mira
 con ffprobe sobre el propio stream y se le dice al cliente, que decide.
@@ -121,8 +122,10 @@ class Tramo:
     channel_id: int
     message_id: int
     documento: object
-    tamano: int
+    tamano: int         # cuanto aporta este mensaje (todo, o un tramo suyo)
     desde: int          # donde empieza dentro de las partes concatenadas
+    base: int = 0       # donde empieza dentro del mensaje (un volumen de rar
+                        # lleva su cabecera delante de los datos)
 
 
 @dataclass
@@ -243,8 +246,10 @@ async def _armar(channel_id: int, message_id: int) -> Virtual:
             raise NoReproducible("el mensaje ya no tiene archivo")
         nombre = next((a.file_name for a in d.attributes if getattr(a, "file_name", None)), "")
     tipo = clasificar(nombre)
-    if tipo in (None, "comprimido"):
-        raise NoReproducible("esta comprimido: hay que descargarlo" if tipo else "no es un video")
+    if tipo is None:
+        raise NoReproducible("no es un video")
+    if tipo in ("zip", "comprimido"):
+        return await _armar_comprimido(dl, channel_id, message_id, nombre)
 
     partes = await _partes(channel_id, message_id, nombre)
     docs = await _documentos(dl, channel_id, [m for _p, m, _n in partes])
@@ -256,59 +261,26 @@ async def _armar(channel_id: int, message_id: int) -> Virtual:
         tramos.append(Tramo(channel_id, mid, d, d.size, desde))
         desde += d.size
 
-    if tipo == "zip":
-        borrador = Virtual(nombre, tramos, 0, desde, "zip")
-        interno, inicio, tamano = await _video_en_zip(borrador)
-        ext = interno.rsplit(".", 1)[-1].lower()
-        return Virtual(interno.rsplit("/", 1)[-1], tramos, inicio, tamano, ext)
-
     base = _detect_multipart(nombre)[0] or nombre
     return Virtual(base, tramos, 0, desde, base.rsplit(".", 1)[-1].lower())
 
 
-# --- Dentro de un zip --------------------------------------------------------
+# --- Dentro de un comprimido ---------------------------------------------------
 
-_CABECERA_LOCAL = 0x04034B50
-
-
-async def _leer_todo(v: Virtual, desde: int, cuanto: int) -> bytes:
-    trozos = []
-    async for t in leer(v, desde, desde + cuanto - 1):
-        trozos.append(t)
-    return b"".join(trozos)
-
-
-async def _video_en_zip(v: Virtual) -> tuple[str, int, int]:
-    """Nombre, posicion y tamaño del video dentro del zip, si esta guardado
-    sin comprimir. Se recorren las cabeceras locales desde el principio: un
-    zip de pelicula suele traer el video y como mucho un .nfo o un .txt."""
-    pos = 0
-    for _ in range(20):
-        if pos + 30 > v.tamano:
-            break
-        cab = await _leer_todo(v, pos, min(30 + 1024, v.tamano - pos))
-        if len(cab) < 30 or struct.unpack_from("<I", cab, 0)[0] != _CABECERA_LOCAL:
-            break
-        banderas, metodo = struct.unpack_from("<HH", cab, 6)
-        comprimido, original = struct.unpack_from("<II", cab, 18)
-        largo_nombre, largo_extra = struct.unpack_from("<HH", cab, 26)
-        if len(cab) < 30 + largo_nombre + largo_extra:
-            cab = await _leer_todo(v, pos, 30 + largo_nombre + largo_extra)
-        nombre = cab[30:30 + largo_nombre].decode("utf-8", "replace")
-        extra = cab[30 + largo_nombre:30 + largo_nombre + largo_extra]
-        if comprimido == 0xFFFFFFFF or original == 0xFFFFFFFF:
-            original, comprimido = _zip64(extra, original, comprimido)
-        datos = pos + 30 + largo_nombre + largo_extra
-        if banderas & 0x08 and comprimido == 0:
-            raise NoReproducible("el zip no dice el tamaño de lo que guarda: hay que descargarlo")
-        if nombre.lower().endswith(EXT_VIDEO):
-            if banderas & 0x01:
-                raise NoReproducible("el zip esta cifrado: hay que descargarlo")
-            if metodo != 0:
-                raise NoReproducible("el zip comprime el video: hay que descargarlo")
-            return nombre, datos, original
-        pos = datos + comprimido
-    raise NoReproducible("no se ha encontrado ningun video dentro del zip")
+async def _armar_comprimido(dl, channel_id: int, message_id: int, nombre: str) -> Virtual:
+    """El video de un rar, 7z o zip que lo guarda tal cual: los tramos de
+    cada volumen que dice `interior` (lo mira ahora si aun no se miro)."""
+    from app.services import interior
+    video, tramos_ = await interior.tramos_de(channel_id, message_id, nombre)
+    docs = await _documentos(dl, channel_id, sorted({t[0] for t in tramos_}))
+    tramos, desde = [], 0
+    for mid, base, cuanto in tramos_:
+        d = docs.get(mid)
+        if d is None:
+            raise NoReproducible("una de las partes ya no esta en el canal")
+        tramos.append(Tramo(channel_id, mid, d, cuanto, desde, base))
+        desde += cuanto
+    return Virtual(video, tramos, 0, desde, video.rsplit(".", 1)[-1].lower())
 
 
 def _zip64(extra: bytes, original: int, comprimido: int) -> tuple[int, int]:
@@ -347,14 +319,15 @@ async def leer(v: Virtual, desde: int, hasta: int, bloque: int = TROZO):
         if tramo is None:
             return
         local = crudo - tramo.desde
-        alineado = local - local % bloque
-        saltar = local - alineado
+        en_mensaje = tramo.base + local
+        alineado = en_mensaje - en_mensaje % bloque
+        saltar = en_mensaje - alineado
         cuanto = min(hasta - pos + 1, tramo.tamano - local)
         # El iterador se cierra siempre: salir del bucle a medias (el tramo
         # pedido acaba antes que el archivo, o el `<video>` corta la conexion)
         # sin cerrarlo deja prestada la conexion con el DC del archivo.
         it = dl.client.iter_download(tramo.documento, offset=alineado,
-                                     request_size=bloque, file_size=tramo.tamano)
+                                     request_size=bloque, file_size=tramo.documento.size)
         try:
             async for trozo in it:
                 if saltar:
