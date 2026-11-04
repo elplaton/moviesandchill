@@ -60,6 +60,14 @@ comprueba("la ficha enlaza a este titulo en TMDB", True,
 comprueba("la ficha enlaza a otro titulo: no, aunque el nombre cuadre", False,
           si("Dune Parte Dos (2024).mkv", DUNE2, {"titulo": "Dune", "tmdb_id": 438631, "tmdb_tipo": "movie"}))
 comprueba("el nombre lleva su id de TMDB", True, si("Dune Parte Dos [tmdbid-693134].mkv", DUNE2))
+# Casos reales de la prueba contra Telegram (noviembre de 2026).
+comprueba("el 7z de la pelicula, año delante", True, si("[2016] Aliados [DuaL].7z.001", ALIADOS))
+comprueba("los extras no son la pelicula aunque cuelguen de su ficha", False,
+          si("Extra - Aliados.7z.001", ALIADOS, {"titulo": "Aliados", "año": 2016}))
+comprueba("otra pelicula con la palabra", False,
+          si("Nuestros Maravillosos Aliados (1987).mkv", ALIADOS, {"titulo": "Nuestros maravillosos aliados", "año": 1987}))
+comprueba("la secuela con la ficha de la primera encima", False,
+          si("Aliados 2 (2016).mkv", ALIADOS, {"titulo": "Aliados", "año": 2016}))
 
 print("Series")
 comprueba("un capitulo de la serie", True, si("Breaking Bad 1x01.mkv", BB))

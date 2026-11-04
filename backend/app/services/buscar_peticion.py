@@ -59,6 +59,12 @@ def mismo_titulo(a: str | None, b: str | None) -> bool:
     return bool(pa) and (pa == pb or "".join(pa) == "".join(pb))
 
 
+# Lo que acompaña a una pelicula y no es la pelicula. Va antes que la ficha:
+# en el canal el extra suele colgar de la misma ficha que la pelicula.
+_EXTRA = re.compile(r"\b(extras?|bonus|featurettes?|making[ ._-]?of|tr[aá]iler|teaser|sample|muestra)\b",
+                    re.IGNORECASE)
+
+
 def veredicto(nombre: str, pistas: dict | None, peticion: dict) -> tuple[bool, str]:
     """Si el archivo `nombre`, con las `pistas` de su ficha en el canal (el
     dict que guarda el indexador: titulo, año, original, tmdb_id, tmdb_tipo),
@@ -69,6 +75,9 @@ def veredicto(nombre: str, pistas: dict | None, peticion: dict) -> tuple[bool, s
     p = parse_filename(nombre)
     tipo = peticion["media_type"]
     pistas = pistas or {}
+
+    if _EXTRA.search(nombre):
+        return False, "es un extra, no el título"
 
     if tipo == "movie" and p.episode is not None:
         return False, "es un capítulo y se pidió una película"
@@ -87,6 +96,15 @@ def veredicto(nombre: str, pistas: dict | None, peticion: dict) -> tuple[bool, s
         return False, "el nombre lleva el id de otro título de TMDB"
 
     pedidos = [peticion.get("titulo"), peticion.get("titulo_original")]
+    # Si el nombre del archivo dice un titulo con palabras del pedido pero no
+    # es el mismo ("Aliados 2", "Dune" por "Dune: Parte dos"), manda el
+    # nombre aunque la ficha de encima diga otra cosa: en un canal varios
+    # archivos cuelgan de la misma ficha. Si el nombre no dice nada del
+    # pedido ("60b016c396c7.mp4"), se decide por la ficha.
+    del_nombre = set(_palabras(p.title))
+    if (del_nombre & {w for q in pedidos if q for w in _palabras(q)}
+            and not any(mismo_titulo(p.title, q) for q in pedidos if q)):
+        return False, f"el nombre dice otro título («{p.title}»)"
     suyos = [p.title, pistas.get("titulo"), pistas.get("original")]
     if not any(mismo_titulo(s, q) for s in suyos if s for q in pedidos if q):
         return False, "es otro título"
