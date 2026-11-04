@@ -17,7 +17,7 @@ const input = 'w-full h-11 rounded-xl bg-white/10 border border-white/10 px-4 te
 const TABS = [
   ['usuarios', 'Usuarios'], ['descargas', 'Descargas'], ['canales', 'Canales'], ['revision', 'Revisión'],
   ['novedades', 'Novedades'], ['peticiones', 'Peticiones'], ['telegram', 'Telegram'],
-  ['servidor', 'Ajustes'],
+  ['creditos', 'Créditos'], ['servidor', 'Ajustes'],
   ['registros', 'Registros'],
 ] as const;
 
@@ -768,9 +768,7 @@ function Server() {
         <Toggle k="tmdb_enabled" label="Metadatos de TMDB" help="Carátulas, sinopsis y clasificación" />
         <Toggle k="convert_dts_to_ac3" label="Convertir a MP4 al descargar" help="Necesario para iPhone y para las teles" />
         <Toggle k="delete_archives_after_extract" label="Borrar comprimidos tras extraer" />
-        <Toggle k="creditos_analizar" label="Averiguar los créditos al ver" help="Si no se sabe dónde empiezan, se miran en Telegram mientras se ve" />
       </section>
-      <PasadaCreditos />
       <Cache />
       <Pantalla />
       <p className="text-[12px] text-nf-text3">Las rutas y el resto de ajustes se editan desde la web de escritorio o en el archivo .env del servidor.</p>
@@ -823,6 +821,50 @@ function Cache() {
         )}
       </div>
     </section>
+  );
+}
+
+/** Pestaña Créditos: averiguarlos al ver, la pasada completa y cuánto se sabe. */
+function Creditos() {
+  const [on, setOn] = useState<boolean | null>(null);
+  const [r, setR] = useState<any>(null);
+  useEffect(() => {
+    apiFetch('/config').then(x => x.json()).then(d => setOn(!!d.config?.creditos_analizar)).catch(() => {});
+    apiFetch('/admin/creditos/resumen').then(x => x.json()).then(setR).catch(() => {});
+  }, []);
+  const cambiar = async () => {
+    const nuevo = !on;
+    setOn(nuevo);
+    const res = await apiFetch('/config', { method: 'POST', body: JSON.stringify({ creditos_analizar: nuevo }) }).catch(() => null);
+    if (!res || !res.ok) { setOn(!nuevo); toast('No se ha podido guardar', 'error'); return; }
+    toast('Guardado', 'ok');
+  };
+  const cuenta = (tipo: string) => (r?.titulos || []).filter((t: any) => t.tmdb_type === tipo).reduce((a: number, t: any) => a + t.n, 0);
+  const medidos = (r?.enlaces || []).reduce((a: number, e: any) => a + e.n, 0);
+  return (
+    <div>
+      <section className="rounded-2xl bg-white/5 px-4 py-1 mb-4">
+        <button onClick={cambiar} disabled={on === null} className="w-full flex items-center justify-between py-3 text-left">
+          <div>
+            <p className="text-[15px]">Averiguar los créditos al ver</p>
+            <p className="text-[12px] text-nf-text3">Si no se sabe dónde empiezan, se miden en Telegram mientras se ve</p>
+          </div>
+          <span className={`w-12 h-7 rounded-full relative shrink-0 ${on ? 'bg-nf-red' : 'bg-white/15'}`}><span className={`absolute top-0.5 w-6 h-6 rounded-full bg-white transition-transform ${on ? 'translate-x-[22px]' : 'translate-x-0.5'}`} /></span>
+        </button>
+      </section>
+      <PasadaCreditos />
+      <section className="rounded-2xl bg-white/5 p-4 mb-4">
+        <p className="text-[13px] font-semibold text-nf-text2 mb-2">Lo que ya se sabe</p>
+        <div className="grid grid-cols-3 gap-2">
+          {[['Películas', cuenta('movie')], ['Series', cuenta('tv')], ['Enlaces', medidos]].map(([k, v]) => (
+            <div key={k as string}>
+              <p className="text-[11px] uppercase tracking-wide text-nf-text3">{k}</p>
+              <p className="text-[17px] font-semibold tabular-nums">{r ? (v as number).toLocaleString('es-ES') : '—'}</p>
+            </div>
+          ))}
+        </div>
+      </section>
+    </div>
   );
 }
 
@@ -1579,6 +1621,7 @@ export default function Admin() {
       {tab === 'novedades' && <Novedades />}
       {tab === 'peticiones' && <Peticiones />}
       {tab === 'telegram' && <Telegram />}
+      {tab === 'creditos' && <Creditos />}
       {tab === 'servidor' && <Server />}
       {tab === 'registros' && <Registros />}
     </div>

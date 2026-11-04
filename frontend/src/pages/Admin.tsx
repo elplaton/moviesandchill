@@ -8,6 +8,7 @@ import AdminTelegram from './admin/AdminTelegram';
 import AdminNovedades from './admin/AdminNovedades';
 import AdminPeticiones from './admin/AdminPeticiones';
 import AdminRevision from './admin/AdminRevision';
+import AdminCreditos from './admin/AdminCreditos';
 import Channels from './Channels';
 import Settings from './Settings';
 import Logs from './Logs';
@@ -20,6 +21,7 @@ const TABS = [
   { id: 'novedades', label: 'Novedades' },
   { id: 'peticiones', label: 'Peticiones' },
   { id: 'telegram', label: 'Telegram' },
+  { id: 'creditos', label: 'Créditos' },
   { id: 'ajustes', label: 'Ajustes' },
   { id: 'registros', label: 'Registros' },
 ];
@@ -65,6 +67,7 @@ export default function Admin() {
         {tab === 'novedades' && <AdminNovedades />}
         {tab === 'peticiones' && <AdminPeticiones onToast={show} />}
         {tab === 'telegram' && <AdminTelegram onToast={show} />}
+        {tab === 'creditos' && <AdminCreditos onToast={show} />}
         {tab === 'ajustes' && <Settings embedded />}
         {tab === 'registros' && <Logs embedded />}
       </div>
