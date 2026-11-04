@@ -79,6 +79,10 @@ def load_config(force_reload: bool = False) -> dict:
         # decida no se analiza nada. Los capitulos de creditos que traiga el
         # archivo se siguen leyendo igual: van en la misma lectura de pistas.
         "creditos_analizar": _env_bool("TMD_CREDITOS_ANALIZAR", False),
+        # Que el servidor mire por su cuenta la cabecera de los comprimidos
+        # (services/interior.py). Apagado: la revision la hace quien la lance
+        # (desde el Mac, en noviembre de 2026) y se carga en la tabla.
+        "interior_vigilante": _env_bool("TMD_INTERIOR_VIGILANTE", False),
         # Correo de contacto que va dentro de la firma de los avisos: lo exige
         # el estandar de Web Push para que el servicio de push sepa a quien
         # escribir si algo va mal. No se muestra en ningun sitio.

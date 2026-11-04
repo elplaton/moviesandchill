@@ -211,8 +211,11 @@ async def startup():
 
     # Que hay dentro de cada comprimido: lo que guarda el video tal cual se
     # puede ver sin descargar. Despacio y en segundo plano; luego, lo nuevo.
-    from app.services.interior import vigilante as vigilante_interior
-    _spawn(vigilante_interior(), "interior_comprimidos")
+    # Solo con TMD_INTERIOR_VIGILANTE: sin el, la tabla la llena quien
+    # revise desde fuera, y el servidor solo sirve lo que ya se sabe.
+    if config.get("interior_vigilante"):
+        from app.services.interior import vigilante as vigilante_interior
+        _spawn(vigilante_interior(), "interior_comprimidos")
 
     # Lo pedido que ya ha llegado: se marca y se avisa a quien lo esperaba.
     from app.services.peticiones import vigilante as vigilante_peticiones
