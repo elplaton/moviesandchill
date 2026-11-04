@@ -1,4 +1,7 @@
-import { IconInfo, IconPlay, IconStar } from './ui/Icon';
+import { useEffect, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
+import { IconInfo, IconMute, IconPlay, IconStar, IconVolume } from './ui/Icon';
+import Trailer from './Trailer';
 import Button from './ui/Button';
 import type { BrowseItem } from '../types';
 
@@ -7,6 +10,8 @@ interface Props {
   onOpen: () => void;
   /** Si hay algo de este título en disco, se ofrece verlo directamente. */
   onPlay?: () => void;
+  /** Falso mientras el reproductor está abierto encima de la portada. */
+  activo?: boolean;
 }
 
 /**
@@ -16,7 +21,23 @@ interface Props {
  * entrar. Antes esa franja la ocupaban un «Bienvenido, admin» y un buscador,
  * que no dicen nada del catálogo; el buscador ha pasado a la barra superior.
  */
-export default function Hero({ item, onOpen, onPlay }: Props) {
+export default function Hero({ item, onOpen, onPlay, activo = true }: Props) {
+  // El trailer del destacado, como en la ficha: invisible hasta que se ve,
+  // en silencio con boton. Se para con una ficha abierta (si no, sonarian
+  // dos), con el reproductor y al bajar hasta que el destacado ya no se ve.
+  const [params] = useSearchParams();
+  const caja = useRef<HTMLElement>(null);
+  const [aLaVista, setALaVista] = useState(true);
+  const [sonido, setSonido] = useState(false);
+  const [trailerVisible, setTrailerVisible] = useState(false);
+  useEffect(() => {
+    const c = caja.current;
+    if (!c || typeof IntersectionObserver === 'undefined') return;
+    const o = new IntersectionObserver(([e]) => setALaVista(e.intersectionRatio > 0.4), { threshold: [0, 0.4, 1] });
+    o.observe(c);
+    return () => o.disconnect();
+  }, []);
+  const trailerActivo = activo && aLaVista && !params.has('ficha');
   const bg = (item.backdrop || item.poster || '').replace('/w780/', '/w1280/');
   const meta = [
     item.year ? String(item.year) : '',
@@ -25,12 +46,20 @@ export default function Hero({ item, onOpen, onPlay }: Props) {
   ].filter(Boolean);
 
   return (
-    <section className="relative mb-4 h-[min(64vh,620px)] min-h-[420px]">
+    <section ref={caja} className="relative mb-4 h-[min(64vh,620px)] min-h-[420px]">
       {bg && <img src={bg} alt="" className="absolute inset-0 h-full w-full object-cover object-top" />}
+      <Trailer tmdbId={item.tmdb_id} kind={item.media_type} sonido={sonido} activo={trailerActivo}
+        onVisible={setTrailerVisible} />
       {/* Dos degradados: uno lateral para que el texto se lea y otro al pie
           para fundir con el primer carril sin un corte duro. */}
       <div className="absolute inset-0" style={{ background: 'linear-gradient(90deg, #141414 0%, rgba(20,20,20,0.92) 30%, rgba(20,20,20,0.15) 70%, rgba(20,20,20,0.35) 100%)' }} />
       <div className="absolute inset-x-0 bottom-0 h-40" style={{ background: 'linear-gradient(180deg, rgba(20,20,20,0), #141414)' }} />
+      {trailerVisible && (
+        <button onClick={() => setSonido(s => !s)} aria-label={sonido ? 'Silenciar el tráiler' : 'Activar el sonido del tráiler'}
+          className="absolute bottom-16 right-gutter z-10 grid h-11 w-11 place-items-center rounded-full border border-white/40 bg-black/40 hover:bg-white/20 animate-fade-in">
+          <span className="w-5 h-5">{sonido ? <IconVolume /> : <IconMute />}</span>
+        </button>
+      )}
 
       <div className="relative flex h-full max-w-[720px] flex-col justify-end px-gutter pb-14">
         <p className="mb-2 text-micro font-bold uppercase tracking-[0.18em] text-nf-red">

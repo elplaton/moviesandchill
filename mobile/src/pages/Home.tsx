@@ -4,7 +4,8 @@ import Poster from '../components/Poster';
 import Row from '../components/Row';
 import Player from '../components/Player';
 import { cachedContinueWatching, clearWatched, continueWatching, type Watched } from '../utils/progress';
-import { IClose, IPlay, IStar } from '../components/Icons';
+import { IClose, IMute, IPlay, IStar, IVolume } from '../components/Icons';
+import Trailer from '../components/Trailer';
 import { fondoDeTitulo } from '../utils/text';
 import { useCarriles } from '../hooks/useCarriles';
 import Secciones from '../components/Secciones';
@@ -21,6 +22,8 @@ export default function Home() {
   // en la tele o en el escritorio).
   const [resume, setResume] = useState<Watched[]>(() => cachedContinueWatching());
   const [playing, setPlaying] = useState<Watched | null>(null);
+  const [sonido, setSonido] = useState(false);
+  const [trailerVisible, setTrailerVisible] = useState(false);
 
   // Al volver a la pestaña se relee: el telefono suspende la app y lo que se
   // haya visto mientras tanto en otro aparato no llegaria solo.
@@ -55,6 +58,10 @@ export default function Home() {
         <div className="relative">
         <Link to={link(hero)} className="block relative h-[62vw] max-h-[420px] overflow-hidden">
           <img src={hero.backdrop || hero.poster} alt="" className="absolute inset-0 w-full h-full object-cover" />
+          {/* El trailer del destacado, como en la ficha: invisible hasta que
+              ya se ve, en silencio con boton. Se para con el reproductor. */}
+          <Trailer tmdbId={hero.tmdb_id} kind={hero.media_type} sonido={sonido} activo={!playing}
+            onVisible={setTrailerVisible} />
           <div className="absolute inset-0" style={{ background: 'linear-gradient(180deg, rgba(20,20,20,0.1) 30%, #141414 100%)' }} />
           <div className="absolute left-4 right-4 bottom-4">
             <p className="text-[11px] font-semibold text-nf-red tracking-wide mb-1 uppercase">{hero.plataforma ? `Nuevo en ${hero.plataforma}` : 'Novedad'}</p>
@@ -66,6 +73,13 @@ export default function Home() {
             </p>
           </div>
         </Link>
+        {/* El boton de sonido, fuera del enlace por lo mismo que las pildoras. */}
+        {trailerVisible && (
+          <button onClick={() => setSonido(s => !s)} aria-label={sonido ? 'Silenciar el tráiler' : 'Activar el sonido del tráiler'}
+            className="absolute right-3 bottom-4 w-10 h-10 rounded-full border border-white/40 bg-black/50 flex items-center justify-center tap">
+            <span className="w-5 h-5">{sonido ? <IVolume /> : <IMute />}</span>
+          </button>
+        )}
         {/* Encima del destacado y fuera del enlace: tocar una pildora no
             puede abrir la ficha de la novedad. */}
         <div className="absolute left-4 right-4" style={{ top: 'calc(var(--safe-t) + 12px)' }}>

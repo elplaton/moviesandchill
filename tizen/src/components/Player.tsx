@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useTapa } from '../tv/tapado';
 import Overlay from './Overlay';
 import { useBackHandler } from '../focus/react';
 import { pushMediaHandler, pushRawHandler } from '../focus/keys';
@@ -71,6 +72,8 @@ function fmt(s: number): string {
  * volver son botones en pantalla.
  */
 export default function Player(props: Props) {
+  // Tapa la portada: el tráiler del panel de arriba se para (tv/tapado.ts).
+  useTapa();
   const { onClose } = props;
   // Que se esta reproduciendo ahora, que no siempre es lo que dijo el padre:
   // al acabar un capitulo el reproductor pasa al siguiente por su cuenta (ver

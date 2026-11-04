@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate, useParams } from 'react-router-dom';
 import { apiFetch } from '../services/api';
-import { cuantoQueda, estadoPasada, leerPasada, mandarPasada, resultadosPasada, type Pasada } from '../services/pasadaCreditos';
+import { botonPasada, cuantoQueda, estadoPasada, leerPasada, mandarPasada, resultadosPasada, type Pasada } from '../services/pasadaCreditos';
 import { useAuth } from '../contexts/AuthContext';
 import { toast } from '../utils/toast';
 import { IClose } from '../components/Icons';
@@ -872,7 +872,7 @@ function PasadaCreditos() {
       )}
       <button disabled={!p || mandando} onClick={() => mandar(p?.lanzada ? 'pausar' : 'lanzar')}
         className="mt-3 h-10 px-4 rounded-xl bg-white/10 text-[14px] font-semibold active:bg-white/20 disabled:opacity-50">
-        {p?.lanzada ? 'Pausar' : hechos > 0 && p?.estado !== 'terminada' ? 'Reanudar' : 'Lanzar'}
+        {botonPasada(p)}
       </button>
     </section>
   );

@@ -19,7 +19,7 @@ const DEBOUNCE_MS = 350;
 
 function metaOf(r: SearchResult, key: string, kind: 'movie' | 'series', title: string, subtitle?: string): Featured {
   return {
-    key, kind, title,
+    key, kind, title, tmdbId: r.tmdb_id ?? undefined,
     poster: r.tmdb_poster, backdrop: r.tmdb_backdrop, year: r.tmdb_year, rating: r.tmdb_rating,
     overview: r.tmdb_overview, genres: r.tmdb_genres, subtitle,
   };

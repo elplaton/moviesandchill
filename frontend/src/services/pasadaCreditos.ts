@@ -46,7 +46,15 @@ export function estadoPasada(p: Pasada): string {
   if (p.estado === 'pausada') return p.lanzada ? 'En marcha' : 'En pausa';
   if (p.estado === 'terminada') return 'Terminada';
   if (p.estado === 'error') return 'Se ha parado por un error (mira los registros)';
-  return (p.hechos ?? 0) > 0 ? 'En pausa' : 'Sin lanzar';
+  // `hechos` puede no ser 0 sin haberla lanzado nunca: lo que se mide al ver
+  // algo cuenta igual. Parada es «sin lanzar», haya lo que haya hecho.
+  return 'Sin lanzar';
+}
+
+/** Lo que dice el botón. */
+export function botonPasada(p: Pasada | null): string {
+  if (p?.lanzada) return 'Pausar';
+  return p?.estado === 'pausada' ? 'Reanudar' : 'Lanzar';
 }
 
 /** «unos 40 min», «unas 5 h», «1 día y 3 h». */

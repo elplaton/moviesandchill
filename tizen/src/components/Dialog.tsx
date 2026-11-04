@@ -1,4 +1,5 @@
 import { FocusScope, useBackHandler } from '../focus/react';
+import { useTapa } from '../tv/tapado';
 import Overlay from './Overlay';
 import TvButton from './TvButton';
 
@@ -16,6 +17,8 @@ interface Props {
  * Sin desenfoque de fondo: un velo solido es gratis para la GPU de la TV.
  */
 export default function Dialog({ title, text, actions, onClose }: Props) {
+  // Tapa la portada: el tráiler del panel de arriba se para (tv/tapado.ts).
+  useTapa();
   useBackHandler(() => { onClose(); }, true);
   return (
     <Overlay>

@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useFeatured } from '../tv/featured';
+import { useTapado } from '../tv/tapado';
+import Trailer from './Trailer';
 import { IconStar } from './Icons';
 import type { Featured } from '../types';
 
@@ -14,6 +16,11 @@ interface Props {
   heading?: string;
 }
 
+/** Lo que hay que quedarse en una tarjeta para que empiece su trailer: pasar
+ *  de largo por un carril no debe cargar un reproductor de YouTube por cada
+ *  tarjeta (en un Fire TV Stick se notaria). */
+const REPOSO_MS = 2500;
+
 /**
  * Panel de informacion de la portada. Ocupa la franja superior y describe la
  * tarjeta enfocada: fondo, titulo, año, nota, generos y sinopsis. Las
@@ -25,6 +32,20 @@ export default function Hero({ fallback, heading }: Props) {
   // animable barata). Solo se cambia la capa oculta.
   const [layers, setLayers] = useState<[string | undefined, string | undefined]>([undefined, undefined]);
   const [front, setFront] = useState(0);
+
+  // El trailer de la tarjeta enfocada, con sonido (en la tele suena siempre,
+  // se pidio asi), cuando el foco se queda quieto en ella y no hay nada
+  // encima (una ficha, el reproductor, un dialogo).
+  const tapado = useTapado();
+  const [enReposo, setEnReposo] = useState<string | null>(null);
+  useEffect(() => {
+    setEnReposo(null);
+    if (!featured?.tmdbId || featured.kind === 'file') return;
+    const clave = featured.key;
+    const t = setTimeout(() => setEnReposo(clave), REPOSO_MS);
+    return () => clearTimeout(t);
+  }, [featured?.key, featured?.tmdbId, featured?.kind]);
+  const conTrailer = !!featured?.tmdbId && featured.kind !== 'file';
 
   const url = bigBackdrop(featured?.backdrop) || featured?.poster;
   useEffect(() => {
@@ -54,6 +75,10 @@ export default function Hero({ fallback, heading }: Props) {
           <div key={i} className="tv-backdrop absolute inset-0 bg-cover bg-center"
             style={{ backgroundImage: layers[i] ? `url(${layers[i]})` : undefined, opacity: front === i && layers[i] ? 1 : 0 }} />
         ))}
+        {conTrailer && (
+          <Trailer tmdbId={featured?.tmdbId} kind={featured?.kind || 'movie'} sonido
+            activo={!tapado && enReposo === featured?.key} />
+        )}
         <div className="absolute inset-0" style={{ background: 'linear-gradient(90deg, #141414 0%, rgba(20,20,20,0.85) 22%, rgba(20,20,20,0) 60%)' }} />
         <div className="absolute inset-0" style={{ background: 'linear-gradient(180deg, rgba(20,20,20,0) 40%, #141414 96%)' }} />
       </div>

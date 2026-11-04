@@ -83,7 +83,7 @@ export default function Catalog({ filter, heading, fuente = 'portada' }: Props) 
 
   return (
     <Shell flush={!!hero}>
-      {hero && <Hero item={hero} onOpen={() => open(hero)} />}
+      {hero && <Hero item={hero} onOpen={() => open(hero)} activo={!playing} />}
 
       {!hero && heading && (
         <div className="mb-6 px-gutter">

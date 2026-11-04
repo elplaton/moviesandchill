@@ -3,7 +3,7 @@ import Shell from '../components/Shell';
 import { Embedded } from '../components/Shell';
 import { apiFetch } from '../services/api';
 import type { AppConfig } from '../types';
-import { cuantoQueda, estadoPasada, leerPasada, mandarPasada, resultadosPasada, type Pasada } from '../services/pasadaCreditos';
+import { botonPasada, cuantoQueda, estadoPasada, leerPasada, mandarPasada, resultadosPasada, type Pasada } from '../services/pasadaCreditos';
 
 interface CacheEstado {
   activa: boolean;
@@ -247,7 +247,7 @@ function PasadaCreditos() {
       <div className="flex gap-3 mt-4">
         <button disabled={!p || mandando} onClick={() => mandar(p?.lanzada ? 'pausar' : 'lanzar')}
           className="bg-white/10 hover:bg-white/20 disabled:opacity-50 text-white px-5 py-2.5 rounded-xl text-sm font-semibold transition-colors">
-          {p?.lanzada ? 'Pausar' : hechos > 0 && p?.estado !== 'terminada' ? 'Reanudar' : 'Lanzar'}
+          {botonPasada(p)}
         </button>
       </div>
     </div>

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useTapa } from '../tv/tapado';
 import { applyFocus, getElement, setFocus } from '../focus/engine';
 import { FocusScope, useBackHandler, useFocusItem } from '../focus/react';
 import { apiFetch, streamUrl } from '../services/api';
@@ -196,6 +197,8 @@ function textoTemporada(s: number | null | undefined, visto: boolean): string {
  * esta en curso. Atras cierra y el foco vuelve a la tarjeta de origen.
  */
 export default function TitleDetail({ input, onClose }: Props) {
+  // Tapa la portada: el tráiler del panel de arriba se para (tv/tapado.ts).
+  useTapa();
   const { meta, kind } = input;
   const { downloadStates, download, cancelBatch, pauseBatch, rutaDe, rutaEpisodio, recargar } = useDownloadsCtx();
   const { esFavorito, alternar } = useFavorites();

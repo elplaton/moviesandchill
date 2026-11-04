@@ -237,6 +237,8 @@ export interface Featured {
   key: string;
   title: string;
   kind: 'movie' | 'series' | 'file';
+  /** Para el tráiler del panel de arriba (`Hero`). */
+  tmdbId?: number;
   poster?: string;
   backdrop?: string;
   year?: number;

@@ -50,6 +50,7 @@ function toFeatured(item: BrowseItem, rowKey: string): Featured {
     key: `${rowKey}-${item.id ?? `${item.media_type}-${item.tmdb_id}`}`,
     title: item.title,
     kind: item.media_type,
+    tmdbId: item.tmdb_id,
     poster: item.poster,
     backdrop: item.backdrop,
     year: item.year,

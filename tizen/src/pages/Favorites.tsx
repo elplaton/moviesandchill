@@ -14,6 +14,7 @@ function toFeatured(item: BrowseItem): Featured {
     key: `fav-${item.id}`,
     title: item.title,
     kind: item.media_type,
+    tmdbId: item.tmdb_id,
     poster: item.poster,
     backdrop: item.backdrop,
     year: item.year,
