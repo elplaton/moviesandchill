@@ -10,7 +10,8 @@ import { groupEpisodes, groupVersions, episodeLabel, seasonLabel, type Episode, 
 import Button from './ui/Button';
 import Player from './Player';
 import { audioQueNoSuena, comprobarReproduccion, motivoNoSeVe } from '../services/reproducir';
-import { IconBell, IconCheck, IconClose, IconDownload, IconHeart, IconPlay, IconStar, IconTrash } from './ui/Icon';
+import { IconBell, IconCheck, IconClose, IconDownload, IconHeart, IconMute, IconPlay, IconStar, IconTrash, IconVolume } from './ui/Icon';
+import Trailer from './Trailer';
 import type { SearchResult, TMDBMetadata } from '../types';
 
 export interface SheetInput {
@@ -101,6 +102,10 @@ export default function TitleSheet({ input, onClose }: Props) {
   const [season, setSeason] = useState<number | null | undefined>(undefined);
   const [names, setNames] = useState<Map<string, string>>(new Map());
   const [playing, setPlaying] = useState<{ path: string; subtitle?: string } | null>(null);
+  // El trailer arranca en silencio (un navegador no deja otra cosa) y el
+  // boton de sonido solo sale mientras se ve.
+  const [sonido, setSonido] = useState(false);
+  const [trailerVisible, setTrailerVisible] = useState(false);
   const [notice, setNotice] = useState('');
   const [pick, setPick] = useState<{ variants: Version[]; subtitle?: string } | null>(null);
   /** "Ver" no ha podido: el motivo y la version, para ofrecer descargarla. */
@@ -225,8 +230,16 @@ export default function TitleSheet({ input, onClose }: Props) {
 
         <div className="relative h-[340px]">
           {bg && <img src={bg} alt="" className="absolute inset-0 h-full w-full object-cover object-top" />}
+          {/* Encima de la caratula, invisible hasta que ya se esta viendo. */}
+          <Trailer tmdbId={input.tmdbId} kind={kind} sonido={sonido} activo={!playing} onVisible={setTrailerVisible} />
           <div className="absolute inset-0" style={{ background: 'linear-gradient(90deg, #141414 8%, rgba(20,20,20,0.55) 55%, rgba(20,20,20,0.2) 100%)' }} />
           <div className="absolute inset-x-0 bottom-0 h-32" style={{ background: 'linear-gradient(180deg, rgba(20,20,20,0), #141414)' }} />
+          {trailerVisible && (
+            <button onClick={() => setSonido(s => !s)} aria-label={sonido ? 'Silenciar el tráiler' : 'Activar el sonido del tráiler'}
+              className="absolute bottom-8 right-8 z-10 grid h-11 w-11 place-items-center rounded-full border border-white/40 bg-black/40 hover:bg-white/20 animate-fade-in">
+              <span className="w-5 h-5">{sonido ? <IconVolume /> : <IconMute />}</span>
+            </button>
+          )}
 
           <div className="relative flex h-full max-w-[620px] flex-col justify-end p-9">
             <p className="mb-1.5 text-micro font-bold uppercase tracking-[0.18em] text-nf-red">{isSeries ? 'Serie' : 'Película'}</p>

@@ -12,6 +12,7 @@ import Overlay from './Overlay';
 import Player from './Player';
 import { soloPuntero } from '../tv/platform';
 import TvButton from './TvButton';
+import Trailer from './Trailer';
 import { IconCheck, IconDownload, IconHeart, IconPlay, IconStar, IconTrash } from './Icons';
 import { audioQueNoSuena, comprobarReproduccion, motivoNoSeVe } from '../services/reproducir';
 import { useWatched, type Capitulo } from '../hooks/useWatched';
@@ -450,7 +451,13 @@ export default function TitleDetail({ input, onClose }: Props) {
   return (
     <Overlay>
     <div className="fixed inset-0 z-[60] bg-tv-bg overflow-hidden">
-      {bg && <div className="absolute inset-0 bg-cover bg-center" style={{ backgroundImage: `url(${bg})`, opacity: 0.55 }} />}
+      {/* La caratula y, encima, el trailer cuando ya se esta viendo, los dos
+          atenuados igual. En la tele suena siempre y sin boton (se pidio
+          asi); se para al abrir el reproductor. */}
+      <div className="absolute inset-0" style={{ opacity: 0.55 }}>
+        {bg && <div className="absolute inset-0 bg-cover bg-center" style={{ backgroundImage: `url(${bg})` }} />}
+        <Trailer tmdbId={input.tmdbId} kind={kind} sonido activo={!playing} />
+      </div>
       <div className="absolute inset-0" style={{ background: 'linear-gradient(90deg, #141414 0%, rgba(20,20,20,0.96) 36%, rgba(20,20,20,0.55) 60%, rgba(20,20,20,0.35) 100%)' }} />
       <div className="absolute inset-0" style={{ background: 'linear-gradient(180deg, rgba(20,20,20,0.2) 0%, rgba(20,20,20,0) 30%, #141414 100%)' }} />
 

@@ -206,6 +206,23 @@ async def _buscar(req: SearchRequest, user: str):
     }
 
 
+@router.get("/media/{tmdb_id}/trailer")
+async def media_trailer(tmdb_id: int, user: Annotated[str, Depends(get_current_user)],
+                        media_type: str = "movie"):
+    """El trailer de un titulo para ponerlo en la ficha donde va la caratula
+    (`{"key": <id de YouTube> | null, "idioma", "nombre"}`). Cacheado un dia en
+    el espacio `tmdb`, que no es de nadie: el trailer es el mismo para todos, y
+    "no tiene" tambien se guarda para no volver a preguntar en cada apertura."""
+    from app.routers.download import config
+    from app.services import cache
+    from app.services.tmdb import trailer
+
+    tipo = "tv" if media_type in ("tv", "series") else "movie"
+    r = await cache.recordar("tmdb", ["trailer", tipo, tmdb_id],
+                             lambda: trailer(config.get("tmdb_api_key", ""), tmdb_id, tipo))
+    return r or {"key": None}
+
+
 @router.get("/media/{tmdb_id}/files")
 async def media_files(tmdb_id: int, user: Annotated[str, Depends(get_current_user)],
                       media_type: str | None = None):

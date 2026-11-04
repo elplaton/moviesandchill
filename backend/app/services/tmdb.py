@@ -208,6 +208,51 @@ async def en_plataforma(api_key: str, tmdb_id: int, media_type: str, plataformas
     return any(b and any(b in t or t in b for t in tiene if t) for b in buscadas)
 
 
+_TIPOS_VIDEO = {"Trailer": 0, "Teaser": 1}
+
+
+def _elegir_trailer(videos: list[dict]) -> dict | None:
+    """De los videos de TMDB, el trailer que se pone en la ficha: de YouTube
+    (es lo que se sabe incrustar), trailer antes que teaser, el oficial antes
+    que el de un fan, el doblaje de España antes que el latino y, a igualdad,
+    el de mas resolucion."""
+    buenos = [v for v in videos
+              if v.get("site") == "YouTube" and v.get("key") and v.get("type") in _TIPOS_VIDEO]
+    if not buenos:
+        return None
+    return min(buenos, key=lambda v: (_TIPOS_VIDEO[v["type"]], not v.get("official"),
+                                      v.get("iso_639_1") == "es" and v.get("iso_3166_1") != "ES",
+                                      -(v.get("size") or 0)))
+
+
+async def trailer(api_key: str, tmdb_id: int, media_type: str) -> dict | None:
+    """El trailer de un titulo: `{"key": <id de YouTube>, "idioma", "nombre"}`,
+    o `{"key": None}` si no hay. Primero en español y, si no hay, en el idioma
+    original del titulo (se pidio asi: mejor el original subtitulado de la
+    vida que nada). None si TMDB falla, para que no se cachee el fallo."""
+    if not api_key:
+        return {"key": None}
+    tipo = "tv" if media_type in ("tv", "series") else "movie"
+    # `language` filtra tambien los videos: con es-ES vienen solo los de
+    # habla hispana. De paso trae el idioma original, para el segundo intento.
+    d = await _get(f"/{tipo}/{tmdb_id}", {"api_key": api_key, "language": "es-ES",
+                                           "append_to_response": "videos"})
+    if d is None:
+        return None
+    v = _elegir_trailer((d.get("videos") or {}).get("results") or [])
+    if v:
+        return {"key": v["key"], "idioma": "es", "nombre": v.get("name")}
+    original = d.get("original_language")
+    if original and original != "es":
+        datos = await _get(f"/{tipo}/{tmdb_id}/videos", {"api_key": api_key, "language": original})
+        if datos is None:
+            return None
+        v = _elegir_trailer(datos.get("results") or [])
+        if v:
+            return {"key": v["key"], "idioma": original, "nombre": v.get("name")}
+    return {"key": None}
+
+
 def _extract_year(item: dict) -> int | None:
     date_str = item.get("release_date") or item.get("first_air_date")
     if date_str and len(date_str) >= 4:

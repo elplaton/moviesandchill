@@ -12,7 +12,8 @@ import { cachedResumePoint } from '../utils/progress';
 import { groupEpisodes, groupVersions, seasonLabel, episodeLabel, type Version } from '../utils/versions';
 import Player from '../components/Player';
 import { comprobarReproduccion, motivoNoSeVe } from '../services/reproducir';
-import { IBack, IBell, ICheck, IDown, IHeart, IPlay, IStar, ITrash } from '../components/Icons';
+import { IBack, IBell, ICheck, IDown, IHeart, IMute, IPlay, IStar, ITrash, IVolume } from '../components/Icons';
+import Trailer from '../components/Trailer';
 import type { DownloadState, SearchResult, TMDBMetadata } from '../types';
 
 type RowState = { s: 'ready'; f: LocalFile } | { s: 'busy'; ds: DownloadState } | { s: 'idle' };
@@ -66,6 +67,10 @@ export default function Title() {
   const [season, setSeason] = useState<number | null | undefined>(undefined);
   const [names, setNames] = useState<Map<string, string>>(new Map());
   const [playing, setPlaying] = useState<{ path: string; subtitle?: string } | null>(null);
+  // El trailer arranca en silencio (un navegador no deja otra cosa) y el
+  // boton de sonido solo sale mientras se ve.
+  const [sonido, setSonido] = useState(false);
+  const [trailerVisible, setTrailerVisible] = useState(false);
   const [menu, setMenu] = useState<{ v: Version; ds: DownloadState } | null>(null);
   const [pick, setPick] = useState<{ variants: Version[]; subtitle?: string } | null>(null);
   /** "Ver" no ha podido: el motivo y la version, para ofrecer descargarla. */
@@ -167,7 +172,16 @@ export default function Title() {
     <div className="min-h-screen pb-10">
       <div className="relative h-[60vw] max-h-[400px]">
         {bg && <img src={bg} alt="" className="absolute inset-0 w-full h-full object-cover" />}
+        {/* Encima de la caratula, invisible hasta que ya se esta viendo. */}
+        <Trailer tmdbId={tmdbId || null} kind={isSeries ? 'series' : 'movie'} sonido={sonido} activo={!playing}
+          onVisible={setTrailerVisible} />
         <div className="absolute inset-0" style={{ background: 'linear-gradient(180deg, rgba(20,20,20,0.35) 0%, rgba(20,20,20,0) 35%, #141414 100%)' }} />
+        {trailerVisible && (
+          <button onClick={() => setSonido(s => !s)} aria-label={sonido ? 'Silenciar el tráiler' : 'Activar el sonido del tráiler'}
+            className="absolute right-3 bottom-12 w-10 h-10 rounded-full border border-white/40 bg-black/50 flex items-center justify-center tap">
+            <span className="w-5 h-5">{sonido ? <IVolume /> : <IMute />}</span>
+          </button>
+        )}
         <button onClick={() => navigate(-1)} className="absolute left-3 w-10 h-10 rounded-full bg-black/50 flex items-center justify-center tap" style={{ top: 'calc(var(--safe-t) + 10px)' }}><span className="w-5 h-5"><IBack /></span></button>
       </div>
       <div className="px-4 -mt-10 relative">
