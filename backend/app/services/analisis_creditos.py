@@ -16,7 +16,8 @@ completas, asi que:
 2. Se piden **solo esos trozos** (~70 KB cada uno) y se decodifica cada uno
    suelto con ffmpeg, a 320x180 en gris.
 3. Cada fotograma se clasifica (`etiqueta()`): **creditos** (casi todo negro,
-   con un poco de claro y bordes finos: letras), **negro** o **imagen**.
+   con un poco de claro y bordes finos: letras; o el listado de nombres que
+   llena la pantalla), **negro** o **imagen**.
 4. Se busca donde empieza el tramo de negro/creditos del final.
 
 Medido en *Mass* (MP4, 1,9 Mb/s): 25 MB de Telegram con bloques de 128 KB
@@ -60,7 +61,8 @@ logger = logging.getLogger("tmd")
 # texto y comprobaciones con fotogramas clave escasos (Animales en MKV, que la
 # 1 dio por empezados siete minutos tarde). La 3 mide el principio de la zona
 # de creditos y no el ultimo tramo (los de Animales tienen huecos de imagen).
-VERSION = 3
+# La 4 reconoce el listado de nombres de las peliculas (DENSIDAD_LETRAS).
+VERSION = 4
 
 Lector = Callable[[int, int], Awaitable[bytes]]   # leer(desde, cuanto) -> bytes
 
@@ -500,33 +502,55 @@ def decodificar(codec: str, annexb: bytes) -> bytes | None:
     return r.stdout[:tam] if len(r.stdout) >= tam else None
 
 
-def medidas(px: bytes) -> tuple[float, float, float]:
-    """(fraccion oscura, fraccion clara, bordes) de un fotograma en gris."""
+def medidas(px: bytes) -> tuple[float, float, float, float]:
+    """(fraccion oscura, fraccion clara, bordes, fraccion negra) de un
+    fotograma en gris. Oscuro es < 50 y negro < 25: el fondo de unos creditos
+    es negro de verdad, el de una escena de noche casi nunca."""
     n = len(px)
     oscuro = sum(1 for p in px if p < 50) / n
+    negro = sum(1 for p in px if p < 25) / n
     claro = sum(1 for p in px if p > 120) / n
     bordes = 0
     for y in range(0, ALTO, 2):
         f = px[y * ANCHO:(y + 1) * ANCHO]
         bordes += sum(1 for i in range(ANCHO - 1) if abs(f[i] - f[i + 1]) > 40)
-    return oscuro, claro, bordes / (n / 2)
+    return oscuro, claro, bordes / (n / 2), negro
+
+
+# El listado de nombres que sube al final de una pelicula: fondo negro con
+# columnas de letras que llenan la pantalla. Lo que no es negro son letras, y
+# una letra pequeña es casi toda borde, asi que hay muchos bordes por cada
+# pixel que no es negro (DENSIDAD_LETRAS). Medido en 20 peliculas: el listado
+# da 0,6-0,8 y las escenas, como mucho 0,24 (las oscuras, 0,01-0,05).
+NEGRO_LISTADO = 0.6
+BORDES_LISTADO = 0.02
+DENSIDAD_LETRAS = 0.35
 
 
 def etiqueta(px: bytes) -> str:
     """'C' creditos, 'K' negro o 'N' imagen.
 
-    Dos formas de ser creditos: casi todo negro (>= 92 %) con letras (bordes
-    finos), o **casi entero negro** (>= 97 %) con un poco de claro aunque
-    apenas tenga bordes: una tarjeta con dos nombres pequeños. Sin la segunda,
-    en *Animales* una tarjeta asi salia como imagen y, con un fotograma clave
-    cada 10 s, rompia la comprobacion. Las escenas oscuras que se confundian
-    rondaban el 75-90 %, asi que no llegan."""
-    oscuro, claro, bordes = medidas(px)
+    Tres formas de ser creditos: casi todo negro (>= 92 %) con letras (bordes
+    finos); **casi entero negro** (>= 97 %) con un poco de claro aunque
+    apenas tenga bordes, una tarjeta con dos nombres pequeños (sin esto, en
+    *Animales* una tarjeta asi salia como imagen y, con un fotograma clave
+    cada 10 s, rompia la comprobacion); y **el listado** que sube al final de
+    las peliculas, que llena la pantalla de letras y a 320x180 deja solo un
+    75-90 % oscuro. Ese no se distingue por lo oscuro sino porque lo que no es
+    negro es casi todo borde (DENSIDAD_LETRAS). Sin el, en las peliculas con
+    listado (casi todas las de despues de los 80) no se encontraba nada, o
+    solo el ultimo minuto: X-Men 2, Matrix Revolutions, Aquaman. Las escenas
+    oscuras que se confundian rondaban el 75-90 % oscuro, pero con luz
+    repartida y pocos bordes."""
+    oscuro, claro, bordes, negro = medidas(px)
     if oscuro >= 0.985 and claro < 0.001:
         return "K"
     if oscuro >= 0.97 and 0.001 <= claro <= 0.05:
         return "C"
     if oscuro >= 0.92 and 0.001 <= claro <= 0.08 and bordes >= 0.004:
+        return "C"
+    if (negro >= NEGRO_LISTADO and claro >= 0.003 and bordes >= BORDES_LISTADO
+            and bordes >= DENSIDAD_LETRAS * (1 - negro)):
         return "C"
     return "N"
 

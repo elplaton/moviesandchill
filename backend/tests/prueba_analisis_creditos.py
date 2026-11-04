@@ -134,6 +134,23 @@ noche = bytearray(b"\x18" * ancho)
 for i in range(ancho // 10):   # una escena oscura: 10 % de la imagen con algo de luz
     noche[i * 10] = 90
 ver(ac.etiqueta(bytes(noche)) == "N", "una escena oscura con luz repartida no son creditos")
+# El listado de una pelicula: tres columnas de nombres en lineas de 2 px cada
+# 5, que a 320x180 dejan ~85 % oscuro (X-Men 2, Matrix Revolutions).
+listado = bytearray(b"\x08" * ancho)
+for y in range(10, 170, 5):
+    for col in (40, 130, 220):
+        for x in range(col, col + 60):
+            if (x // 2) % 2 == 0:
+                for dy in (0, 1):
+                    listado[(y + dy) * ac.ANCHO + x] = 200
+o, c, b, n = ac.medidas(bytes(listado))
+ver(o < 0.92 and ac.etiqueta(bytes(listado)) == "C", "el listado de nombres que llena la pantalla son creditos")
+# Una escena oscura con mucho detalle (hojas, una calle de noche): bordes, pero
+# sin fondo negro de verdad.
+calle = bytearray(ancho)
+for i in range(ancho):
+    calle[i] = 30 + (i * 7919) % 60 if (i // 3) % 2 else 28
+ver(ac.etiqueta(bytes(calle)) == "N", "una escena oscura con detalle no es un listado")
 
 asyncio.run(main())
 shutil.rmtree(dir_, ignore_errors=True)

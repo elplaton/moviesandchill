@@ -143,6 +143,31 @@ async def marcar_proceso(tmdb_id: int, tmdb_type: str, temporada: int, estado: s
         """, tmdb_id, tmdb_type, temporada, estado, detalle[:500])
 
 
+async def rehacer_tras_cambiar_detector() -> tuple[int, int]:
+    """Lo que hay que volver a medir porque ha cambiado el detector de imagen
+    (analisis_creditos.VERSION): las referencias de peliculas sacadas de la
+    imagen y, de peliculas y temporadas, lo que se quedo sin resultado. Se
+    borra su fila de `creditos_proceso` y la pasada lo vuelve a coger. Lo que
+    salio de capitulos o se puso a mano no se toca, ni lo que no se pudo
+    analizar (eso no depende del detector). Las referencias de temporadas
+    medidas se quedan: son la mediana de tres episodios con tarjetas sueltas,
+    que el detector ya reconocia. Devuelve (referencias, procesos) borrados."""
+    pool = get_pool()
+    if not pool:
+        return 0, 0
+    async with pool.acquire() as conn, conn.transaction():
+        refs = await conn.fetch("""
+            DELETE FROM creditos WHERE tmdb_type = 'movie' AND fuente = 'imagen' RETURNING tmdb_id""")
+        procs = await conn.fetch("""
+            DELETE FROM creditos_proceso p
+            WHERE p.estado = 'sin_resultado'
+               OR (p.tmdb_type = 'movie' AND p.estado = 'hecho' AND NOT EXISTS (
+                       SELECT 1 FROM creditos c
+                       WHERE c.tmdb_id = p.tmdb_id AND c.tmdb_type = 'movie' AND c.temporada = 0))
+            RETURNING tmdb_id""")
+        return len(refs), len(procs)
+
+
 async def resumen() -> dict:
     """Cifras para el panel: cuanto se sabe y de donde ha salido."""
     pool = get_pool()

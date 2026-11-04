@@ -180,10 +180,36 @@ async def pausar() -> dict:
     return estado()
 
 
+CLAVE_DETECTOR = "creditos_detector"   # app_settings: la VERSION con la que se midio
+
+
+async def _si_cambio_el_detector() -> None:
+    """Si el detector de imagen es otro que el de lo medido, se vuelve a
+    dejar pendiente lo que dependia de el (`rehacer_tras_cambiar_detector`).
+    Paso con la version 4: la 3 no reconocia el listado de nombres de las
+    peliculas y dos de cada tres salian sin resultado o con un minuto de
+    creditos que eran ocho."""
+    from app.database import creditos as db
+    from app.database.connection import get_app_settings, set_app_settings
+    from app.services.analisis_creditos import VERSION
+    if (await get_app_settings()).get(CLAVE_DETECTOR) == str(VERSION):
+        return
+    refs, procs = await db.rehacer_tras_cambiar_detector()
+    await set_app_settings({CLAVE_DETECTOR: str(VERSION)})
+    if refs or procs:
+        logger.info("Creditos: detector nuevo (version %d): %d referencias de peliculas y %d titulos "
+                    "vuelven a quedar pendientes para la pasada", VERSION, refs, procs)
+
+
 async def reanudar_si_estaba() -> None:
-    """Al arrancar: si estaba lanzada (un reinicio o un despliegue a medias),
-    sigue. Espera un poco a que Telegram conecte."""
+    """Al arrancar: lo que haya que rehacer por un detector nuevo y, si estaba
+    lanzada (un reinicio o un despliegue a medias), sigue. Espera un poco a
+    que Telegram conecte."""
     from app.database.connection import get_app_settings
+    try:
+        await _si_cambio_el_detector()
+    except Exception as e:
+        logger.warning("Creditos: no se ha podido revisar la version del detector: %s", e)
     if (await get_app_settings()).get(CLAVE) != "1":
         return
     await asyncio.sleep(180)
