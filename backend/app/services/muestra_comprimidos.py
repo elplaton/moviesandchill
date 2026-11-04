@@ -150,6 +150,26 @@ def _zip(b: bytes) -> dict:
     return {"clase": "sin_video", "detalle": f"zip; antes del video: {otros[:3]}"}
 
 
+_FIRMAS_VIDEO = ((b"\x1a\x45\xdf\xa3", 0, "mkv"), (b"ftyp", 4, "mp4"), (b"RIFF", 0, "avi"))
+
+
+def _7z(b: bytes) -> dict:
+    """El metodo de un 7z esta en la cabecera del final (en el ultimo volumen)
+    y suele ir comprimida ella misma. Pero los datos empiezan justo despues de
+    los 32 bytes de la firma, sin cabecera por archivo: almacenado, ahi esta
+    el video tal cual (o, si delante va un .nfo, unos bytes despues). En un
+    flujo comprimido que aparezca la firma de un MKV o un MP4 por azar es
+    casi imposible."""
+    datos = b[32:]
+    for firma, desfase, formato in _FIRMAS_VIDEO:
+        i = datos.find(firma)
+        if i >= desfase:
+            return {"clase": "almacenado", "formato": "7z",
+                    "detalle": f"7z: {formato} tal cual en el byte {32 + i - desfase}"}
+    return {"clase": "comprimido", "formato": "7z",
+            "detalle": f"7z: ningun video tal cual en {len(b) // 1024} KB; empieza por {datos[:4].hex()}"}
+
+
 def _veredicto(formato: str, nombre: str, metodo: int, cifrado: bool, otros: list) -> dict:
     if cifrado:
         clase = "cifrado"
@@ -173,9 +193,7 @@ def analizar(b: bytes) -> dict:
         if b.startswith(b"PK\x03\x04"):
             return _zip(b)
         if b.startswith(b"7z\xbc\xaf\x27\x1c"):
-            # El metodo esta en la cabecera del final del archivo (en el
-            # ultimo volumen) y suele ir comprimida ella misma: sin mirar.
-            return {"clase": "7z", "formato": "7z", "detalle": "7z: el metodo va al final"}
+            return _7z(b)
         if b.startswith(b"\x1a\x45\xdf\xa3"):
             return {"clase": "video_troceado", "detalle": "mkv partido sin archivador"}
         if b[4:8] == b"ftyp":
@@ -303,7 +321,10 @@ def _resumir(resultados: list[dict]) -> dict:
     por_canal = collections.defaultdict(collections.Counter)
     ejemplos = collections.defaultdict(list)
     for r in resultados:
-        for k in (r["clase"], f'{r["tipo"]}:{r["clase"]}'):
+        claves = [r["clase"], f'{r["tipo"]}:{r["clase"]}']
+        if r.get("formato"):
+            claves.append(f'{r["formato"]}:{r["clase"]}')
+        for k in claves:
             resumen[k]["n"] += 1
             resumen[k]["bytes"] += r["bytes"]
         por_canal[r["canal"]][r["clase"]] += 1
