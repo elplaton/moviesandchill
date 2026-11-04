@@ -171,10 +171,15 @@ async def _de_telegram(peticion: dict, consultas: list[str]) -> list[dict]:
     """Lo que la busqueda de los canales encuentra y no esta indexado, con las
     pistas de su ficha. Telegram busca tambien en el pie, asi que entra lo que
     coincide por el nombre del archivo **o** por el pie (hay archivos que se
-    llaman "60b016c396c7.mp4")."""
+    llaman "60b016c396c7.mp4").
+
+    En un grupo con temas (foro) la busqueda sin tema los recorre todos,
+    tambien los que el admin ha marcado para no indexar (Deportes, Libros...):
+    lo de esos temas se descarta aqui, o se indexaria saltandose esa decision."""
     from app.database.connection import get_pool
+    from app.database.media import temas_ignorados
     from app.services.busqueda import coincide
-    from app.services.contexto import pistas_de, texto_de
+    from app.services.contexto import pistas_de, tema_de, texto_de
     from app.services.reproduccion import _downloader
 
     dl = _downloader()
@@ -196,11 +201,12 @@ async def _de_telegram(peticion: dict, consultas: list[str]) -> list[dict]:
         if (channel_id, mid) not in ya:
             por_canal.setdefault(channel_id, []).append(mid)
 
+    ignorados = await temas_ignorados()
     salida = []
     for channel_id, mids in por_canal.items():
         msgs = await dl.client.get_messages(_entidad(dl, channel_id), ids=mids)
         for msg in msgs or []:
-            if msg is None:
+            if msg is None or tema_de(msg) in ignorados.get(channel_id, set()):
                 continue
             r = vistos[(channel_id, msg.id)]
             pie = texto_de(msg) or None
