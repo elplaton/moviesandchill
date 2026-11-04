@@ -5,10 +5,15 @@ import { apiFetch } from '../services/api';
 import { botonPasada, cuantoQueda, estadoPasada, leerPasada, mandarPasada, resultadosPasada, type Pasada } from '../services/pasadaCreditos';
 import { useAuth } from '../contexts/AuthContext';
 import { toast } from '../utils/toast';
-import { IBack, IClose } from '../components/Icons';
+import { IBack, IClose, IMenu } from '../components/Icons';
 import { buscarParaPedir, chatsDestino, enCuanto, enviarYa, ESTADO_TEXTO, guardarAjustes, moverEnCola, peticionesAdmin, probarPeticion,
          quitarDeCola, ritmo, segundosHastaPuesto, temasDe, TIPO_PETICION, vistaPrevia, volverALaCola,
          type AjustesPeticiones, type ChatDestino, type ResultadoPeticion, type TipoPeticion, type EstadoCola, type TemaForo, type PeticionAdmin } from '../services/peticiones';
+
+// Punto de miles también con cuatro cifras («6.429», no «6429»): el español
+// no lo pone por debajo de 10.000 y en las cifras del panel, unas con punto y
+// otras sin él, parecía un error.
+const MILES = { useGrouping: 'always' } as unknown as Intl.NumberFormatOptions;
 
 const GB = 1024 ** 3;
 const fmt = (b: number | null | undefined) => b == null ? 'Sin límite' : `${(b / GB).toFixed(b >= GB * 10 ? 0 : 1)} GB`;
@@ -185,7 +190,7 @@ function TemasCanal({ channelId }: { channelId: number }) {
       const d = await r.json();
       if (!r.ok || d.ok === false) throw new Error(d.detail || d.error || 'No se ha podido guardar');
       const partes = ['Temas guardados'];
-      if (d.quitados) partes.push(`${Number(d.quitados).toLocaleString('es-ES')} archivos quitados del catálogo`);
+      if (d.quitados) partes.push(`${Number(d.quitados).toLocaleString('es-ES', MILES)} archivos quitados del catálogo`);
       if (d.reindexando?.length) partes.push(`${d.reindexando.length === 1 ? 'se vuelve a indexar 1 tema' : `se vuelven a indexar ${d.reindexando.length} temas`}`);
       toast(partes.join(' · '), 'ok', 5000);
       await cargar();
@@ -213,7 +218,7 @@ function TemasCanal({ channelId }: { channelId: number }) {
   return (
     <div className="mt-3 border-t border-white/5 pt-1">
       {datos.sin_leer > 0 && (
-        <p className="text-[12px] text-nf-text3 py-2">Hay {datos.sin_leer.toLocaleString('es-ES')} archivos de los que aún no se sabe el tema; se irán leyendo solos.</p>
+        <p className="text-[12px] text-nf-text3 py-2">Hay {datos.sin_leer.toLocaleString('es-ES', MILES)} archivos de los que aún no se sabe el tema; se irán leyendo solos.</p>
       )}
       {temas.length === 0 && <p className="text-[13px] text-nf-text3 py-2">No hay temas.</p>}
       {temas.map(t => {
@@ -224,7 +229,7 @@ function TemasCanal({ channelId }: { channelId: number }) {
             <div className="min-w-0 pr-3">
               <p className={`text-[15px] truncate ${indexar ? '' : 'text-nf-text3'}`}>{t.titulo}</p>
               <p className="text-[12px] text-nf-text3">
-                {t.indexados.toLocaleString('es-ES')} indexados{t.general ? ' · General' : ''}{t.cerrado ? ' · cerrado' : ''} · {indexar ? 'Indexar' : 'No se indexa'}
+                {t.indexados.toLocaleString('es-ES', MILES)} indexados{t.general ? ' · General' : ''}{t.cerrado ? ' · cerrado' : ''} · {indexar ? 'Indexar' : 'No se indexa'}
               </p>
             </div>
             <span className={`w-12 h-7 rounded-full relative shrink-0 ${indexar ? 'bg-nf-red' : 'bg-white/15'}`}><span className={`absolute top-0.5 w-6 h-6 rounded-full bg-white transition-transform ${indexar ? 'translate-x-[22px]' : 'translate-x-0.5'}`} /></span>
@@ -310,7 +315,7 @@ function Channels() {
   // enormes y pegados al borde. En rejilla de dos cabe el numero entero.
   const Cifra = ({ n, label }: { n?: number; label: string }) => (
     <div className="rounded-xl bg-black/25 px-2 py-3 text-center">
-      <p className="text-[20px] font-bold leading-none tabular-nums">{(n ?? 0).toLocaleString('es-ES')}</p>
+      <p className="text-[20px] font-bold leading-none tabular-nums">{(n ?? 0).toLocaleString('es-ES', MILES)}</p>
       <p className="text-[11px] text-nf-text3 mt-1.5">{label}</p>
     </div>
   );
@@ -331,7 +336,7 @@ function Channels() {
           <div className="mt-4">
             <div className="flex items-baseline justify-between text-[11px] text-nf-text3 mb-1.5">
               <span>Progreso TMDB</span>
-              <span className="tabular-nums">{buscados.toLocaleString('es-ES')} / {(stats.total || 0).toLocaleString('es-ES')} · {pctTmdb} %</span>
+              <span className="tabular-nums">{buscados.toLocaleString('es-ES', MILES)} / {(stats.total || 0).toLocaleString('es-ES', MILES)} · {pctTmdb} %</span>
             </div>
             <div className="h-1.5 rounded-full bg-white/10 overflow-hidden">
               <div className={`h-full ${pctTmdb >= 100 ? 'bg-nf-ok' : 'bg-nf-red'}`} style={{ width: `${Math.min(pctTmdb, 100)}%` }} />
@@ -365,7 +370,7 @@ function Channels() {
             {r && (
               <>
                 <div className="flex items-baseline justify-between mt-2 text-[11px] text-nf-text3">
-                  <span className="tabular-nums truncate">Contexto leído: {r.leidos.toLocaleString('es-ES')} / {r.total.toLocaleString('es-ES')} · {r.con_ficha.toLocaleString('es-ES')} con ficha</span>
+                  <span className="tabular-nums truncate">Contexto leído: {r.leidos.toLocaleString('es-ES', MILES)} / {r.total.toLocaleString('es-ES', MILES)} · {r.con_ficha.toLocaleString('es-ES', MILES)} con ficha</span>
                   {(releyendo || r.estado === 'en_cola' || fallo) && (
                     <span className={`shrink-0 ml-2 ${releyendo ? 'text-yellow-400' : fallo ? 'text-nf-red' : ''}`}>{ESTADO_RELECTURA[r.estado]}</span>
                   )}
@@ -399,7 +404,7 @@ interface GrupoRevision {
 }
 
 const POR_PAGINA = 30;
-const num = (n: number) => n.toLocaleString('es-ES');
+const num = (n: number) => n.toLocaleString('es-ES', MILES);
 const conAño = (t: string, y: number | null | undefined) => y ? `${t} (${y})` : t;
 // Una respuesta que no es JSON (un 502 del proxy) no puede tumbar la pantalla:
 // se trata como un error sin detalle y sale el texto por defecto.
@@ -633,7 +638,9 @@ function Revision() {
 
   return (
     <div>
-      <div className="flex gap-2 overflow-x-auto no-scrollbar -mx-4 px-4 mb-2">
+      {/* En varias filas y no deslizando: deslizando, el ultimo motivo salia
+          cortado por la derecha y parecia que no habia mas. */}
+      <div className="flex flex-wrap gap-2 mb-2">
         {(resumen?.motivos || []).map(m => (
           <button key={m.clave} onClick={() => setMotivo(m.clave)}
             className={`shrink-0 h-9 px-3.5 rounded-full text-[13px] font-semibold ${motivo === m.clave ? 'bg-white text-black' : 'bg-white/10 text-nf-text2'}`}>
@@ -870,7 +877,7 @@ function Creditos() {
           {[['Películas', cuenta('movie')], ['Series', cuenta('tv')], ['Enlaces', medidos]].map(([k, v]) => (
             <div key={k as string}>
               <p className="text-[11px] uppercase tracking-wide text-nf-text3">{k}</p>
-              <p className="text-[17px] font-semibold tabular-nums">{r ? (v as number).toLocaleString('es-ES') : '—'}</p>
+              <p className="text-[17px] font-semibold tabular-nums">{r ? (v as number).toLocaleString('es-ES', MILES) : '—'}</p>
             </div>
           ))}
         </div>
@@ -914,7 +921,7 @@ function PasadaCreditos() {
                 <div className="h-full bg-nf-red" style={{ width: `${pct}%` }} />
               </div>
               <p className="text-[12px] text-nf-text2 mt-1.5 tabular-nums">
-                {hechos.toLocaleString('es-ES')} de {total.toLocaleString('es-ES')} ({pct} %)
+                {hechos.toLocaleString('es-ES', MILES)} de {total.toLocaleString('es-ES', MILES)} ({pct} %)
                 {p.lanzada && p.segundos_restantes ? ` · ${cuantoQueda(p.segundos_restantes)}` : ''}
               </p>
             </>
@@ -998,17 +1005,24 @@ function Novedades() {
         ) : (
           <div className="rounded-2xl bg-white/5 divide-y divide-white/5">
             {items.map(n => (
-              <div key={n.id} className="flex items-center gap-3 p-3">
-                <div className="w-9 h-[54px] shrink-0 rounded-md overflow-hidden bg-white/5">
-                  {n.poster && <img src={`https://image.tmdb.org/t/p/w92${n.poster}`} alt="" loading="lazy" className="w-full h-full object-cover" />}
-                </div>
+              // La etiqueta va debajo y no al lado: al lado se comia el ancho y
+              // de cada fila solo se leia «YoSoyFran · Sin clasifi…».
+              <div key={n.id} className="flex items-start gap-3 p-3">
+                {n.poster && (
+                  <div className="w-9 h-[54px] shrink-0 rounded-md overflow-hidden bg-white/5">
+                    <img src={`https://image.tmdb.org/t/p/w92${n.poster}`} alt="" loading="lazy" className="w-full h-full object-cover" />
+                  </div>
+                )}
                 <div className="min-w-0 flex-1">
-                  <p className="text-[14px] truncate">{n.title || n.file_name}</p>
-                  <p className="text-[12px] text-nf-text3 truncate">{n.channel} · {tipo(n)} · {cuando(n.at)}</p>
+                  <p className="text-[14px] truncate">{n.title || n.file_name || 'Mensaje sin archivo'}</p>
+                  <p className="text-[12px] text-nf-text3 truncate">{n.channel} · {tipo(n)}</p>
+                  <p className="mt-1 flex items-center gap-2 text-[12px] text-nf-text3">
+                    <span className={`text-[11px] px-2 py-0.5 rounded-md ${n.indexed ? 'bg-nf-ok/15 text-green-300' : 'bg-white/10 text-nf-text2'}`}>
+                      {n.indexed ? 'Indexado' : n.reason || 'Descartado'}
+                    </span>
+                    <span>{cuando(n.at)}</span>
+                  </p>
                 </div>
-                <span className={`shrink-0 text-[11px] px-2 py-1 rounded-lg ${n.indexed ? 'bg-nf-ok/15 text-green-300' : 'bg-white/10 text-nf-text3'}`}>
-                  {n.indexed ? 'Indexado' : n.reason || 'Descartado'}
-                </span>
               </div>
             ))}
           </div>
@@ -1587,8 +1601,10 @@ function Registros() {
 
   useEffect(() => {
     const load = () => apiFetch('/logs?lines=200').then(r => r.json()).then(d => {
-      if (d.logs) { setLineas(d.logs); setAviso(''); }
-      else setAviso(d.error || d.detail || 'Sin registros disponibles.');
+      // Una lista vacia tambien es «verdadera»: antes un error con `logs: []`
+      // pintaba «0 líneas» y un recuadro negro sin decir por que.
+      if (d.logs?.length) { setLineas(d.logs); setAviso(''); }
+      else setAviso(d.error || d.detail || 'Todavía no hay nada en el registro.');
     }).catch(() => setAviso('No se han podido leer los registros.'));
     load();
     const t = setInterval(() => { if (!pausado) load(); }, 4000);
@@ -1606,7 +1622,7 @@ function Registros() {
       {aviso ? (
         <p className="rounded-2xl bg-white/5 p-4 text-[13px] text-nf-text2 leading-relaxed">{aviso}</p>
       ) : (
-        <pre className="rounded-2xl bg-black/50 p-3 text-[11px] leading-[1.5] overflow-x-auto whitespace-pre text-nf-text2">
+        <pre className="rounded-2xl bg-black/50 p-3 text-[11px] leading-[1.5] whitespace-pre-wrap break-all text-nf-text2">
 {lineas.join('\n')}
         </pre>
       )}
@@ -1631,7 +1647,7 @@ interface ResumenAdmin {
 /** Disco libre: en TB a partir de uno, que «3.412 GB» se lee peor que «3,3 TB». */
 const disco = (b: number) => b >= 1024 ** 4
   ? `${(b / 1024 ** 4).toLocaleString('es-ES', { maximumFractionDigits: 1 })} TB`
-  : `${Math.round(b / GB).toLocaleString('es-ES')} GB`;
+  : `${Math.round(b / GB).toLocaleString('es-ES', MILES)} GB`;
 
 const plural = (n: number, uno: string, varios: string) => n === 1 ? uno : varios;
 
@@ -1715,7 +1731,7 @@ function Resumen({ ir }: { ir: (id: string) => void }) {
     );
   }
 
-  const n = (v: number | null | undefined) => v == null ? '—' : v.toLocaleString('es-ES');
+  const n = (v: number | null | undefined) => v == null ? '—' : v.toLocaleString('es-ES', MILES);
   const { telegram: tg, catalogo: cat, revision: rev, descargas: des, peticiones: pet,
           creditos: cre, comprimidos: com, usuarios: usu } = r;
   const conFicha = cat && cat.total ? Math.round((cat.con_ficha / cat.total) * 100) : null;
@@ -1786,72 +1802,105 @@ function Resumen({ ir }: { ir: (id: string) => void }) {
   );
 }
 
-/** El menú de secciones, debajo del Resumen: grupos y filas como los Ajustes del iPhone. */
-function Menu({ ir }: { ir: (id: string) => void }) {
-  return (
-    <nav className="mt-2">
-      {GRUPOS.map(g => (
-        <div key={g.titulo}>
-          <p className="mt-6 mb-2 px-1 text-[12px] uppercase tracking-wider font-semibold text-nf-text3">{g.titulo}</p>
-          <div className="rounded-2xl bg-white/5 overflow-hidden">
-            {g.secciones.map(([id, nombre]) => (
-              <button key={id} onClick={() => ir(id)}
-                className="w-full h-12 flex items-center justify-between px-4 text-left text-[16px] border-b border-white/5 last:border-0 active:bg-white/10">
-                <span>{nombre}</span>
-                <IAdelante />
-              </button>
-            ))}
-          </div>
+/**
+ * La barra lateral: el menú de secciones, agrupado igual que en la web, que
+ * sale desde la izquierda con el botón ☰ de la cabecera, en la portada y en
+ * cualquier sección. Va por portal en el `<body>`: dentro de `.app-main` un
+ * `position: fixed` no se coloca respecto a la ventana en iOS (es lo mismo
+ * que obligó a sacar así el reproductor).
+ */
+function BarraLateral({ abierta, actual, cerrar, ir }: {
+  abierta: boolean; actual: string | undefined; cerrar: () => void; ir: (id: string | null) => void;
+}) {
+  // Montada siempre para poder animar la entrada y la salida (solo
+  // transform y opacidad).
+  return createPortal(
+    <div className={`fixed inset-0 z-[70] ${abierta ? '' : 'pointer-events-none'}`} aria-hidden={!abierta}>
+      <div onClick={cerrar}
+        className={`absolute inset-0 bg-black/60 transition-opacity duration-200 ${abierta ? 'opacity-100' : 'opacity-0'}`} />
+      <nav className={`absolute left-0 top-0 bottom-0 w-[82%] max-w-[320px] bg-[#141414] border-r border-white/10 overflow-y-auto
+                       transition-transform duration-200 ${abierta ? 'translate-x-0' : '-translate-x-full'}`}
+        style={{ paddingTop: 'calc(var(--safe-t) + 16px)', paddingBottom: 'calc(var(--safe-b) + 16px)' }}>
+        <div className="flex items-center justify-between px-4 mb-4">
+          <p className="text-[22px] font-bold">Administración</p>
+          <button onClick={cerrar} aria-label="Cerrar el menú" className="tap w-9 h-9 rounded-full bg-white/10 flex items-center justify-center">
+            <span className="w-5 h-5"><IClose /></span>
+          </button>
         </div>
-      ))}
-    </nav>
+        <div className="px-2">
+          <Entrada texto="Resumen" activa={!actual} onClick={() => ir(null)} />
+          {GRUPOS.map(g => (
+            <div key={g.titulo} className="mt-4">
+              <p className="px-3 mb-1 text-[11px] uppercase tracking-wider font-semibold text-nf-text3">{g.titulo}</p>
+              {g.secciones.map(([id, nombre]) => (
+                <Entrada key={id} texto={nombre} activa={actual === id} onClick={() => ir(id)} />
+              ))}
+            </div>
+          ))}
+        </div>
+      </nav>
+    </div>,
+    document.body,
+  );
+}
+
+function Entrada({ texto, activa, onClick }: { texto: string; activa: boolean; onClick: () => void }) {
+  return (
+    <button onClick={onClick}
+      className={`w-full h-11 px-3 rounded-xl text-left text-[16px] border-l-2 active:bg-white/10
+        ${activa ? 'bg-white/10 font-semibold border-nf-red' : 'text-nf-text2 border-transparent'}`}>
+      {texto}
+    </button>
   );
 }
 
 /**
- * El panel en el teléfono: sin sección, la portada (Resumen + menú); con
- * sección (`/admin/:tab`), esa sección a todo el ancho con su cabecera.
+ * El panel en el teléfono: sin sección, el Resumen; con sección
+ * (`/admin/:tab`), esa sección a todo el ancho. Se navega con la barra
+ * lateral (☰), igual en la portada que dentro de una sección, y desde las
+ * tarjetas y avisos del Resumen.
  *
  * La sección sigue en la ruta, así que los enlaces directos siguen valiendo
- * (el aviso de peticiones abre `/m/admin/peticiones`). Volver tiene dos casos:
- * si se llegó desde la portada se hace `navigate(-1)`, que devuelve la
- * portada con el scroll donde estaba (el armazón lo recupera en los POP); si
- * se entró directo, no hay portada detrás en el historial y «atrás» sacaría
- * de la app, así que se sustituye la entrada por la portada.
+ * (el aviso de peticiones abre `/m/admin/peticiones`). Del Resumen a una
+ * sección se apila (atrás vuelve al Resumen, con su scroll); de una sección a
+ * otra se sustituye, para que atrás no recorra todas las que se han mirado.
  */
 export default function Admin() {
   const { tab } = useParams();
   const navigate = useNavigate();
   const location = useLocation();
-  const ir = (id: string) => navigate(`/admin/${id}`, { state: { desdePortada: true } });
+  const [menu, setMenu] = useState(false);
   const sec = tab ? SECCION[tab] : undefined;
 
-  if (!sec) {
-    return (
-      <div className="px-4 pb-8" style={{ paddingTop: 'calc(var(--safe-t) + 20px)' }}>
-        <h1 className="text-[28px] font-bold mb-3">Administración</h1>
-        <Resumen ir={ir} />
-        <Menu ir={ir} />
-      </div>
-    );
-  }
-
-  const volver = () => {
-    if ((location.state as any)?.desdePortada) navigate(-1);
-    else navigate('/admin', { replace: true });
+  const ir = (id: string | null) => {
+    setMenu(false);
+    if (id === (sec ? tab : null)) return;
+    if (id === null) {
+      if ((location.state as any)?.desdePortada) navigate(-1);
+      else navigate('/admin', { replace: true });
+      return;
+    }
+    if (sec) navigate(`/admin/${id}`, { replace: true, state: location.state });
+    else navigate(`/admin/${id}`, { state: { desdePortada: true } });
   };
+
+  const cabecera = (
+    <div className="flex items-center gap-3 mb-4">
+      <button onClick={() => setMenu(true)} aria-label="Abrir el menú del panel"
+        className="tap w-10 h-10 -ml-1 shrink-0 rounded-full bg-white/10 flex items-center justify-center">
+        <span className="w-5 h-5"><IMenu /></span>
+      </button>
+      <h1 className="min-w-0 truncate text-[22px] font-bold">
+        {sec ? <><span className="text-nf-text3 font-semibold">{sec.grupo} › </span>{sec.nombre}</> : 'Administración'}
+      </h1>
+    </div>
+  );
 
   return (
     <div className="px-4 pb-6" style={{ paddingTop: 'calc(var(--safe-t) + 12px)' }}>
-      <div className="flex items-center gap-3 mb-4">
-        <button onClick={volver} aria-label="Volver al panel"
-          className="tap w-10 h-10 -ml-1 shrink-0 rounded-full bg-white/10 flex items-center justify-center">
-          <span className="w-5 h-5"><IBack /></span>
-        </button>
-        <h1 className="min-w-0 truncate text-[22px] font-bold">
-          <span className="text-nf-text3 font-semibold">{sec.grupo} › </span>{sec.nombre}
-        </h1>
-      </div>
+      {cabecera}
+      <BarraLateral abierta={menu} actual={sec ? tab : undefined} cerrar={() => setMenu(false)} ir={ir} />
+      {!sec && <Resumen ir={(id) => ir(id)} />}
       {tab === 'usuarios' && <Users />}
       {tab === 'descargas' && <DownloadsAll />}
       {tab === 'canales' && <Channels />}

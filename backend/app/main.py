@@ -14,6 +14,11 @@ logging.basicConfig(
 )
 logger = logging.getLogger("tmd")
 
+# Las ultimas lineas, tambien en memoria: en Docker no hay journalctl y sin
+# esto Admin -> Registros salia vacio (services/registro.py).
+from app.services import registro as _registro  # noqa: E402
+_registro.instalar(logging.Formatter("%(asctime)s | %(levelname)-7s | %(message)s", "%Y-%m-%d %H:%M:%S"))
+
 app = FastAPI(title="Telegram Movie Downloader")
 
 from app.config import load_config as _load_config

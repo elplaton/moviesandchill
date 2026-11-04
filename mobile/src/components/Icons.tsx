@@ -8,6 +8,7 @@ export const IShield = () => <svg {...b}><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-
 export const IPlay = () => <svg viewBox="0 0 24 24" className="w-full h-full" fill="currentColor"><path d="M7 4.5v15l12-7.5z" /></svg>;
 export const IVolume = () => <svg {...b}><path d="M11 5L6 9H3v6h3l5 4V5z" /><path d="M15.5 8.5a5 5 0 010 7" /></svg>;
 export const IMute = () => <svg {...b}><path d="M11 5L6 9H3v6h3l5 4V5z" /><path d="M16 9l5 6M21 9l-5 6" /></svg>;
+export const IMenu = () => <svg {...b}><path d="M4 7h16M4 12h16M4 17h16" /></svg>;
 export const IBack = () => <svg {...b}><path d="M15 5l-7 7 7 7" /></svg>;
 export const ITrash = () => <svg {...b}><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3" /></svg>;
 export const IStar = () => <svg viewBox="0 0 20 20" className="w-full h-full" fill="currentColor"><path d="M9.05 2.93c.3-.92 1.6-.92 1.9 0l1.07 3.29a1 1 0 00.95.69h3.46c.97 0 1.37 1.24.59 1.81l-2.8 2.03a1 1 0 00-.37 1.12l1.07 3.29c.3.92-.75 1.69-1.54 1.12l-2.8-2.03a1 1 0 00-1.18 0l-2.8 2.03c-.78.57-1.83-.2-1.53-1.12l1.07-3.29a1 1 0 00-.37-1.12L2.98 8.72c-.78-.57-.38-1.81.59-1.81h3.46a1 1 0 00.95-.69l1.07-3.29z" /></svg>;

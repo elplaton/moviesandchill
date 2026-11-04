@@ -2,6 +2,11 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { apiFetch } from '../../services/api';
 
+// Punto de miles también con cuatro cifras («6.429», no «6429»): el español
+// no lo pone por debajo de 10.000 y en las cifras del panel, unas con punto y
+// otras sin él, parecía un error.
+const MILES = { useGrouping: 'always' } as unknown as Intl.NumberFormatOptions;
+
 /**
  * La portada del panel: el estado de todo de un vistazo (`GET
  * /api/admin/resumen`). Arriba lo que pide atención, cada aviso llevando a la
@@ -26,7 +31,7 @@ interface Resumen {
   usuarios: { total: number; activos: number } | null;
 }
 
-const n = (x: number | null | undefined) => (x == null ? '—' : x.toLocaleString('es-ES'));
+const n = (x: number | null | undefined) => (x == null ? '—' : x.toLocaleString('es-ES', MILES));
 
 export function tamano(bytes: number): string {
   const gb = bytes / 1024 ** 3;

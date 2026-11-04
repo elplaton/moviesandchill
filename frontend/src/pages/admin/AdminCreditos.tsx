@@ -2,6 +2,11 @@ import { useEffect, useState } from 'react';
 import { apiFetch } from '../../services/api';
 import { botonPasada, cuantoQueda, estadoPasada, leerPasada, mandarPasada, resultadosPasada, type Pasada } from '../../services/pasadaCreditos';
 
+// Punto de miles también con cuatro cifras («6.429», no «6429»): el español
+// no lo pone por debajo de 10.000 y en las cifras del panel, unas con punto y
+// otras sin él, parecía un error.
+const MILES = { useGrouping: 'always' } as unknown as Intl.NumberFormatOptions;
+
 /**
  * Pestaña «Créditos» del panel: dónde empiezan los créditos de cada título
  * (services/creditos.py). Tres cosas: averiguarlos al ver (el interruptor
@@ -94,7 +99,7 @@ function PasadaCreditos() {
                 <div className="h-full bg-nf-red transition-[width] duration-500" style={{ width: `${pct}%` }} />
               </div>
               <p className="text-nf-dim text-xs mt-2 tabular-nums">
-                {hechos.toLocaleString('es-ES')} de {total.toLocaleString('es-ES')} películas y temporadas ({pct} %)
+                {hechos.toLocaleString('es-ES', MILES)} de {total.toLocaleString('es-ES', MILES)} películas y temporadas ({pct} %)
                 {p.lanzada && p.segundos_restantes ? ` · ${cuantoQueda(p.segundos_restantes)}` : ''}
               </p>
             </>
@@ -127,8 +132,8 @@ function Resumen() {
   const de = (tipo: string) => (r?.titulos || []).filter(t => t.tmdb_type === tipo);
   const linea = (filas: { fuente: string; n: number }[]) => {
     const total = filas.reduce((a, f) => a + f.n, 0);
-    const partes = filas.map(f => `${f.n.toLocaleString('es-ES')} ${FUENTE[f.fuente] || f.fuente}`).join(' · ');
-    return `${total.toLocaleString('es-ES')}${partes ? ` (${partes})` : ''}`;
+    const partes = filas.map(f => `${f.n.toLocaleString('es-ES', MILES)} ${FUENTE[f.fuente] || f.fuente}`).join(' · ');
+    return `${total.toLocaleString('es-ES', MILES)}${partes ? ` (${partes})` : ''}`;
   };
   const medidos = (r?.enlaces || []).reduce((a, e) => a + e.n, 0);
   return (
@@ -136,7 +141,7 @@ function Resumen() {
       <h2 className="text-white font-semibold mb-3">Lo que ya se sabe</h2>
       {!r ? <p className="text-nf-dim text-sm">Consultando…</p> : (
         <div className="grid grid-cols-3 gap-3">
-          {[['Películas', linea(de('movie'))], ['Series', linea(de('tv'))], ['Enlaces medidos', medidos.toLocaleString('es-ES')]].map(([k, v]) => (
+          {[['Películas', linea(de('movie'))], ['Series', linea(de('tv'))], ['Enlaces medidos', medidos.toLocaleString('es-ES', MILES)]].map(([k, v]) => (
             <div key={k}>
               <p className="text-nf-faint text-micro uppercase tracking-wide">{k}</p>
               <p className="text-white text-sm font-semibold">{v}</p>

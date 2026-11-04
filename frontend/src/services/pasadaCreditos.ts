@@ -5,6 +5,11 @@
  */
 import { apiFetch } from './api';
 
+// Punto de miles también con cuatro cifras («6.429», no «6429»): el español
+// no lo pone por debajo de 10.000 y en las cifras del panel, unas con punto y
+// otras sin él, parecía un error.
+const MILES = { useGrouping: 'always' } as unknown as Intl.NumberFormatOptions;
+
 export interface Pasada {
   estado: 'parada' | 'en_marcha' | 'pausada' | 'terminada' | 'error';
   lanzada: boolean;
@@ -77,6 +82,6 @@ const RESULTADOS: Record<string, string> = {
 export function resultadosPasada(p: Pasada): string {
   return Object.entries(p.resultados || {})
     .filter(([, n]) => n > 0)
-    .map(([k, n]) => `${n.toLocaleString('es-ES')} ${RESULTADOS[k] || k}`)
+    .map(([k, n]) => `${n.toLocaleString('es-ES', MILES)} ${RESULTADOS[k] || k}`)
     .join(' · ');
 }
