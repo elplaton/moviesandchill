@@ -60,6 +60,10 @@ import {
  *  final»: los créditos de una película pueden durar diez minutos. */
 const REPREGUNTAR_CREDITOS_MS = 60_000;
 const MAX_PREGUNTAS_CREDITOS = 5;
+/** Y una vez más a este tiempo del final si aún no están medidos: si medirlos
+ *  tardó más de esos cinco minutos (la cola ocupada, Telegram lento), el dato
+ *  suele estar ya y la tarjeta sale al empezar los créditos de todas formas. */
+const PREGUNTA_FINAL_S = 15 * 60;
 
 /** Lo que se queda el mensaje en pantalla antes de quitarse de en medio. */
 const MENSAJE_MS = 3200;
@@ -184,6 +188,7 @@ export function useSiguiente({ path, tmdbId, mediaType, onVer, onCerrar, pausar 
   const creditosPedidos = useRef(0);
   const creditosUltima = useRef(0);
   const creditosRef = useRef<{ inicio: number | null; origen: string | null }>({ inicio: null, origen: null });
+  const preguntaFinal = useRef(false);
   // «Ver créditos» en la pantalla del final: no vuelve a salir hasta que acaba.
   const finalVisto = useRef(false);
   // De qué archivo se ha avisado ya de que empezaron los créditos.
@@ -220,6 +225,7 @@ export function useSiguiente({ path, tmdbId, mediaType, onVer, onCerrar, pausar 
     creditosPedidos.current = 0;
     creditosUltima.current = 0;
     creditosRef.current = { inicio: null, origen: null };
+    preguntaFinal.current = false;
     finalVisto.current = false;
     setInicioCreditos(null);
     setRelacionados([]);
@@ -267,6 +273,9 @@ export function useSiguiente({ path, tmdbId, mediaType, onVer, onCerrar, pausar 
             && ahora - creditosUltima.current > REPREGUNTAR_CREDITOS_MS)) {
       creditosPedidos.current += 1;
       creditosUltima.current = ahora;
+      pedirCreditos(duracion);
+    } else if (creditosRef.current.origen !== 'medido' && !preguntaFinal.current && quedan < PREGUNTA_FINAL_S) {
+      preguntaFinal.current = true;
       pedirCreditos(duracion);
     }
 
