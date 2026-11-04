@@ -23,6 +23,7 @@ import asyncio
 import csv
 import io
 import logging
+import re
 from datetime import date
 
 logger = logging.getLogger("tmd")
@@ -147,6 +148,58 @@ async def _relleno(api_key: str, ids: set[int], tipo: str, ya: set[int], faltan:
     return out
 
 
+_PARTE = re.compile(r"^(part|parte|season|temporada|volume|volumen|vol\.)\s*(\d+)$", re.IGNORECASE)
+_PLURAL = {"part": "Partes", "parte": "Partes", "season": "Temporadas", "temporada": "Temporadas",
+           "volume": "Volúmenes", "volumen": "Volúmenes", "vol.": "Volúmenes"}
+_SINGULAR = {"part": "Parte", "parte": "Parte", "season": "Temporada", "temporada": "Temporada",
+             "volume": "Volumen", "volumen": "Volumen", "vol.": "Volumen"}
+
+
+def _subtitulo_juntado(subs: list[str]) -> str:
+    """«Part 4», «Part 1», «Part 3» -> «Partes 1, 3 y 4»; seguidas, «Partes 1 a 4»."""
+    partes = [_PARTE.match(x.strip()) for x in subs]
+    if all(partes) and len({m.group(1).lower() for m in partes}) == 1:
+        nums = sorted({int(m.group(2)) for m in partes})
+        palabra = _PLURAL[partes[0].group(1).lower()]
+        if len(nums) > 2 and nums == list(range(nums[0], nums[-1] + 1)):
+            return f"{palabra} {nums[0]} a {nums[-1]}"
+        texto = ", ".join(map(str, nums[:-1]))
+        return f"{palabra} {texto} y {nums[-1]}" if len(nums) > 1 else f"{_SINGULAR[partes[0].group(1).lower()]} {nums[0]}"
+    return " · ".join(dict.fromkeys(subs))
+
+
+def _subtitulo(sub: str | None) -> str | None:
+    m = _PARTE.match((sub or "").strip())
+    return f"{_SINGULAR[m.group(1).lower()]} {m.group(2)}" if m else sub
+
+
+def juntar_partes(items: list[dict]) -> list[dict]:
+    """Una tarjeta por titulo. El top oficial de Netflix cuenta cada parte o
+    temporada por separado («Lupin: Part 1» a «Part 4», y una semana salieron
+    las cuatro entre las diez series), pero dentro de la app sale una vez: se
+    queda en su mejor puesto con «Partes 1 a 4» y los de detras suben. Por
+    ficha de TMDB y, lo que no la tiene, por titulo."""
+    out: list[dict] = []
+    por: dict[tuple, dict] = {}
+    for it in items:
+        clave = ("id", it["tmdb_id"]) if it.get("tmdb_id") else ("titulo", (it.get("titulo") or "").strip().lower())
+        if clave in por:
+            por[clave]["_subs"].append(it.get("subtitulo"))
+            continue
+        nuevo = {**it, "_subs": [it.get("subtitulo")]}
+        por[clave] = nuevo
+        out.append(nuevo)
+    for n, it in enumerate(out, start=1):
+        subs = [x for x in it.pop("_subs") if x]
+        if len(subs) > 1:
+            it["subtitulo"] = _subtitulo_juntado(subs)
+        elif subs:
+            it["subtitulo"] = _subtitulo(subs[0])
+        if "puesto" in it:
+            it["puesto"] = n
+    return out
+
+
 async def _bajar_netflix() -> tuple[str | None, list[dict]]:
     """La ultima semana publicada para España y sus filas, sin emparejar.
     (None, []) si no se puede bajar o leer."""
@@ -212,6 +265,7 @@ async def _netflix_oficial(api_key: str, semana_guardada: str | None = None
             item["subtitulo"] = (temporada.replace("Season", "Temporada")
                                  .replace("Limited Series", "Miniserie"))
         out[tipo].append(item)
+    out["tv"] = juntar_partes(out["tv"])
     logger.info("Top de Netflix (semana del %s): %d peliculas, %d series",
                 semana, len(out["movie"]), len(out["tv"]))
     return semana, out
@@ -342,7 +396,9 @@ async def ultimo(ambito: str, tipo: str) -> tuple[str | None, str, list[dict]]:
     items = [{"tmdb_id": f["tmdb_id"], "puesto": f["puesto"],
               **(json.loads(f["datos"]) if isinstance(f["datos"], str) else (f["datos"] or {}))}
              for f in filas]
-    return filas[0]["fecha"].isoformat(), filas[0]["fuente"], items
+    # Tambien al leer: la foto guardada antes de juntarlas (o una de otro
+    # sitio) puede traer la misma serie varias veces.
+    return filas[0]["fecha"].isoformat(), filas[0]["fuente"], juntar_partes(items)
 
 
 async def _semana_guardada() -> str | None:
