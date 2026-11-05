@@ -867,33 +867,45 @@ function Cache() {
   );
 }
 
-/** Pestaña Créditos: averiguarlos al ver, la pasada completa y cuánto se sabe. */
+/** Pestaña Créditos: usarlos o no, averiguarlos al ver, la pasada completa y cuánto se sabe. */
 function Creditos() {
-  const [on, setOn] = useState<boolean | null>(null);
+  const [conf, setConf] = useState<{ activos: boolean; alVer: boolean } | null>(null);
   const [r, setR] = useState<any>(null);
   useEffect(() => {
-    apiFetch('/config').then(x => x.json()).then(d => setOn(!!d.config?.creditos_analizar)).catch(() => {});
+    apiFetch('/config').then(x => x.json())
+      .then(d => setConf({ activos: d.config?.creditos_activos !== false, alVer: !!d.config?.creditos_analizar }))
+      .catch(() => {});
     apiFetch('/admin/creditos/resumen').then(x => x.json()).then(setR).catch(() => {});
   }, []);
-  const cambiar = async () => {
-    const nuevo = !on;
-    setOn(nuevo);
-    const res = await apiFetch('/config', { method: 'POST', body: JSON.stringify({ creditos_analizar: nuevo }) }).catch(() => null);
-    if (!res || !res.ok) { setOn(!nuevo); toast('No se ha podido guardar', 'error'); return; }
+  const cambiar = async (clave: 'creditos_activos' | 'creditos_analizar', nuevo: boolean) => {
+    const campo = clave === 'creditos_activos' ? 'activos' : 'alVer';
+    setConf(c => c && { ...c, [campo]: nuevo });
+    const res = await apiFetch('/config', { method: 'POST', body: JSON.stringify({ [clave]: nuevo }) }).catch(() => null);
+    if (!res || !res.ok) { setConf(c => c && { ...c, [campo]: !nuevo }); toast('No se ha podido guardar', 'error'); return; }
     toast('Guardado', 'ok');
   };
   const cuenta = (tipo: string) => (r?.titulos || []).filter((t: any) => t.tmdb_type === tipo).reduce((a: number, t: any) => a + t.n, 0);
   const medidos = (r?.enlaces || []).reduce((a: number, e: any) => a + e.n, 0);
+  const activos = !!conf?.activos;
+  const fila = (titulo: string, texto: string, on: boolean, disabled: boolean, onClick: () => void) => (
+    <button onClick={onClick} disabled={disabled} role="switch" aria-checked={on}
+      className="w-full flex items-center justify-between gap-3 py-3 text-left disabled:opacity-40">
+      <div>
+        <p className="text-[15px]">{titulo}</p>
+        <p className="text-[12px] text-nf-text3">{texto}</p>
+      </div>
+      <span className={`w-12 h-7 rounded-full relative shrink-0 ${on ? 'bg-nf-red' : 'bg-white/15'}`}><span className={`absolute top-0.5 w-6 h-6 rounded-full bg-white transition-transform ${on ? 'translate-x-[22px]' : 'translate-x-0.5'}`} /></span>
+    </button>
+  );
   return (
     <div>
-      <section className="rounded-2xl bg-white/5 px-4 py-1 mb-4">
-        <button onClick={cambiar} disabled={on === null} className="w-full flex items-center justify-between py-3 text-left">
-          <div>
-            <p className="text-[15px]">Averiguar los créditos al ver</p>
-            <p className="text-[12px] text-nf-text3">Si no se sabe dónde empiezan, se miden en Telegram mientras se ve</p>
-          </div>
-          <span className={`w-12 h-7 rounded-full relative shrink-0 ${on ? 'bg-nf-red' : 'bg-white/15'}`}><span className={`absolute top-0.5 w-6 h-6 rounded-full bg-white transition-transform ${on ? 'translate-x-[22px]' : 'translate-x-0.5'}`} /></span>
-        </button>
+      <section className="rounded-2xl bg-white/5 px-4 py-1 mb-4 divide-y divide-white/10">
+        {fila('Usar los créditos',
+          'La tarjeta del siguiente sale al empezar los créditos. Apagado, siempre 45 s antes del final',
+          activos, !conf, () => cambiar('creditos_activos', !activos))}
+        {fila('Averiguar los créditos al ver',
+          'Si no se sabe dónde empiezan, se miden en Telegram mientras se ve',
+          !!conf?.alVer, !conf || !activos, () => cambiar('creditos_analizar', !conf?.alVer))}
       </section>
       <PasadaCreditos />
       <section className="rounded-2xl bg-white/5 p-4 mb-4">
@@ -1670,7 +1682,7 @@ interface ResumenAdmin {
   revision: { archivos: number; grupos: number; por_motivo: Record<string, number> } | null;
   descargas: { activas: number; disco_libre: number } | null;
   peticiones: { en_cola: number; pausadas: boolean; chat: string | null } | null;
-  creditos: { al_ver: boolean; pasada: { estado: string; lanzada: boolean; hechos: number | null; total: number | null; cediendo: string | null } } | null;
+  creditos: { activos?: boolean; al_ver: boolean; pasada: { estado: string; lanzada: boolean; hechos: number | null; total: number | null; cediendo: string | null } } | null;
   comprimidos: { revisados: number; ver: number } | null;
   usuarios: { total: number; activos: number; en_linea?: number } | null;
 }
@@ -1817,7 +1829,7 @@ function Resumen({ ir }: { ir: (id: string) => void }) {
           valor={pctPasada != null ? `${pctPasada} %` : '—'}
           tono={pas?.estado === 'error' ? 'aviso' : undefined}
           lineas={cre ? [!!pas?.total && `${n(pas.hechos ?? 0)} de ${n(pas.total)}`, pas && pasadaCorta(pas),
-                         `Al ver: ${cre.al_ver ? 'encendido' : 'apagado'}`] : ['No disponible']} />
+                         cre.activos === false ? 'Desactivados' : `Al ver: ${cre.al_ver ? 'encendido' : 'apagado'}`] : ['No disponible']} />
 
         {/* Como en la web: lo que importa es cuántos se pueden ver, y lleva a
             Canales, que es donde vive lo indexado (no tiene sección propia). */}

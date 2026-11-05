@@ -3,6 +3,7 @@
 #
 #   ./deploy.sh                  despliegue completo
 #   TV_IP=192.168.1.50 ./deploy.sh
+#   TV_NAME=lg-salon TV_IP=192.168.1.59 ./deploy.sh   otra tele (cada una con su nombre)
 #   ./deploy.sh --no-launch      instala pero no arranca
 #   ./deploy.sh --setup          registra la tele en el CLI (pide la clave de Developer Mode)
 #
@@ -12,7 +13,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 TV_IP="${TV_IP:-192.168.1.47}"
-TV_NAME="lgtv"
+TV_NAME="${TV_NAME:-lgtv}"
 APP_ID="com.moviesandchill.tv"
 ARES="npx --prefix ../tizen"
 
@@ -39,8 +40,11 @@ if ! nc -z -G 3 "$TV_IP" 9922 2>/dev/null; then
   die "la TV no responde en $TV_IP. Comprueba la IP (el DHCP la cambia)."
 fi
 
-if [ "$SETUP" = "1" ] || ! $ARES ares-setup-device --list 2>/dev/null | grep -q "$TV_NAME"; then
+if [ "$SETUP" = "1" ] || ! $ARES ares-setup-device --list 2>/dev/null | grep -q "^$TV_NAME "; then
   echo "==> Registrando la TV como '$TV_NAME' (te pedira la passphrase de la app Developer Mode)..."
+  if $ARES ares-setup-device --list 2>/dev/null | grep -q "^$TV_NAME "; then
+    $ARES ares-setup-device --remove "$TV_NAME" >/dev/null
+  fi
   $ARES ares-setup-device --add "$TV_NAME" --info "{\"host\":\"$TV_IP\",\"port\":\"9922\",\"username\":\"prisoner\"}" >/dev/null
   $ARES ares-novacom --device "$TV_NAME" --getkey
 fi

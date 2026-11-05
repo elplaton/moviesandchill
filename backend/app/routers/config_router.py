@@ -25,6 +25,7 @@ class ConfigUpdateRequest(BaseModel):
     download_parallel: int | None = None
     convert_dts_to_ac3: bool | None = None
     tmdb_enabled: bool | None = None
+    creditos_activos: bool | None = None
     creditos_analizar: bool | None = None
 
 

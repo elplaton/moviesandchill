@@ -26,7 +26,7 @@ interface Resumen {
   revision: { archivos: number; grupos: number } | null;
   descargas: { activas: number; disco_libre: number } | null;
   peticiones: { en_cola: number; pausadas: boolean; chat: string | null } | null;
-  creditos: { al_ver: boolean; pasada: { estado: string; lanzada: boolean; hechos: number | null; total: number | null; cediendo: string | null } } | null;
+  creditos: { activos?: boolean; al_ver: boolean; pasada: { estado: string; lanzada: boolean; hechos: number | null; total: number | null; cediendo: string | null } } | null;
   comprimidos: { revisados: number; ver: number } | null;
   usuarios: { total: number; activos: number; en_linea?: number } | null;
 }
@@ -132,7 +132,7 @@ export default function AdminResumen() {
         <Tarjeta titulo="Créditos" onClick={() => ir('creditos')}
           estado={!pas ? 'nada' : pas.estado === 'error' ? 'aviso' : 'ok'}
           cifra={pas?.total ? `${pctPasada} %` : '—'}
-          linea={!cre ? '' : `pasada ${pas?.lanzada ? 'en marcha' : pas?.estado === 'terminada' ? 'terminada' : 'parada'} · al ver ${cre.al_ver ? 'sí' : 'no'}`} />
+          linea={!cre ? '' : cre.activos === false ? 'desactivados' : `pasada ${pas?.lanzada ? 'en marcha' : pas?.estado === 'terminada' ? 'terminada' : 'parada'} · al ver ${cre.al_ver ? 'sí' : 'no'}`} />
         <Tarjeta titulo="Comprimidos" onClick={() => ir('canales')}
           estado={!com ? 'nada' : 'ok'}
           cifra={n(com?.ver)}

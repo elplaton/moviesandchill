@@ -19,9 +19,15 @@ async def creditos(path: str, user: Annotated[str, Depends(get_current_user)],
     con ella se predice el inicio a partir de otro enlace del mismo titulo.
     `tmdb_id`/`media_type`/`season` solo hacen falta para lo descargado; lo
     de Telegram ya sabe de que titulo es."""
+    from app.routers.download import config
     from app.services.creditos import consultar
     from app.services.proceso_creditos import al_reproducir
     from app.tasks import spawn
+
+    # Apagado desde el panel: como si no se supiera, que es lo que hace al
+    # reproductor volver a su regla fija. Y sin lanzar nada que gaste Telegram.
+    if not (config or {}).get("creditos_activos", True):
+        return {"inicio": None, "origen": None, "fuente": None, "postcreditos": False}
 
     r = await consultar(path, duracion, tmdb_id=tmdb_id, tmdb_type=media_type, temporada=season)
     # Abrir algo es lo que pone en marcha averiguar sus creditos: sin dato, el

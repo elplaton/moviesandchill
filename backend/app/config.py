@@ -73,6 +73,11 @@ def load_config(force_reload: bool = False) -> dict:
         # Cada cuantos minutos se mira si han llegado episodios de las series
         # que alguien sigue (0 = no avisar).
         "avisos_minutos": _env_int("TMD_AVISOS_MINUTOS", 10),
+        # Usar los creditos en los reproductores (la tarjeta del siguiente
+        # episodio y el «visto» al empezar los creditos). Apagado, `/api/creditos`
+        # no da nada y los reproductores vuelven a su regla fija de 45 s antes
+        # del final; tampoco se averigua nada al ver. Lo medido no se borra.
+        "creditos_activos": _env_bool("TMD_CREDITOS", True),
         # Averiguar los creditos mirando la imagen (services/proceso_creditos.py)
         # al reproducir algo que no los tiene. Apagado por defecto: gasta
         # Telegram (un episodio ~5 MB, una pelicula ~25-50 MB) y hasta que se
@@ -158,7 +163,7 @@ def _env_json(key: str, default):
 # lo guardado en la base de datos es lo ultimo que dijo el usuario.
 SAVED_SETTING_KEYS = ("api_id", "api_hash", "phone")
 # Interruptores del panel que se guardan igual ("1"/"0").
-SAVED_BOOL_KEYS = ("creditos_analizar",)
+SAVED_BOOL_KEYS = ("creditos_activos", "creditos_analizar")
 
 
 async def apply_saved_settings(cfg: dict) -> dict:

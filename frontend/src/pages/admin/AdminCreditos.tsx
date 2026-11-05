@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { apiFetch } from '../../services/api';
 import { botonPasada, cuantoQueda, estadoPasada, leerPasada, mandarPasada, resultadosPasada, type Pasada } from '../../services/pasadaCreditos';
 
@@ -9,14 +9,44 @@ const MILES = { useGrouping: 'always' } as unknown as Intl.NumberFormatOptions;
 
 /**
  * Pestaña «Créditos» del panel: dónde empiezan los créditos de cada título
- * (services/creditos.py). Tres cosas: averiguarlos al ver (el interruptor
- * TMD_CREDITOS_ANALIZAR, guardado en la base de datos), la pasada completa
- * del catálogo (services/pasada_creditos.py) y cuánto se sabe ya.
+ * (services/creditos.py). Cuatro cosas: usarlos o no (el interruptor general,
+ * `creditos_activos`), averiguarlos al ver (TMD_CREDITOS_ANALIZAR), la pasada
+ * completa del catálogo (services/pasada_creditos.py) y cuánto se sabe ya. Los
+ * dos interruptores se guardan en la base de datos y mandan sobre el .env.
  */
 export default function AdminCreditos({ onToast }: { onToast: (m: string) => void }) {
+  const [conf, setConf] = useState<{ activos: boolean; alVer: boolean } | null>(null);
+  useEffect(() => {
+    apiFetch('/config').then(r => r.json())
+      .then(d => setConf({ activos: d.config?.creditos_activos !== false, alVer: !!d.config?.creditos_analizar }))
+      .catch(() => setConf(null));
+  }, []);
+  const cambiar = async (clave: 'creditos_activos' | 'creditos_analizar', nuevo: boolean, ok: string) => {
+    const campo = clave === 'creditos_activos' ? 'activos' : 'alVer';
+    setConf(c => c && { ...c, [campo]: nuevo });
+    const r = await apiFetch('/config', { method: 'POST', body: JSON.stringify({ [clave]: nuevo }) }).catch(() => null);
+    if (!r || !r.ok) { setConf(c => c && { ...c, [campo]: !nuevo }); onToast('No se ha podido guardar'); return; }
+    onToast(ok);
+  };
+  const activos = !!conf?.activos;
   return (
     <div className="max-w-2xl">
-      <AlVer onToast={onToast} />
+      <div className={CAJA}>
+        <Interruptor titulo="Usar los créditos" on={activos} disabled={!conf}
+          onClick={() => cambiar('creditos_activos', !activos, !activos ? 'Créditos activados' : 'Créditos desactivados')}>
+          Al empezar los créditos sale la tarjeta del siguiente episodio (o «Más títulos como este») y lo que se
+          estaba viendo se da por visto. Apagado, eso pasa siempre 45 s antes del final, como si no se supieran, y
+          no se mide nada al ver. Lo ya medido no se borra.
+        </Interruptor>
+        <div className={`mt-5 pt-5 border-t border-white/10 transition-opacity ${activos ? '' : 'opacity-40'}`}>
+          <Interruptor titulo="Averiguar los créditos al ver" on={!!conf?.alVer} disabled={!conf || !activos}
+            onClick={() => cambiar('creditos_analizar', !conf?.alVer,
+              !conf?.alVer ? 'Se averiguarán los créditos al ver' : 'Ya no se averiguan al ver')}>
+            Si alguien abre algo cuyos créditos no se saben, se miden mientras lo ve (los últimos fotogramas, en
+            Telegram) y la tarjeta del siguiente episodio sale a tiempo.
+          </Interruptor>
+        </div>
+      </div>
       <PasadaCreditos />
       <Resumen />
     </div>
@@ -25,34 +55,20 @@ export default function AdminCreditos({ onToast }: { onToast: (m: string) => voi
 
 const CAJA = 'bg-white/5 backdrop-blur-md border border-white/10 rounded-2xl p-6 mb-6 shadow-xl';
 
-function AlVer({ onToast }: { onToast: (m: string) => void }) {
-  const [on, setOn] = useState<boolean | null>(null);
-  useEffect(() => {
-    apiFetch('/config').then(r => r.json()).then(d => setOn(!!d.config?.creditos_analizar)).catch(() => setOn(null));
-  }, []);
-  const cambiar = async () => {
-    const nuevo = !on;
-    setOn(nuevo);
-    const r = await apiFetch('/config', { method: 'POST', body: JSON.stringify({ creditos_analizar: nuevo }) }).catch(() => null);
-    if (!r || !r.ok) { setOn(!nuevo); onToast('No se ha podido guardar'); return; }
-    onToast(nuevo ? 'Se averiguarán los créditos al ver' : 'Ya no se averiguan al ver');
-  };
+function Interruptor({ titulo, on, disabled, onClick, children }: {
+  titulo: string; on: boolean; disabled: boolean; onClick: () => void; children: ReactNode;
+}) {
   return (
-    <div className={CAJA}>
-      <div className="flex items-center justify-between gap-4">
-        <div>
-          <h2 className="text-white font-semibold">Averiguar los créditos al ver</h2>
-          <p className="text-nf-faint text-xs mt-1">
-            Si alguien abre algo cuyos créditos no se saben, se miden mientras lo ve (los últimos fotogramas, en
-            Telegram) y la tarjeta del siguiente episodio sale a tiempo. Se guarda: sobrevive a reinicios.
-          </p>
-        </div>
-        <button type="button" role="switch" aria-checked={!!on} aria-label="Averiguar los créditos al ver"
-          disabled={on === null} onClick={cambiar}
-          className={`w-14 h-7 shrink-0 rounded-full transition-colors duration-300 relative ${on ? 'bg-nf-red shadow-lg shadow-nf-red/30' : 'bg-white/10'}`}>
-          <span className={`absolute left-0 top-0.5 w-6 h-6 rounded-full bg-white shadow-md transition-transform duration-300 ${on ? 'translate-x-[30px]' : 'translate-x-0.5'}`} />
-        </button>
+    <div className="flex items-center justify-between gap-4">
+      <div>
+        <h2 className="text-white font-semibold">{titulo}</h2>
+        <p className="text-nf-faint text-xs mt-1">{children}</p>
       </div>
+      <button type="button" role="switch" aria-checked={on} aria-label={titulo}
+        disabled={disabled} onClick={onClick}
+        className={`w-14 h-7 shrink-0 rounded-full transition-colors duration-300 relative disabled:cursor-not-allowed ${on ? 'bg-nf-red shadow-lg shadow-nf-red/30' : 'bg-white/10'}`}>
+        <span className={`absolute left-0 top-0.5 w-6 h-6 rounded-full bg-white shadow-md transition-transform duration-300 ${on ? 'translate-x-[30px]' : 'translate-x-0.5'}`} />
+      </button>
     </div>
   );
 }

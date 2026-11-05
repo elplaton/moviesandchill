@@ -89,7 +89,8 @@ async def _creditos() -> dict:
     p = pasada_creditos.estado()
     if p.get("estado") != "en_marcha":
         p = await pasada_creditos.resumen()
-    return {"al_ver": bool(config.get("creditos_analizar")),
+    return {"activos": bool(config.get("creditos_activos", True)),
+            "al_ver": bool(config.get("creditos_analizar")),
             "pasada": {k: p.get(k) for k in ("estado", "lanzada", "hechos", "total", "cediendo")}}
 
 
