@@ -286,6 +286,43 @@ async def _leer_de(ruta, d, c):
         return f.read(c)
 
 
+def probar_plazas():
+    """El tope es de lo que se recodifica (AVI): lo que copia la imagen no
+    cuenta, a quien esta viendo no se le quita la plaza y a quien ya no, si."""
+    import time
+    print("plazas para recodificar")
+    ahora = time.monotonic()
+
+    def ses(path, recodificar, hace=0.0):
+        d = tempfile.mkdtemp()
+        return hls.Sesion(path=path, url="", claves=[0.0], duracion=1, audio=None,
+                          hevc=False, dir=d, recodificar=recodificar, usado=ahora - hace)
+
+    hls._sesiones.clear()
+    for i in range(20):
+        hls._sesiones[f"tg:1:{i}"] = ses(f"tg:1:{i}", False)
+    comprueba("veinte copiando no ocupan plaza", None, hls._plaza(ses("tg:2:0", True)))
+    for i in range(hls.RECODIFICANDO_MAX):
+        hls._sesiones[f"tg:3:{i}"] = ses(f"tg:3:{i}", True, hace=i)
+    nueva = ses("tg:2:2", True)
+    try:
+        hls._plaza(nueva)
+        comprueba("con todas viendo, la nueva espera", "Lleno", "entro")
+    except hls.Lleno:
+        comprueba("con todas viendo, la nueva espera", "Lleno", "Lleno")
+    comprueba("y no deja su carpeta", False, os.path.isdir(nueva.dir))
+    otro_idioma = ses("tg:3:2", True)
+    comprueba("cambiar de idioma reaprovecha la plaza de su sesion", "tg:3:2",
+              hls._plaza(otro_idioma))
+    hls._sesiones["tg:3:4"].usado = ahora - hls.SIN_USO_S - 1
+    comprueba("una que lleva rato sin usarse deja la suya", "tg:3:4",
+              hls._plaza(ses("tg:2:3", True)))
+    for s in hls._sesiones.values():
+        shutil.rmtree(s.dir, ignore_errors=True)
+    hls._sesiones.clear()
+
+
+probar_plazas()
 if not shutil.which("ffmpeg"):
     print("Sin ffmpeg: no se puede probar el HLS al vuelo")
     sys.exit(0)

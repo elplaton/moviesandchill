@@ -61,9 +61,15 @@ SALTO = 12
 # Lo que queda detras de lo pedido y se conserva (volver unos segundos atras).
 ATRAS = 30
 ESPERA_TROZO = 45
-# Copiando la imagen una sesion casi no gasta (solo el audio pasa a AAC);
-# recodificando, con dos hilos y a 9 veces el tiempo real, tampoco mucho.
-SESIONES_MAX = 6
+# Cuantas sesiones pueden estar **recodificando** a la vez (AVI, XviD...: x264
+# con dos hilos, ~11 % de un nucleo cada una). Las que copian la imagen no
+# cuentan: casi no gastan (solo el audio pasa a AAC) y lo que las limita es el
+# ancho de banda de Telegram, no el servidor.
+RECODIFICANDO_MAX = 6
+# Una sesion que recodifica y lleva esto sin que se le pida nada esta cerrada
+# o en pausa (un reproductor en marcha pide un trozo cada 4 s): se le puede
+# quitar la plaza. Si vuelve, se le arma otra al pedir.
+SIN_USO_S = 90
 # Recodificando: cada cuanto se pone un fotograma clave (y por tanto un trozo)
 # y hasta que alto de imagen se acepta.
 TROZO_S = 4
@@ -201,10 +207,41 @@ async def sesion(path: str, audio: int | None = None) -> Sesion:
         if s:
             return s
         s = await _crear(path, audio)
+        # Lo que se mira y lo que se cambia va sin ningun await en medio: dos
+        # sesiones creandose a la vez no pueden coger la misma plaza.
+        sobra = _plaza(s) if s.recodificar else None
         _sesiones[clave] = s
         _arrancar_limpiador()
-        await _hacer_sitio(clave)
+        if sobra:
+            logger.info("HLS al vuelo %s: se cierra %s, sin uso, para dejar sitio", path, sobra)
+            await _cerrar(sobra)
         return s
+
+
+class Lleno(Exception):
+    """Ya hay RECODIFICANDO_MAX sesiones recodificando y todas en uso."""
+
+
+def _plaza(nueva: Sesion) -> str | None:
+    """Sitio para una sesion que recodifica. Si estan todas cogidas, la que
+    lleve mas tiempo sin usarse deja la suya, pero solo si lleva SIN_USO_S
+    parada: a quien esta viendo no se le corta la pelicula para darsela a otro,
+    se le dice al que llega que espere (`Lleno`). Devuelve la sesion a cerrar."""
+    recodificando = [(c, s) for c, s in _sesiones.items() if s.recodificar]
+    if len(recodificando) < RECODIFICANDO_MAX:
+        return None
+    # El mismo archivo en otro idioma es la misma persona cambiando de pista:
+    # la sesion de antes ya no la va a usar.
+    for c, s in recodificando:
+        if s.path == nueva.path:
+            return c
+    clave, vieja = min(recodificando, key=lambda cs: cs[1].usado)
+    if time.monotonic() - vieja.usado >= SIN_USO_S:
+        return clave
+    shutil.rmtree(nueva.dir, ignore_errors=True)
+    logger.warning("HLS al vuelo %s: rechazado, ya hay %d videos recodificandose a la vez",
+                   nueva.path, len(recodificando))
+    raise Lleno(f"ya hay {len(recodificando)} videos adaptandose a la vez; prueba en unos minutos")
 
 
 # Los cuatro primeros bytes de un MKV (la cabecera EBML).
@@ -570,14 +607,6 @@ async def _cerrar(path: str) -> None:
     await _parar(s)
     shutil.rmtree(s.dir, ignore_errors=True)
     logger.info("HLS al vuelo %s: sesion cerrada", path)
-
-
-async def _hacer_sitio(nueva: str) -> None:
-    """Como mucho SESIONES_MAX ffmpeg a la vez: se cierra la que lleva mas
-    tiempo sin usarse."""
-    while len(_sesiones) > SESIONES_MAX:
-        vieja = min((p for p in _sesiones if p != nueva), key=lambda p: _sesiones[p].usado)
-        await _cerrar(vieja)
 
 
 def _arrancar_limpiador() -> None:

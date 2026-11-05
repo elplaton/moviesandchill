@@ -28,6 +28,9 @@ async def _sesion(path: str, audio: int | None = None):
 
     try:
         return await hls.sesion(path, audio)
+    except hls.Lleno as e:
+        raise HTTPException(status_code=503, detail=f"No se puede adaptar ahora: {e}",
+                            headers={"Retry-After": "60"})
     except hls.SinHls as e:
         raise HTTPException(status_code=409, detail=f"No se puede adaptar al vuelo: {e}")
 
