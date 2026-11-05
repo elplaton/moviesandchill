@@ -81,7 +81,10 @@ async def startup():
     from app.auth.service import hash_password
     admin_password = os.getenv("TMD_ADMIN_PASSWORD", "admin")
     try:
-        await create_user("admin", hash_password(admin_password), role="admin")
+        # Solo cuenta si la cuenta se crea ahora (instalacion nueva): con la de
+        # por defecto, «admin», se obliga a cambiarla al entrar.
+        await create_user("admin", hash_password(admin_password), role="admin",
+                          must_change=admin_password == "admin")
         from app.database.connection import get_pool
         pool = get_pool()
         if pool:
@@ -231,9 +234,19 @@ async def startup():
     from app.services.peticiones import vigilante as vigilante_peticiones
     _spawn(vigilante_peticiones(), "vigilante_peticiones")
 
+    # La última conexión de cada cuenta, de memoria a la base de datos.
+    from app.services import presencia
+    _spawn(presencia.bucle(), "presencia")
+
 
 @app.on_event("shutdown")
 async def shutdown():
+    try:
+        # Lo del último minuto, antes de cerrar el pool.
+        from app.services import presencia
+        await presencia.volcar()
+    except Exception:
+        pass
     if downloader:
         await downloader.stop()
     try:

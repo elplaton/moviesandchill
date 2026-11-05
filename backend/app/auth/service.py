@@ -51,13 +51,19 @@ def needs_rehash(password_hash: str) -> bool:
     return not password_hash.startswith("pbkdf2_sha256$")
 
 
-def create_access_token(username: str, secret: str) -> str:
+def create_access_token(username: str, secret: str, cambiar: bool = False) -> str:
+    """`cambiar`: la cuenta entra con una contraseña provisional. El token solo
+    vale entonces para ver quien eres y cambiarla (ver auth/dependencies.py):
+    asi la obligacion la impone el servidor y no depende de que cada app
+    enseñe la pantalla."""
     payload = {
         "sub": username,
         "type": "access",
         "exp": datetime.now(timezone.utc) + timedelta(minutes=ACCESS_EXPIRE_MINUTES),
         "iat": datetime.now(timezone.utc),
     }
+    if cambiar:
+        payload["cambiar"] = True
     return jwt.encode(payload, secret, algorithm=ALGORITHM)
 
 

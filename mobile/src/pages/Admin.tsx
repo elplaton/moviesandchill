@@ -37,7 +37,23 @@ const SECCION: Record<string, { grupo: string; nombre: string }> = Object.fromEn
   GRUPOS.flatMap(g => g.secciones.map(([id, nombre]) => [id, { grupo: g.titulo, nombre }])),
 );
 
-interface U { id: number; username: string; role: string; active: boolean; quota_bytes: number | null; used_bytes: number; downloads: number }
+interface U { id: number; username: string; role: string; active: boolean; quota_bytes: number | null; used_bytes: number; downloads: number; must_change_password?: boolean; last_seen_at?: string | null; online?: boolean }
+
+/** «hace 5 min», «hace 3 h», «ayer», «hace 4 días» o la fecha. */
+function haceCuanto(iso: string | null | undefined): string {
+  if (!iso) return '';
+  const t = new Date(iso);
+  const min = Math.max(0, Math.round((Date.now() - t.getTime()) / 60000));
+  if (min < 1) return 'hace un momento';
+  if (min < 60) return `hace ${min} min`;
+  const h = Math.round(min / 60);
+  if (h < 24) return `hace ${h} h`;
+  const d = Math.round(h / 24);
+  if (d === 1) return 'ayer';
+  if (d < 30) return `hace ${d} días`;
+  return t.toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
 
 function Users() {
   const { me } = useAuth();
@@ -46,7 +62,12 @@ function Users() {
   const [edit, setEdit] = useState<U | null>(null);
   const [ef, setEf] = useState({ quota: '', unlimited: false, password: '', role: 'user' });
   const load = () => apiFetch('/admin/users').then(r => r.json()).then(d => setUsers(d.users || [])).catch(() => {});
-  useEffect(() => { load(); }, []);
+  // «En línea» cambia solo: se vuelve a preguntar cada medio minuto.
+  useEffect(() => {
+    load();
+    const t = setInterval(() => { if (!document.hidden) load(); }, 30000);
+    return () => clearInterval(t);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const create = async () => {
     const r = await apiFetch('/admin/users', { method: 'POST', body: JSON.stringify({ username: form.username.trim(), password: form.password, role: form.role, quota_gb: form.quota.trim() === '' ? null : parseFloat(form.quota) }) });
     const d = await r.json(); if (!r.ok) { toast(d.detail || 'No se pudo crear', 'error'); return; }
@@ -63,7 +84,8 @@ function Users() {
   return (
     <div>
       <section className="rounded-2xl bg-white/5 p-4 mb-4">
-        <p className="text-[13px] font-semibold text-nf-text2 mb-3">Nueva cuenta</p>
+        <p className="text-[13px] font-semibold text-nf-text2 mb-1">Nueva cuenta</p>
+        <p className="text-[12px] text-nf-text3 mb-3">La contraseña es provisional: al entrar por primera vez se le pedirá que ponga una suya.</p>
         <div className="space-y-2">
           <input className={input} placeholder="Usuario" autoCapitalize="none" value={form.username} onChange={e => setForm({ ...form, username: e.target.value })} />
           <input className={input} placeholder="Contraseña" type="password" value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} />
@@ -79,7 +101,11 @@ function Users() {
         return (
           <div key={u.id} className={`rounded-2xl bg-white/5 p-4 mb-2 ${u.active ? '' : 'opacity-60'}`}>
             <div className="flex items-center justify-between">
-              <div><p className="text-[16px] font-semibold">{u.username}{u.username === me?.username && <span className="text-nf-text3 text-[12px]"> (tú)</span>}</p><p className="text-[12px] text-nf-text3">{u.role === 'admin' ? 'Administrador' : 'Usuario'} · {u.downloads} descargas{!u.active && ' · desactivada'}</p></div>
+              <div><p className="text-[16px] font-semibold">{u.username}{u.username === me?.username && <span className="text-nf-text3 text-[12px]"> (tú)</span>}</p><p className="text-[12px] text-nf-text3">{u.role === 'admin' ? 'Administrador' : 'Usuario'} · {u.downloads} descargas{!u.active && ' · desactivada'}{u.must_change_password && ' · contraseña provisional'}</p>
+                <p className={`text-[12px] flex items-center gap-1.5 ${u.online ? 'text-green-400' : 'text-nf-text3'}`}>
+                  {u.online && <span className="w-2 h-2 rounded-full bg-green-500" />}
+                  {u.online ? 'En línea' : u.last_seen_at ? `Última conexión ${haceCuanto(u.last_seen_at)}` : 'Sin conexiones registradas'}
+                </p></div>
               <button onClick={() => { setEdit(u); setEf({ quota: u.quota_bytes == null ? '' : String(u.quota_bytes / GB), unlimited: u.quota_bytes == null, password: '', role: u.role }); }} className="tap h-9 px-3 rounded-full bg-white/10 text-[13px]">Editar</button>
             </div>
             <p className="text-[12px] text-nf-text2 mt-2">{fmt(u.used_bytes)} usados · {u.quota_bytes ? `${pct} % de ${fmt(u.quota_bytes)}` : 'sin límite'}</p>
@@ -1641,7 +1667,7 @@ interface ResumenAdmin {
   peticiones: { en_cola: number; pausadas: boolean; chat: string | null } | null;
   creditos: { al_ver: boolean; pasada: { estado: string; lanzada: boolean; hechos: number | null; total: number | null; cediendo: string | null } } | null;
   comprimidos: { revisados: number; ver: number } | null;
-  usuarios: { total: number; activos: number } | null;
+  usuarios: { total: number; activos: number; en_linea?: number } | null;
 }
 
 /** Disco libre: en TB a partir de uno, que «3.412 GB» se lee peor que «3,3 TB». */
@@ -1796,7 +1822,7 @@ function Resumen({ ir }: { ir: (id: string) => void }) {
 
         <Tarjeta titulo="Usuarios" onClick={() => ir('usuarios')}
           valor={n(usu?.activos)} unidad={usu ? plural(usu.activos, 'activo', 'activos') : undefined}
-          lineas={usu ? [`de ${n(usu.total)} ${plural(usu.total, 'cuenta', 'cuentas')}`] : ['No disponible']} />
+          lineas={usu ? [`de ${n(usu.total)} ${plural(usu.total, 'cuenta', 'cuentas')}`, ...(usu.en_linea ? [`${n(usu.en_linea)} en línea`] : [])] : ['No disponible']} />
       </div>
     </div>
   );

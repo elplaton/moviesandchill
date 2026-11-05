@@ -14,6 +14,7 @@ import Profile from './pages/Profile';
 import Admin from './pages/Admin';
 import Onboarding from './pages/Onboarding';
 import Vincular from './pages/Vincular';
+import CambiarPassword from './pages/CambiarPassword';
 
 function Splash() {
   return <div className="min-h-screen flex items-center justify-center"><span className="text-nf-red font-bold text-3xl tracking-tighter">MOVIES&amp;CHILL</span></div>;
@@ -110,9 +111,13 @@ function Desplazable({ children }: { children: ReactNode }) {
 }
 
 export default function App() {
-  const { me, loading, hasPrefs } = useAuth();
+  const { me, pendiente, loading, hasPrefs } = useAuth();
   const location = useLocation();
   if (loading) return <Splash />;
+  // Con la contraseña provisional no hay otra pantalla (el servidor tampoco
+  // deja hacer nada más). Al cambiarla se sigue a donde se iba: la ruta no se
+  // ha tocado, así que el QR de una tele llega a /vincular igual.
+  if (pendiente) return <CambiarPassword />;
   // Sin sesion se pasa por el login, pero recordando a donde se iba: el QR de
   // la tele abre /vincular, y en Safari (que no comparte sesion con la app
   // instalada) lo normal es llegar sin haber entrado.

@@ -7,7 +7,12 @@ import { connectProgressWs, disconnectProgressWs } from '../services/ws';
 import { reafirmarAvisos } from '../services/push';
 
 interface AuthContextType {
+  /** Dentro y con la contraseña ya suya: lo que tienen que mirar las pantallas. */
   isAuthenticated: boolean;
+  /** Dentro con la contraseña provisional que le dio el admin: hasta cambiarla
+   *  el servidor no deja hacer nada más (ver CambiarPassword). */
+  mustChangePassword: boolean;
+  cambiarPassword: (nueva: string) => Promise<string | null>;
   isLoading: boolean;
   username: string | null;
   isAdmin: boolean;
@@ -22,6 +27,8 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType>({
   isAuthenticated: false,
+  mustChangePassword: false,
+  cambiarPassword: async () => null,
   isLoading: true,
   username: null,
   isAdmin: false,
@@ -35,7 +42,11 @@ const AuthContext = createContext<AuthContextType>({
 });
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [dentro, setDentro] = useState(false);
+  const [mustChangePassword, setMustChange] = useState(false);
+  // Favoritos, descargas y demás cargan al ver una sesión abierta: con la
+  // contraseña provisional todo eso contestaría 403, así que no lo está.
+  const isAuthenticated = dentro && !mustChangePassword;
   const [isLoading, setIsLoading] = useState(true);
   const [username, setUsername] = useState<string | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
@@ -67,11 +78,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         .then((res) => res.json())
         .then((data) => {
           if (data.username) {
-            setIsAuthenticated(true);
+            setDentro(true);
             setUsername(data.username);
             setIsAdmin(data.role === 'admin');
             setUsedBytes(data.used_bytes || 0);
             setQuotaBytes(data.quota_bytes ?? null);
+            if (data.must_change_password) { setMustChange(true); return; }
             connectProgressWs();
             checkPreferences();
           } else {
@@ -106,8 +118,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // Los carriles en memoria llevan "Mis favoritos" y lo que esta cuenta
       // ha pedido: son de la cuenta, no del navegador.
       olvidarCarriles();
-      setIsAuthenticated(true);
+      setDentro(true);
       setUsername(user);
+      await refreshMe();
+      if (data.must_change_password) { setMustChange(true); return null; }
+      connectProgressWs();
+      await checkPreferences();
+      return null;
+    } catch {
+      return 'Error de conexión';
+    }
+  };
+
+  const cambiarPassword = async (nueva: string): Promise<string | null> => {
+    try {
+      const res = await apiFetch('/auth/password', { method: 'POST', body: JSON.stringify({ new_password: nueva }) });
+      const data = await res.json();
+      if (!res.ok) return data.detail || 'No se ha podido cambiar';
+      // Los tokens de antes solo valían para llegar aquí. Sin tercer argumento
+      // se respeta el «Recuérdame» elegido al entrar.
+      setTokens(data.access_token, data.refresh_token);
+      setMustChange(false);
       await refreshMe();
       connectProgressWs();
       await checkPreferences();
@@ -127,14 +158,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     olvidarEstado();
     olvidarCarriles();
     disconnectProgressWs();
-    setIsAuthenticated(false);
+    setDentro(false);
+    setMustChange(false);
     setUsername(null);
     setIsAdmin(false);
     setHasPreferences(null);
   };
 
   return (
-    <AuthContext.Provider value={{ isAuthenticated, isLoading, username, isAdmin, usedBytes, quotaBytes, refreshMe, hasPreferences, login, logout, refreshPreferences }}>
+    <AuthContext.Provider value={{ isAuthenticated, mustChangePassword, cambiarPassword, isLoading, username, isAdmin, usedBytes, quotaBytes, refreshMe, hasPreferences, login, logout, refreshPreferences }}>
       {children}
     </AuthContext.Provider>
   );

@@ -106,7 +106,8 @@ async def _usuarios() -> dict:
     async with get_pool().acquire() as conn:
         f = await conn.fetchrow("""
             SELECT COUNT(*) AS total, COUNT(*) FILTER (WHERE active IS NOT FALSE) AS activos FROM users""")
-    return dict(f)
+    from app.services import presencia
+    return {**dict(f), "en_linea": presencia.cuantos_en_linea()}
 
 
 def _avisos(r: dict) -> list[dict]:

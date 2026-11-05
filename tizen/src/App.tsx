@@ -15,6 +15,7 @@ import Library from './pages/Library';
 import Favorites from './pages/Favorites';
 import Settings from './pages/Settings';
 import Onboarding from './pages/Onboarding';
+import CambiarPassword from './pages/CambiarPassword';
 
 function Splash() {
   return (
@@ -53,10 +54,13 @@ function Shell() {
 }
 
 export default function App() {
-  const { isAuthenticated, isLoading, hasPrefs } = useAuth();
+  const { isAuthenticated, isLoading, hasPrefs, mustChangePassword } = useAuth();
   const location = useLocation();
 
   if (isLoading) return <Splash />;
+  // Con la contraseña provisional no hay otra pantalla: el servidor tampoco
+  // deja hacer nada más hasta cambiarla.
+  if (mustChangePassword) return <CambiarPassword />;
   if (!isAuthenticated) {
     return location.pathname === '/login' ? <Login /> : <Navigate to="/login" replace />;
   }

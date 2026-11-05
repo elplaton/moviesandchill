@@ -76,7 +76,7 @@ function useEntradaQr(activa: boolean, alEntrar: (d: { access_token: string; ref
   return { qr, aviso };
 }
 
-function Field({ label, value, secret, index, active, onSelect }: {
+export function Field({ label, value, secret, index, active, onSelect }: {
   label: string; value: string; secret?: boolean; index: number; active: boolean; onSelect: () => void;
 }) {
   const { ref, focusKey: id } = useFocusItem<HTMLDivElement>({ index, onEnter: onSelect, onFocus: onSelect });

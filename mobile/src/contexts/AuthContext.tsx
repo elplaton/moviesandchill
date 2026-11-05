@@ -9,20 +9,27 @@ import { reafirmarAvisos } from '../services/push';
 export interface Me { id: number; username: string; role: 'admin' | 'user'; quota_bytes: number | null; used_bytes: number }
 
 interface Ctx {
+  /** La cuenta, solo con la contraseña ya suya: favoritos, descargas y demás
+   *  cargan al verla, y con la provisional el servidor les contestaría 403. */
   me: Me | null;
+  /** Quien ha entrado con la contraseña provisional que le dio el admin y
+   *  tiene que cambiarla antes de nada (ver CambiarPassword). */
+  pendiente: string | null;
+  cambiarPassword: (nueva: string) => Promise<string | null>;
   loading: boolean;
   /** null mientras no se sabe; false manda al onboarding. */
   hasPrefs: boolean | null;
   login: (u: string, p: string) => Promise<string | null>;
   logout: () => void;
-  refresh: () => Promise<void>;
+  refresh: () => Promise<boolean>;
   refreshPrefs: () => Promise<void>;
 }
 
-const AuthCtx = createContext<Ctx>({ me: null, loading: true, hasPrefs: null, login: async () => null, logout: () => {}, refresh: async () => {}, refreshPrefs: async () => {} });
+const AuthCtx = createContext<Ctx>({ me: null, pendiente: null, cambiarPassword: async () => null, loading: true, hasPrefs: null, login: async () => null, logout: () => {}, refresh: async () => false, refreshPrefs: async () => {} });
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [me, setMe] = useState<Me | null>(null);
+  const [pendiente, setPendiente] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [hasPrefs, setHasPrefs] = useState<boolean | null>(null);
 
@@ -39,18 +46,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const refresh = async () => {
+  /** true si la cuenta está lista para usarse (dentro y sin contraseña provisional). */
+  const refresh = async (): Promise<boolean> => {
     try {
       const r = await apiFetch('/auth/me');
       if (!r.ok) throw new Error();
       const d = await r.json();
+      if (d.must_change_password) { setPendiente(d.username); setMe(null); return false; }
+      setPendiente(null);
       setMe({ id: d.id, username: d.username, role: d.role, quota_bytes: d.quota_bytes ?? null, used_bytes: d.used_bytes || 0 });
-    } catch { setMe(null); }
+      return true;
+    } catch { setMe(null); return false; }
   };
 
   useEffect(() => {
     if (!getAccessToken()) { setLoading(false); return; }
-    refresh().then(() => { connectProgressWs(); return refreshPrefs(); }).finally(() => setLoading(false));
+    refresh().then((listo) => { if (!listo) return; connectProgressWs(); return refreshPrefs(); }).finally(() => setLoading(false));
   }, []);
 
   // Este teléfono, a nombre de la cuenta que acaba de entrar (ver reafirmarAvisos).
@@ -70,16 +81,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // Los carriles en memoria llevan "Mis favoritos" y lo que esta cuenta
       // ha pedido: son de la cuenta, no del aparato.
       olvidarCarriles();
-      await refresh();
+      if (!await refresh()) return null;
       await refreshPrefs();
       connectProgressWs();
       return null;
     } catch { return 'Sin conexión con el servidor'; }
   };
 
-  const logout = () => { clearTokens(); olvidarCache(); olvidarEstado(); olvidarCarriles(); disconnectProgressWs(); setMe(null); setHasPrefs(null); };
+  const cambiarPassword = async (nueva: string) => {
+    try {
+      const r = await apiFetch('/auth/password', { method: 'POST', body: JSON.stringify({ new_password: nueva }) });
+      const d = await r.json();
+      if (!r.ok) return d.detail || 'No se ha podido cambiar';
+      // Los tokens de antes solo valían para llegar aquí.
+      setTokens(d.access_token, d.refresh_token);
+      if (!await refresh()) return 'No se ha podido comprobar la cuenta';
+      await refreshPrefs();
+      connectProgressWs();
+      return null;
+    } catch { return 'Sin conexión con el servidor'; }
+  };
 
-  return <AuthCtx.Provider value={{ me, loading, hasPrefs, login, logout, refresh, refreshPrefs }}>{children}</AuthCtx.Provider>;
+  const logout = () => { clearTokens(); olvidarCache(); olvidarEstado(); olvidarCarriles(); disconnectProgressWs(); setMe(null); setPendiente(null); setHasPrefs(null); };
+
+  return <AuthCtx.Provider value={{ me, pendiente, cambiarPassword, loading, hasPrefs, login, logout, refresh, refreshPrefs }}>{children}</AuthCtx.Provider>;
 }
 
 export const useAuth = () => useContext(AuthCtx);

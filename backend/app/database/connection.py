@@ -475,6 +475,12 @@ async def _ensure_tables():
             # Cuota de disco por cuenta (NULL = sin limite) y si puede entrar.
             await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS quota_bytes BIGINT")
             await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS active BOOLEAN DEFAULT TRUE")
+            # Contraseña provisional: la puso el admin (al crear la cuenta o al
+            # restablecerla) y hay que cambiarla al entrar. Las cuentas que ya
+            # existian quedan en FALSE: ya han entrado con la suya.
+            await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN DEFAULT FALSE")
+            # La última vez que la cuenta usó la app (ver services/presencia.py).
+            await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ")
             await conn.execute("ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS liked_years INTEGER[] DEFAULT '{}'")
             # Fecha de estreno completa. Con solo el año, "Novedades" no podia
             # distinguir lo de este mes de lo de enero y salia siempre igual.

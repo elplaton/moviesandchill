@@ -11,6 +11,7 @@ import Downloads from './pages/Downloads';
 import Favorites from './pages/Favorites';
 import Admin from './pages/Admin';
 import Account from './pages/Account';
+import CambiarPassword from './pages/CambiarPassword';
 
 function Splash() {
   return (
@@ -30,8 +31,11 @@ function Protected({ children }: { children: React.ReactNode }) {
 }
 
 export default function App() {
-  const { isAuthenticated, isLoading, hasPreferences } = useAuth();
+  const { isAuthenticated, isLoading, hasPreferences, mustChangePassword } = useAuth();
   if (isLoading) return <Splash />;
+  // Con la contraseña provisional no hay otra pantalla: el servidor tampoco
+  // deja hacer nada más hasta cambiarla.
+  if (mustChangePassword) return <CambiarPassword />;
 
   return (
     <Routes>

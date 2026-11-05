@@ -34,10 +34,15 @@ class UpdateUserRequest(BaseModel):
 
 
 def _user_out(u: dict) -> dict:
+    from app.services import presencia
+    ultima = presencia.ultima_vez(u["username"], u.get("last_seen_at"))
     return {
+        "last_seen_at": ultima.isoformat() if ultima else None,
+        "online": presencia.en_linea(ultima),
         "id": u["id"], "username": u["username"], "role": u["role"], "active": u.get("active", True),
         "quota_bytes": u.get("quota_bytes"), "used_bytes": int(u.get("used_bytes") or 0),
         "downloads": int(u.get("downloads") or 0), "created_at": str(u.get("created_at") or ""),
+        "must_change_password": bool(u.get("must_change_password")),
     }
 
 
@@ -61,7 +66,9 @@ async def create(req: CreateUserRequest, admin: Annotated[str, Depends(get_curre
     if await get_user_by_username(name):
         raise HTTPException(status_code=409, detail="Ese usuario ya existe")
     quota = int(req.quota_gb * GB) if req.quota_gb is not None and req.quota_gb > 0 else None
-    user_id = await create_user(name, hash_password(req.password), role=req.role, quota_bytes=quota)
+    # La contraseña la ha elegido el admin: es provisional y se cambia al entrar.
+    user_id = await create_user(name, hash_password(req.password), role=req.role, quota_bytes=quota,
+                                must_change=True)
     logger.info("Cuenta creada | %s (rol=%s, cuota=%s) por %s", name, req.role, quota, admin)
     return {"status": "created", "id": user_id}
 
@@ -93,6 +100,9 @@ async def update(user_id: int, req: UpdateUserRequest, admin: Annotated[str, Dep
         if len(req.password) < 4:
             raise HTTPException(status_code=400, detail="La contraseña es demasiado corta")
         fields["password_hash"] = hash_password(req.password)
+        # Restablecer la de otro la deja provisional (la conoce el admin); la
+        # tuya propia desde aqui es tuya.
+        fields["must_change_password"] = not (me and me["id"] == user_id)
     await update_user(user_id, **fields)
     logger.info("Cuenta %s actualizada por %s: %s", target["username"], admin, list(fields.keys()))
     return {"status": "updated"}

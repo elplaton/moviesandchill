@@ -5,6 +5,27 @@ import { useAuth } from '../../contexts/AuthContext';
 export interface AdminUser {
   id: number; username: string; role: 'user' | 'admin'; active: boolean;
   quota_bytes: number | null; used_bytes: number; downloads: number; created_at: string;
+  /** Aún no ha cambiado la contraseña que se le puso al crearla o restablecerla. */
+  must_change_password?: boolean;
+  /** Lo último que hizo con la app (null = no ha entrado nunca desde que se apunta). */
+  last_seen_at?: string | null;
+  /** Ha hecho algo en los últimos 5 minutos. */
+  online?: boolean;
+}
+
+/** «hace 5 min», «hace 3 h», «ayer», «hace 4 días» o la fecha. */
+export function haceCuanto(iso: string | null | undefined): string {
+  if (!iso) return '';
+  const t = new Date(iso);
+  const min = Math.max(0, Math.round((Date.now() - t.getTime()) / 60000));
+  if (min < 1) return 'hace un momento';
+  if (min < 60) return `hace ${min} min`;
+  const h = Math.round(min / 60);
+  if (h < 24) return `hace ${h} h`;
+  const d = Math.round(h / 24);
+  if (d === 1) return 'ayer';
+  if (d < 30) return `hace ${d} días`;
+  return t.toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
 const GB = 1024 ** 3;
@@ -40,7 +61,13 @@ export default function AdminUsers({ onToast }: { onToast: (m: string) => void }
   const load = async () => {
     try { const r = await apiFetch('/admin/users'); const d = await r.json(); setUsers(d.users || []); } catch {}
   };
-  useEffect(() => { load(); }, []);
+  // «En línea» cambia solo: se vuelve a preguntar cada medio minuto mientras
+  // la pestaña está a la vista.
+  useEffect(() => {
+    load();
+    const t = setInterval(() => { if (!document.hidden) load(); }, 30000);
+    return () => clearInterval(t);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const create = async () => {
     setError('');
@@ -94,7 +121,7 @@ export default function AdminUsers({ onToast }: { onToast: (m: string) => void }
     <div>
       <div className="bg-white/5 border border-white/10 rounded-2xl p-6 mb-6 shadow-xl">
         <h2 className="text-white text-lg font-medium mb-1">Nueva cuenta</h2>
-        <p className="text-nf-faint text-xs mb-4">La cuota es el espacio en disco que puede ocupar con sus descargas. Vacío = sin límite.</p>
+        <p className="text-nf-faint text-xs mb-4">La cuota es el espacio en disco que puede ocupar con sus descargas. Vacío = sin límite. La contraseña es provisional: al entrar por primera vez se le pedirá que ponga una suya.</p>
         <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
           <input className={input} placeholder="Usuario" value={form.username} onChange={e => setForm({ ...form, username: e.target.value })} />
           <input className={input} placeholder="Contraseña" type="password" value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} />
@@ -114,19 +141,28 @@ export default function AdminUsers({ onToast }: { onToast: (m: string) => void }
       </div>
 
       <div className="bg-white/5 border border-white/10 rounded-2xl p-6 shadow-xl">
-        <h2 className="text-white text-lg font-medium mb-4">Cuentas ({users.length})</h2>
+        <h2 className="text-white text-lg font-medium mb-4">
+          Cuentas ({users.length})
+          {users.some(u => u.online) && (
+            <span className="ml-3 text-sm font-normal text-green-400">{users.filter(u => u.online).length} en línea</span>
+          )}
+        </h2>
         <div className="space-y-2.5">
           {users.map(u => (
             <div key={u.id} className={`flex flex-wrap items-center gap-4 rounded-xl px-4 py-3 border ${u.active ? 'bg-black/20 border-white/5' : 'bg-black/10 border-white/5 opacity-60'}`}>
-              <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-nf-red to-red-800 flex items-center justify-center text-white font-semibold text-sm shrink-0">
+              <div className="relative w-9 h-9 rounded-lg bg-gradient-to-br from-nf-red to-red-800 flex items-center justify-center text-white font-semibold text-sm shrink-0">
                 {u.username[0].toUpperCase()}
+                {u.online && <span className="absolute -right-1 -bottom-1 w-3 h-3 rounded-full bg-green-500 ring-2 ring-nf-bg" aria-label="En línea" />}
               </div>
               <div className="min-w-[160px]">
                 <p className="text-white text-sm font-medium">
                   {u.username}{u.username === me && <span className="text-nf-faint text-xs"> (tú)</span>}
                 </p>
                 <p className="text-nf-faint text-[11px]">
-                  {u.role === 'admin' ? 'Administrador' : 'Usuario'} · {u.downloads} descargas{!u.active && ' · desactivada'}
+                  {u.role === 'admin' ? 'Administrador' : 'Usuario'} · {u.downloads} descargas{!u.active && ' · desactivada'}{u.must_change_password && ' · contraseña provisional'}
+                </p>
+                <p className={`text-[11px] ${u.online ? 'text-green-400' : 'text-nf-faint'}`}>
+                  {u.online ? 'En línea' : u.last_seen_at ? `Última conexión ${haceCuanto(u.last_seen_at)}` : 'Sin conexiones registradas'}
                 </p>
               </div>
               <div className="flex-1"><UsageBar used={u.used_bytes} quota={u.quota_bytes} /></div>
@@ -163,6 +199,7 @@ export default function AdminUsers({ onToast }: { onToast: (m: string) => void }
             </div>
             <label className="block text-nf-dim text-xs mb-1">Nueva contraseña (opcional)</label>
             <input className={`${input} w-full mb-2`} type="password" value={edit.password} onChange={e => setEdit({ ...edit, password: e.target.value })} placeholder="Dejar vacío para no cambiarla" />
+            {edit.password && editing.username !== me && <p className="text-nf-faint text-xs mb-2">Será provisional: al entrar se le pedirá que ponga una suya.</p>}
             <p className="text-nf-faint text-[11px] mb-5">Ocupa ahora {fmtGB(editing.used_bytes)}.</p>
             {error && <p className="mb-3 text-xs text-red-400">{error}</p>}
             <div className="flex justify-end gap-2">

@@ -5,7 +5,12 @@ import { olvidarEstado } from '../services/estado';
 import { connectProgressWs, disconnectProgressWs } from '../services/ws';
 
 interface AuthContextType {
+  /** Dentro y con la contraseña ya suya. */
   isAuthenticated: boolean;
+  /** Dentro con la contraseña provisional que le dio el admin: hasta cambiarla
+   *  el servidor no deja hacer nada más (ver pages/CambiarPassword). */
+  mustChangePassword: boolean;
+  cambiarPassword: (nueva: string) => Promise<string | null>;
   isLoading: boolean;
   username: string | null;
   isAdmin: boolean;
@@ -20,6 +25,8 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType>({
   isAuthenticated: false,
+  mustChangePassword: false,
+  cambiarPassword: async () => null,
   isLoading: true,
   username: null,
   isAdmin: false,
@@ -31,7 +38,9 @@ const AuthContext = createContext<AuthContextType>({
 });
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [dentro, setDentro] = useState(false);
+  const [mustChangePassword, setMustChange] = useState(false);
+  const isAuthenticated = dentro && !mustChangePassword;
   const [isLoading, setIsLoading] = useState(true);
   const [username, setUsername] = useState<string | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
@@ -57,9 +66,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         .then((res) => res.json())
         .then((data) => {
           if (data.username) {
-            setIsAuthenticated(true);
+            setDentro(true);
             setUsername(data.username);
             setIsAdmin(data.role === 'admin');
+            if (data.must_change_password) { setMustChange(true); return; }
             connectProgressWs();
             return refreshPrefs();
           }
@@ -95,14 +105,37 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // anterior hasta que contestara el servidor (o para siempre sin red).
     olvidarCache();
     olvidarEstado();
-    setIsAuthenticated(true);
     setUsername(user);
-    apiFetch('/auth/me')
-      .then((res) => res.json())
-      .then((d) => setIsAdmin(d.role === 'admin'))
-      .catch(() => {});
+    // Se espera a /me: dice si la contraseña es provisional, y entonces no se
+    // pide nada más (el servidor contestaría 403 a todo).
+    let cambiar = false;
+    try {
+      const d = await (await apiFetch('/auth/me')).json();
+      setIsAdmin(d.role === 'admin');
+      cambiar = !!d.must_change_password;
+    } catch { /* sin /me se entra igual, como antes */ }
+    setMustChange(cambiar);
+    setDentro(true);
+    if (cambiar) return;
     await refreshPrefs();
     connectProgressWs();
+  };
+
+  const cambiarPassword = async (nueva: string): Promise<string | null> => {
+    try {
+      const res = await apiFetch('/auth/password', { method: 'POST', body: JSON.stringify({ new_password: nueva }) });
+      const data = await res.json();
+      if (!res.ok) return data.detail || 'No se ha podido cambiar';
+      // Los tokens de antes solo valían para llegar aquí. Sin tercer argumento
+      // se respeta el «Recuérdame» elegido al entrar.
+      setTokens(data.access_token, data.refresh_token);
+      await refreshPrefs();
+      setMustChange(false);
+      connectProgressWs();
+      return null;
+    } catch {
+      return 'Error de conexión';
+    }
   };
 
   const logout = () => {
@@ -110,14 +143,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     olvidarCache();
     olvidarEstado();
     disconnectProgressWs();
-    setIsAuthenticated(false);
+    setDentro(false);
+    setMustChange(false);
     setUsername(null);
     setIsAdmin(false);
     setHasPrefs(null);
   };
 
   return (
-    <AuthContext.Provider value={{ isAuthenticated, isLoading, username, isAdmin, hasPrefs, login, entrarConTokens, logout, refreshPrefs }}>
+    <AuthContext.Provider value={{ isAuthenticated, mustChangePassword, cambiarPassword, isLoading, username, isAdmin, hasPrefs, login, entrarConTokens, logout, refreshPrefs }}>
       {children}
     </AuthContext.Provider>
   );

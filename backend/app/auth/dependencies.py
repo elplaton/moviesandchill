@@ -6,6 +6,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app.auth.service import decode_token
 from app.config import get_jwt_secret
+from app.services import presencia
 
 logger = logging.getLogger("tmd")
 
@@ -14,6 +15,28 @@ security = HTTPBearer(auto_error=False)
 
 def _get_secret() -> str:
     return get_jwt_secret()
+
+
+# Lo que contesta todo lo demas mientras la cuenta tenga la contraseña
+# provisional. Los clientes lo reconocen por este texto exacto.
+CAMBIAR_PASSWORD = "Tienes que cambiar la contraseña antes de seguir"
+
+
+async def get_user_pendiente(
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(security)] = None,
+    token: Annotated[str | None, Query()] = None,
+):
+    """Como `get_current_user`, pero deja pasar a quien aun tiene que cambiar
+    la contraseña. Solo para `/auth/me` y `/auth/password`."""
+    payload = None
+    if credentials:
+        payload = decode_token(credentials.credentials, _get_secret())
+    elif token:
+        payload = decode_token(token, _get_secret())
+    if not payload:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token invalido o expirado")
+    presencia.ver(payload["sub"])
+    return payload["sub"]
 
 
 async def get_current_user(
@@ -34,7 +57,11 @@ async def get_current_user(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Token invalido o expirado",
         )
+    # 403 y no 401: el token es bueno, renovarlo daria otro igual.
+    if payload.get("cambiar"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=CAMBIAR_PASSWORD)
 
+    presencia.ver(payload["sub"])
     return payload["sub"]
 
 
@@ -72,15 +99,19 @@ async def get_stream_user(
 
     if credentials:
         payload = decode_token(credentials.credentials, secret)
-        if payload:
+        if payload and not payload.get("cambiar"):
+            presencia.ver(payload["sub"])
             return payload["sub"]
 
     if token:
         payload = decode_token(token, secret)
-        if payload:
+        if payload and not payload.get("cambiar"):
+            presencia.ver(payload["sub"])
             return payload["sub"]
         entrada = decode_token(token, secret, expected_type="stream")
         if entrada and _cubre(entrada.get("path") or "", path):
+            # Ver una película es estar usando la app: cada tramo cuenta.
+            presencia.ver(entrada["sub"])
             return entrada["sub"]
 
     raise HTTPException(
@@ -114,8 +145,9 @@ async def get_current_user_ws(
         return None
     secret = _get_secret()
     payload = decode_token(token, secret)
-    if not payload:
+    if not payload or payload.get("cambiar"):
         return None
+    presencia.ver(payload["sub"])
     return payload["sub"]
 
 

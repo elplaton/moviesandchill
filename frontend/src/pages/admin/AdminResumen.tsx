@@ -28,7 +28,7 @@ interface Resumen {
   peticiones: { en_cola: number; pausadas: boolean; chat: string | null } | null;
   creditos: { al_ver: boolean; pasada: { estado: string; lanzada: boolean; hechos: number | null; total: number | null; cediendo: string | null } } | null;
   comprimidos: { revisados: number; ver: number } | null;
-  usuarios: { total: number; activos: number } | null;
+  usuarios: { total: number; activos: number; en_linea?: number } | null;
 }
 
 const n = (x: number | null | undefined) => (x == null ? '—' : x.toLocaleString('es-ES', MILES));
@@ -140,7 +140,7 @@ export default function AdminResumen() {
         <Tarjeta titulo="Usuarios" onClick={() => ir('usuarios')}
           estado={!usu ? 'nada' : 'ok'}
           cifra={n(usu?.activos)}
-          linea={usu ? `activos de ${n(usu.total)}` : ''} />
+          linea={usu ? `activos de ${n(usu.total)}${usu.en_linea ? ` · ${n(usu.en_linea)} en línea` : ''}` : ''} />
       </div>
     </div>
   );
