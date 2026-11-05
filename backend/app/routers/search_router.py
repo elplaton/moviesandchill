@@ -3,7 +3,7 @@ import os
 import re
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
 
 from app.auth.dependencies import get_current_user
@@ -221,6 +221,27 @@ async def media_trailer(tmdb_id: int, user: Annotated[str, Depends(get_current_u
     r = await cache.recordar("tmdb", ["trailer", tipo, tmdb_id],
                              lambda: trailer(config.get("tmdb_api_key", ""), tmdb_id, tipo))
     return r or {"key": None}
+
+
+class FalloTrailer(BaseModel):
+    tmdb_id: int | None = None
+    kind: str = ""
+    aparato: str = ""
+    motivo: str = ""
+
+
+@router.post("/media/trailer/fallo")
+async def trailer_fallo(req: FalloTrailer, request: Request, user: Annotated[str, Depends(get_current_user)]):
+    """El trailer no ha llegado a verse en un aparato, y por que (lo manda
+    components/Trailer.tsx). Solo deja una linea en el registro: es para
+    diagnosticar desde Admin → Registros lo que pasa en un iPhone o una tele,
+    donde no hay consola que mirar."""
+    import logging
+    logging.getLogger("tmd").warning(
+        "Tráiler no visto | user=%s aparato=%s %s/%s motivo=%s | %s",
+        user, req.aparato[:20], req.kind[:10], req.tmdb_id, req.motivo[:120],
+        (request.headers.get("user-agent") or "")[:200])
+    return {"ok": True}
 
 
 @router.get("/media/{tmdb_id}/files")

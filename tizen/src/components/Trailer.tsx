@@ -32,6 +32,8 @@ const RECORTE = 1.18;
 const ESPERA_CON_SONIDO_MS = 3500;
 /** Un poco después de «reproduciendo»: los primeros fotogramas aún son negros. */
 const RETRASO_FUNDIDO_MS = 500;
+/** Si en este tiempo no se está viendo, se cuenta al servidor por qué. */
+const VIGIA_MS = 15000;
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type YT = any;
@@ -70,6 +72,25 @@ async function claveDe(tmdbId: number, kind: string): Promise<string | null> {
   } catch {
     return null;
   }
+}
+
+// Lo ya contado, para no repetir la misma línea en el registro cada vez que
+// se pasa por la misma tarjeta.
+const contados = new Set<string>();
+
+/**
+ * Cuenta al servidor por qué no ha salido el tráiler (queda en Admin →
+ * Registros, con el aparato). En un iPhone o una tele no hay consola que
+ * mirar, y desde fuera solo se ve «no sale».
+ */
+function contarFallo(tmdbId: number | null | undefined, kind: string, motivo: string) {
+  const id = `${kind}:${tmdbId}:${motivo}`;
+  if (contados.has(id)) return;
+  contados.add(id);
+  const aparato = window.location.pathname.split('/')[1] || 'web';
+  apiFetch('/media/trailer/fallo', {
+    method: 'POST', body: JSON.stringify({ tmdb_id: tmdbId || null, kind, aparato, motivo }),
+  }).catch(() => { /* sin servidor, sin registro */ });
 }
 
 export interface PropsTrailer {
@@ -112,6 +133,15 @@ export default function Trailer({ tmdbId, kind, sonido, activo, onVisible, class
     let vivo = true;
     let fundido: ReturnType<typeof setTimeout> | null = null;
     let espera: ReturnType<typeof setTimeout> | null = null;
+    // Por donde se ha llegado, para decir por qué no se ve si no se ve.
+    let fase = 'cargando la API de YouTube';
+    let visto = false;
+    const vigia = setTimeout(() => {
+      if (!vivo || visto) return;
+      const p = reproductor.current;
+      const estado = p && p.getPlayerState ? p.getPlayerState() : 'sin reproductor';
+      contarFallo(tmdbId, kind, `${fase}; estado ${estado}`);
+    }, VIGIA_MS);
     // YouTube sustituye el nodo por su iframe: se le da uno propio que React
     // no toca, o al desmontar React buscaria un hijo que ya no existe.
     const nodo = document.createElement('div');
@@ -139,6 +169,7 @@ export default function Trailer({ tmdbId, kind, sonido, activo, onVisible, class
 
     cargarYouTube().then((Y) => {
       if (!vivo) return;
+      fase = 'esperando a que el reproductor esté listo';
       reproductor.current = new Y.Player(nodo, {
         videoId: clave,
         host: 'https://www.youtube-nocookie.com',
@@ -150,6 +181,7 @@ export default function Trailer({ tmdbId, kind, sonido, activo, onVisible, class
         events: {
           onReady: (e: YT) => {
             if (!vivo) return;
+            fase = 'listo pero sin arrancar (el aparato no deja reproducir solo)';
             encajar();
             if (sonidoRef.current) { e.target.unMute(); e.target.setVolume(100); } else e.target.mute();
             e.target.playVideo();
@@ -166,6 +198,7 @@ export default function Trailer({ tmdbId, kind, sonido, activo, onVisible, class
           onStateChange: (e: YT) => {
             if (!vivo) return;
             if (e.data === Y.PlayerState.PLAYING) {
+              visto = true;
               if (fundido) clearTimeout(fundido);
               fundido = setTimeout(() => { if (vivo) setVisible(true); }, RETRASO_FUNDIDO_MS);
             } else if (e.data === Y.PlayerState.ENDED) {
@@ -173,14 +206,26 @@ export default function Trailer({ tmdbId, kind, sonido, activo, onVisible, class
             }
           },
           // Video retirado, o que no deja incrustarse: se queda la caratula.
-          onError: () => { if (vivo) setVisible(false); },
+          onError: (e: YT) => {
+            if (!vivo) return;
+            setVisible(false);
+            // 2 id no válido, 5 el reproductor HTML5 no puede, 100 retirado,
+            // 101/150 no deja incrustarse, 153 falta la cabecera Referer.
+            visto = true;
+            contarFallo(tmdbId, kind, `error de YouTube ${e && e.data}`);
+          },
         },
       });
-    }).catch(() => { /* sin YouTube, la caratula */ });
+    }).catch(() => {
+      // Sin YouTube, la caratula.
+      visto = true;
+      if (vivo) contarFallo(tmdbId, kind, 'no carga la API de YouTube');
+    });
 
     window.addEventListener('resize', encajar);
     return () => {
       vivo = false;
+      clearTimeout(vigia);
       if (fundido) clearTimeout(fundido);
       if (espera) clearTimeout(espera);
       window.removeEventListener('resize', encajar);
@@ -189,6 +234,8 @@ export default function Trailer({ tmdbId, kind, sonido, activo, onVisible, class
       reproductor.current = null;
       if (nodo.parentNode) nodo.parentNode.removeChild(nodo);
     };
+    // tmdbId y kind van con `clave`: si cambian, cambia la clave.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activo, clave]);
 
   // El boton de la web y el movil cambia el sonido sin rehacer el reproductor.
