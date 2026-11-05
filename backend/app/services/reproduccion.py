@@ -49,8 +49,10 @@ MIME = {"mkv": "video/x-matroska", "mp4": "video/mp4", "m4v": "video/mp4", "mov"
 
 # Sube cuando cambia lo que se guarda en `reproduccion`: lo guardado con otra
 # version se vuelve a comprobar (la 2 añadio `hls` a las pistas; la 3, `hls`
-# tambien para los MP4 y para lo que hay que recodificar, como los AVI).
-VERSION = 3
+# tambien para los MP4 y para lo que hay que recodificar, como los AVI; la 4,
+# los MKV cuyo SeekHead apunta a otro, que se daban por «sin indice» y no se
+# podian adaptar al vuelo: ver mkv.cabecera).
+VERSION = 4
 
 # Cuanto vale lo leido de Telegram (mensajes con su referencia de archivo, que
 # caduca a las horas) y el archivo virtual armado a partir de ellos.

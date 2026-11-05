@@ -63,6 +63,12 @@ logger = logging.getLogger("tmd")
 # de creditos y no el ultimo tramo (los de Animales tienen huecos de imagen).
 # La 4 reconoce el listado de nombres de las peliculas (DENSIDAD_LETRAS).
 VERSION = 4
+# Cambios que **solo añaden aciertos** (lo que ya salia sale igual): no hace
+# falta volver a medir lo que esta bien, solo reintentar lo que fallo. Subirlo
+# deja pendiente lo que se quedo sin resultado (ver pasada_creditos). La 1:
+# los MKV cuyo SeekHead apunta a otro (mkv.cabecera) y el logo detras de unos
+# creditos de pocos fotogramas (inicio_creditos, segunda pasada).
+REINTENTO = 1
 
 Lector = Callable[[int, int], Awaitable[bytes]]   # leer(desde, cuanto) -> bytes
 
@@ -315,30 +321,12 @@ async def _indice_mkv(leer: Lector, tamano: int) -> Indice:
     """Como `mkv.fotogramas_clave`, pero guardando donde esta cada uno (el
     cluster, y el bloque dentro si las Cues lo dicen) y el CodecPrivate."""
     m = _mkv
-    cabeza = await leer(0, min(64 * 1024, tamano))
-    seg = next(((d, t) for eid, d, t in m._elementos(cabeza) if eid == m.SEGMENT), None)
-    if not seg:
+    # La misma lectura que el HLS al vuelo, que sigue un SeekHead que solo
+    # apunta a otro (ver mkv.cabecera).
+    cab = await m.cabecera(leer, tamano)
+    if not cab:
         raise NoAnalizable("MKV sin Segment")
-    s0 = seg[0]
-    posiciones: dict[int, int] = {}
-    en_cabeza: dict[int, bytes] = {}
-    for eid, d, t in m._elementos(cabeza, s0):
-        if eid == m.SEEKHEAD:
-            for sid, sd, st in m._elementos(cabeza, d, min(d + t, len(cabeza))):
-                if sid != m.SEEK:
-                    continue
-                cual = donde = None
-                for xid, xd, xt in m._elementos(cabeza, sd, sd + st):
-                    if xid == m.SEEK_ID:
-                        cual = m._uint(cabeza[xd:xd + xt])
-                    elif xid == m.SEEK_POS:
-                        donde = m._uint(cabeza[xd:xd + xt])
-                if cual is not None and donde is not None:
-                    posiciones.setdefault(cual, s0 + donde)
-        elif eid in (m.INFO, m.TRACKS) and t != m.DESCONOCIDO and d + t <= len(cabeza):
-            en_cabeza[eid] = cabeza[d:d + t]
-        elif eid == m.CLUSTER:
-            break
+    s0, posiciones, en_cabeza = cab
 
     async def elemento(eid: int) -> bytes | None:
         if eid in en_cabeza:
@@ -585,7 +573,11 @@ async def mirar(leer: Lector, idx: Indice, desde: float, hasta: float,
 FRACCION_CREDITOS = 0.7
 
 
-def inicio_creditos(serie: list[tuple[float, str]], minimo: float) -> float | None:
+# Lo que puede durar el logo de la productora que va detras de los creditos.
+LOGO_FINAL_S = 12.0
+
+
+def inicio_creditos(serie: list[tuple[float, str]], minimo: float, fin: float | None = None) -> float | None:
     """Donde empiezan los creditos finales: el primer punto desde el que al
     menos FRACCION_CREDITOS de lo que queda hasta el final es negro o
     creditos, empezando con dos fotogramas seguidos de negro/creditos y con
@@ -593,7 +585,31 @@ def inicio_creditos(serie: list[tuple[float, str]], minimo: float) -> float | No
 
     Antes era «el ultimo tramo largo», y unos creditos con trozos de imagen
     en medio (tarjetas de colores, logos: Animales) se partian y se tomaba el
-    ultimo trozo, minutos despues del principio."""
+    ultimo trozo, minutos despues del principio.
+
+    Si asi no sale nada, una segunda pasada **que solo puede añadir aciertos**
+    (lo que ya salia sale igual): sin la imagen de los ultimos LOGO_FINAL_S
+    (el logo de la productora) y midiendo el minimo hasta `fin`, el final de
+    verdad del video, y no hasta el ultimo fotograma clave. Con fotogramas
+    clave escasos (uno cada 10 s en los «[x265]» de iZombie) unos creditos son
+    dos o tres fotogramas, y un logo detras los dejaba en el 67 % («CCN»)."""
+    r = _inicio(serie, minimo, None)
+    if r is not None or not serie:
+        return r
+    ultimo = serie[-1][0]
+    k = len(serie)
+    while k > 0 and serie[k - 1][1] == "N" and ultimo - serie[k - 1][0] <= LOGO_FINAL_S:
+        k -= 1
+    final = max(ultimo, fin or 0.0)
+    if k == len(serie) and final == ultimo:
+        return None   # nada distinto que probar
+    return _inicio(serie[:k], minimo, final)
+
+
+def _inicio(serie: list[tuple[float, str]], minimo: float, fin: float | None) -> float | None:
+    if not serie:
+        return None
+    fin = serie[-1][0] if fin is None else fin
     n = len(serie)
     cuantos = [0] * (n + 1)   # cuantos negro/creditos hay desde i hasta el final
     for i in range(n - 1, -1, -1):
@@ -603,7 +619,7 @@ def inicio_creditos(serie: list[tuple[float, str]], minimo: float) -> float | No
             continue
         if i > 0 and serie[i - 1][1] in "CK":
             continue   # no es el principio de un tramo
-        if serie[-1][0] - serie[i][0] < minimo:
+        if fin - serie[i][0] < minimo:
             break
         if cuantos[i] / (n - i) >= FRACCION_CREDITOS:
             return serie[i][0]
@@ -650,7 +666,7 @@ async def medir(leer: Lector, tamano: int, idx: Indice | None = None) -> dict:
     hasta, desde = idx.duracion, max(0.0, idx.duracion - ventana)
     serie = await mirar(leer, idx, desde, hasta, cada)
     while True:
-        inicio = inicio_creditos(serie, minimo)
+        inicio = inicio_creditos(serie, minimo, idx.duracion)
         empieza_en_creditos = bool(serie) and serie[0][1] in "CK" and inicio == serie[0][0]
         if not empieza_en_creditos or idx.duracion - desde >= maximo or desde <= 0:
             break

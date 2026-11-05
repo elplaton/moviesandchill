@@ -79,38 +79,78 @@ def _float(buf: bytes) -> float:
     return 0.0
 
 
+# Un SeekHead mas grande que esto no es un SeekHead (o no merece la pena).
+SEEKHEAD_MAX = 4 * 1024 * 1024
+
+
+async def cabecera(leer, tamano_total: int) -> tuple[int, dict[int, int], dict[int, bytes]] | None:
+    """(donde empiezan los datos del Segment, {id: byte donde esta}, {id: el
+    elemento ya leido}) o None si no es un MKV.
+
+    Donde esta cada cosa lo dice el SeekHead del principio. Pero hay archivos
+    (los que escribe libwebm, como los «[x265]» de iZombie o The Expanse) cuyo
+    SeekHead del principio **solo apunta a otro SeekHead al final**, y es ese el
+    que dice donde estan las Cues. Leyendo solo el primero no se encontraba el
+    indice: «MKV sin indice (Cues)», sin creditos y sin HLS al vuelo, aunque el
+    archivo lo tuviera. Por eso se sigue el puntero (dos saltos como mucho)."""
+    cabeza = await leer(0, min(64 * 1024, tamano_total))
+    seg = next(((d, t) for eid, d, t in _elementos(cabeza) if eid == SEGMENT), None)
+    if not seg:
+        return None
+    seg_inicio = seg[0]
+    posiciones: dict[int, int] = {}
+    en_cabeza: dict[int, bytes] = {}
+
+    def apuntar(buf: bytes, desde: int, hasta: int) -> None:
+        for sid, sd, st in _elementos(buf, desde, min(hasta, len(buf))):
+            if sid != SEEK:
+                continue
+            cual, donde = None, None
+            for xid, xd, xt in _elementos(buf, sd, sd + st):
+                if xid == SEEK_ID:
+                    cual = _uint(buf[xd:xd + xt])
+                elif xid == SEEK_POS:
+                    donde = _uint(buf[xd:xd + xt])
+            if cual is not None and donde is not None:
+                posiciones.setdefault(cual, seg_inicio + donde)
+
+    for eid, d, t in _elementos(cabeza, seg_inicio):
+        if eid == SEEKHEAD:
+            apuntar(cabeza, d, d + t)
+        elif eid in (INFO, TRACKS) and t != DESCONOCIDO and d + t <= len(cabeza):
+            en_cabeza[eid] = cabeza[d:d + t]
+        elif eid == CLUSTER:
+            break
+
+    vistos: set[int] = set()
+    for _ in range(2):
+        pos = posiciones.pop(SEEKHEAD, None)
+        if pos is None or pos in vistos or pos >= tamano_total:
+            break
+        vistos.add(pos)
+        cab = await leer(pos, min(16, tamano_total - pos))
+        try:
+            cid, a = _vint(cab, 0, True)
+            tam, b = _vint(cab, a, False)
+        except (IndexError, ValueError):
+            break
+        if cid != SEEKHEAD or tam == DESCONOCIDO or tam > SEEKHEAD_MAX:
+            break
+        cuerpo = await leer(pos + a + b, tam)
+        apuntar(cuerpo, 0, len(cuerpo))
+    return seg_inicio, posiciones, en_cabeza
+
+
 async def fotogramas_clave(leer, tamano_total: int) -> tuple[list[float], float] | None:
     """(segundos de cada fotograma clave del video, duracion) o None si el
     archivo no es un MKV con indice utilizable.
 
     `leer(desde, cuanto)` devuelve bytes del archivo.
     """
-    cabeza = await leer(0, min(64 * 1024, tamano_total))
-    seg = next(((d, t) for eid, d, t in _elementos(cabeza) if eid == SEGMENT), None)
-    if not seg:
+    cab = await cabecera(leer, tamano_total)
+    if not cab:
         return None
-    seg_inicio = seg[0]
-
-    # Donde esta cada cosa lo dice el SeekHead, que va al principio.
-    posiciones: dict[int, int] = {}
-    en_cabeza: dict[int, bytes] = {}
-    for eid, d, t in _elementos(cabeza, seg_inicio):
-        if eid == SEEKHEAD:
-            for sid, sd, st in _elementos(cabeza, d, min(d + t, len(cabeza))):
-                if sid != SEEK:
-                    continue
-                cual, donde = None, None
-                for xid, xd, xt in _elementos(cabeza, sd, sd + st):
-                    if xid == SEEK_ID:
-                        cual = _uint(cabeza[xd:xd + xt])
-                    elif xid == SEEK_POS:
-                        donde = _uint(cabeza[xd:xd + xt])
-                if cual is not None and donde is not None:
-                    posiciones.setdefault(cual, seg_inicio + donde)
-        elif eid in (INFO, TRACKS) and t != DESCONOCIDO and d + t <= len(cabeza):
-            en_cabeza[eid] = cabeza[d:d + t]
-        elif eid == CLUSTER:
-            break
+    _, posiciones, en_cabeza = cab
 
     async def elemento(eid: int) -> bytes | None:
         if eid in en_cabeza:

@@ -168,6 +168,23 @@ async def rehacer_tras_cambiar_detector() -> tuple[int, int]:
         return len(refs), len(procs)
 
 
+async def reintentar_fallidos() -> int:
+    """Lo que no se consiguio vuelve a quedar pendiente para la pasada: lo que
+    se quedo sin resultado y las peliculas sin ningun enlace legible (un MKV
+    cuyo indice no se encontraba). Lo que salio bien no se toca. Devuelve
+    cuantos."""
+    pool = get_pool()
+    if not pool:
+        return 0
+    async with pool.acquire() as conn:
+        filas = await conn.fetch("""
+            DELETE FROM creditos_proceso
+            WHERE estado = 'sin_resultado'
+               OR (estado = 'no_analizable' AND detalle = 'ningun enlace legible')
+            RETURNING tmdb_id""")
+        return len(filas)
+
+
 async def resumen() -> dict:
     """Cifras para el panel: cuanto se sabe y de donde ha salido."""
     pool = get_pool()

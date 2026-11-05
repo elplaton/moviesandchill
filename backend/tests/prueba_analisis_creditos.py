@@ -114,6 +114,25 @@ ver(ac.inicio_creditos(animales, 40) == 5964, "creditos con huecos de imagen: cu
 ver(ac.inicio_creditos([(t, "N") for t in range(0, 300, 5)] + [(300, "C"), (305, "C")] +
                        [(t, "N") for t in range(310, 600, 5)], 15) is None,
     "una escena oscura en medio de la pelicula no son los creditos")
+
+
+def serie_de(letras: str, desde: float, cada: float) -> list[tuple[float, str]]:
+    return [(round(desde + i * cada, 3), e) for i, e in enumerate(letras)]
+
+
+# Episodios «[x265]» de iZombie, tal como salieron en el servidor: un
+# fotograma clave cada ~10 s, unos creditos de dos fotogramas y el logo de la
+# productora detras. Solo con «CCN» al final se quedaban en el 67 % y sin nada.
+ver(ac.inicio_creditos(serie_de("NNNNNNNCCNNNCCN", 2398, 10), 15, 2548) == 2518,
+    "iZombie 2x03: los creditos de antes del logo, no la escena oscura de antes")
+ver(ac.inicio_creditos(serie_de("NNNNNNNNNNNNCCN", 2399, 10), 15, 2549) == 2519,
+    "iZombie 2x04: el logo del final no tumba unos creditos de dos fotogramas")
+ver(ac.inicio_creditos(serie_de("NNNNNNNNNNNNCCC", 2396, 10), 15, 2546) == 2516,
+    "iZombie 2x02 (ya salia): sigue saliendo igual")
+ver(ac.inicio_creditos(serie_de("N" * 40 + "CC" + "N" * 30 + "N", 0, 4), 40, 290) is None,
+    "una escena oscura en medio con un logo al final sigue sin ser los creditos")
+ver(ac.inicio_creditos(serie_de("NNNNNNNNNNNNNNNNNNNNNNNNNNNNNKK", 7700, 4), 40, 7832) is None,
+    "una pelicula clasica sin creditos al final (Crimen perfecto): nada")
 ver(ac.transicion([(0, "N"), (5, "N"), (10, "K"), (15, "C"), (20, "C"), (25, "N")]) == ("ok", 10),
     "comprobar: el primer paso a creditos")
 ver(ac.transicion([(0, "C"), (5, "C"), (10, "C")])[0] == "antes", "comprobar: ya eran creditos")

@@ -181,6 +181,7 @@ async def pausar() -> dict:
 
 
 CLAVE_DETECTOR = "creditos_detector"   # app_settings: la VERSION con la que se midio
+CLAVE_REINTENTO = "creditos_reintento"  # app_settings: el REINTENTO ya hecho
 
 
 async def _si_cambio_el_detector() -> None:
@@ -191,14 +192,21 @@ async def _si_cambio_el_detector() -> None:
     creditos que eran ocho."""
     from app.database import creditos as db
     from app.database.connection import get_app_settings, set_app_settings
-    from app.services.analisis_creditos import VERSION
-    if (await get_app_settings()).get(CLAVE_DETECTOR) == str(VERSION):
-        return
-    refs, procs = await db.rehacer_tras_cambiar_detector()
-    await set_app_settings({CLAVE_DETECTOR: str(VERSION)})
-    if refs or procs:
-        logger.info("Creditos: detector nuevo (version %d): %d referencias de peliculas y %d titulos "
-                    "vuelven a quedar pendientes para la pasada", VERSION, refs, procs)
+    from app.services.analisis_creditos import REINTENTO, VERSION
+    ajustes = await get_app_settings()
+    if ajustes.get(CLAVE_DETECTOR) != str(VERSION):
+        refs, procs = await db.rehacer_tras_cambiar_detector()
+        await set_app_settings({CLAVE_DETECTOR: str(VERSION)})
+        if refs or procs:
+            logger.info("Creditos: detector nuevo (version %d): %d referencias de peliculas y %d titulos "
+                        "vuelven a quedar pendientes para la pasada", VERSION, refs, procs)
+    if ajustes.get(CLAVE_REINTENTO) != str(REINTENTO):
+        # Un detector que solo añade aciertos: se reintenta lo que fallo y lo
+        # que salio bien se queda como estaba.
+        n = await db.reintentar_fallidos()
+        await set_app_settings({CLAVE_REINTENTO: str(REINTENTO)})
+        logger.info("Creditos: detector mejorado (reintento %d): %d titulos sin conseguir vuelven a "
+                    "quedar pendientes para la pasada", REINTENTO, n)
 
 
 async def reanudar_si_estaba() -> None:
