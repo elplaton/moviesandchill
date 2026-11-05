@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
+import Hoja from '../components/Hoja';
 import { useLibrary, type LocalFile, type LocalTitle } from '../contexts/LibraryContext';
 import { useAuth } from '../contexts/AuthContext';
 import { fetchMetadataBatch } from '../services/tmdb';
@@ -244,8 +245,7 @@ export default function Downloads() {
       {/* Varias calidades de la misma película: cada una se ve y se borra por
           su cuenta, que es justo lo que antes no se podía. */}
       {hoja && (
-        <div className="fixed inset-0 z-[65] bg-black/70 flex items-end" onClick={() => setHoja(null)}>
-          <div className="w-full bg-nf-raised rounded-t-2xl p-4 rise" style={{ paddingBottom: 'calc(16px + var(--safe-b))' }} onClick={e => e.stopPropagation()}>
+        <Hoja onClose={() => setHoja(null)}>
             <p className="text-[15px] font-semibold mb-1">{hoja.titulo}</p>
             <p className="text-[12px] text-nf-text3 mb-3">{hoja.versiones.length} versiones en el servidor</p>
             {hoja.versiones.map(v => (
@@ -265,8 +265,7 @@ export default function Downloads() {
                 )}
               </div>
             ))}
-          </div>
-        </div>
+        </Hoja>
       )}
 
       {playing && <Player path={playing.path} title={playing.series || cleanTitle(playing.name)} subtitle={epLabel(playing) || undefined}

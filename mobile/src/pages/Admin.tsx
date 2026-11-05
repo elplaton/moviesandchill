@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import Hoja from '../components/Hoja';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { apiFetch } from '../services/api';
 import { botonPasada, cuantoQueda, estadoPasada, leerPasada, mandarPasada, resultadosPasada, type Pasada } from '../services/pasadaCreditos';
@@ -120,8 +121,7 @@ function Users() {
         );
       })}
       {edit && (
-        <div className="fixed inset-0 z-[65] bg-black/70 flex items-end" onClick={() => setEdit(null)}>
-          <div className="w-full bg-nf-raised rounded-t-2xl p-4 rise space-y-2" style={{ paddingBottom: 'calc(16px + var(--safe-b))' }} onClick={e => e.stopPropagation()}>
+        <Hoja onClose={() => setEdit(null)} className="space-y-2">
             <p className="text-[16px] font-semibold mb-1">Editar {edit.username}</p>
             <select className={input} value={ef.role} onChange={e => setEf({ ...ef, role: e.target.value })}><option value="user">Usuario</option><option value="admin">Administrador</option></select>
             <div className="flex items-center gap-2">
@@ -130,8 +130,7 @@ function Users() {
             </div>
             <input className={input} type="password" placeholder="Nueva contraseña (opcional)" value={ef.password} onChange={e => setEf({ ...ef, password: e.target.value })} />
             <button onClick={save} className="w-full h-11 rounded-xl bg-nf-red text-[15px] font-semibold">Guardar</button>
-          </div>
-        </div>
+        </Hoja>
       )}
     </div>
   );
