@@ -44,6 +44,9 @@ export interface Peticion {
   conseguida_en: string | null;
   pedida_en?: string | null;
   chat_nombre?: string | null;
+  /** Qué pasó con el mensaje del grupo al conseguirse: null pendiente, 'si'
+   *  borrado, 'antes' (conseguida antes de que se borraran) o 'no: <motivo>'. */
+  mensaje_borrado?: string | null;
   error?: string | null;
   usuarios?: string[];
   /** Su sitio en la cola (1 = la siguiente que sale); null si no esta en cola. */

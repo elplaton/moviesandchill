@@ -74,6 +74,78 @@ comprueba("un capitulo de la serie", True, si("Breaking Bad 1x01.mkv", BB))
 comprueba("un capitulo de otra serie", False, si("Better Call Saul 1x01.mkv", BB))
 comprueba("una pelicula con el nombre de la serie no", False, si("Breaking Bad (2008).mkv", BB))
 
+print("Lo que llega en vivo, contra lo pedido")
+
+
+def probar_llegada():
+    """`contra_peticiones` con la base de datos, TMDB, el indexado y la
+    recogida de mentira: lo que importa es a que peticion se le pone y a cual
+    no."""
+    import asyncio
+    import types
+
+    import app.database
+    from app.services import buscar_peticion as bp
+
+    activas = [dict(DUNE2, id=1, titulo_original=None), dict(BB, id=2)]
+    guardados, indexados, repasos, fichas = {}, [], [], []
+
+    db = types.ModuleType("app.database.peticiones")
+
+    async def _activas():
+        return [dict(p) for p in activas]
+
+    async def guardar_original(pid, original):
+        guardados[pid] = original
+    db.activas, db.guardar_original = _activas, guardar_original
+    sys.modules["app.database.peticiones"] = db
+    app.database.peticiones = db
+
+    tmdb = types.ModuleType("app.services.tmdb")
+
+    async def get_details(api_key, tmdb_id, tipo):
+        fichas.append(tmdb_id)
+        return {"tmdb_id": tmdb_id, "original_title": "Dune: Part Two" if tmdb_id == 693134 else "Breaking Bad"}
+    tmdb.get_details = get_details
+    sys.modules["app.services.tmdb"] = tmdb
+
+    async def indexar(aceptados, peticion, detalles):
+        indexados.append((aceptados[0]["file_name"], peticion["tmdb_id"]))
+        return 1
+    bp._indexar = indexar
+
+    pet = types.ModuleType("app.services.peticiones")
+
+    async def repasar():
+        return 0
+    pet.repasar = repasar
+    sys.modules["app.services.peticiones"] = pet
+    tareas = types.ModuleType("app.tasks")
+    tareas.spawn = lambda coro, nombre: (repasos.append(nombre), coro.close())
+    sys.modules["app.tasks"] = tareas
+
+    def llega(nombre, pistas=None):
+        return asyncio.run(bp.contra_peticiones(
+            {"channel_id": 1, "message_id": len(indexados) + 100, "file_name": nombre, "pistas": pistas}, "clave"))
+
+    comprueba("lo pedido llega con el nombre original: se reconoce", True,
+              llega("Dune.Part.Two.2024.2160p.WEB-DL.mkv"))
+    comprueba("y se le pone la ficha de la peticion", [("Dune.Part.Two.2024.2160p.WEB-DL.mkv", 693134)], indexados)
+    comprueba("y se recoge en el momento", ["peticion_llegada"], repasos)
+    comprueba("el original de una peticion antigua se pregunta una vez y se guarda",
+              {1: "Dune: Part Two"}, guardados)
+    comprueba("la secuela de otra cosa no", False, llega("Dune (2021) 1080p.mkv"))
+    comprueba("un capitulo de lo pedido como serie, si", True, llega("Breaking Bad 1x01 1080p.mkv"))
+    comprueba("lo que nadie ha pedido no se toca", False, llega("Oppenheimer (2023).mkv"))
+    comprueba("solo se indexa lo que era", 2, len(indexados))
+    activas.clear()
+    fichas.clear()
+    comprueba("sin peticiones activas no se pregunta nada a TMDB", (False, []),
+              (llega("Dune.Part.Two.2024.mkv"), fichas))
+
+
+probar_llegada()
+
 print()
 print(f"{len(fallos)} fallidas" if fallos else "todas correctas")
 sys.exit(1 if fallos else 0)

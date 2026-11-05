@@ -111,7 +111,17 @@ class Base:
             p["estado"] = "descartada"
 
     async def marcar_enviada(self, pid, chat_id, chat_nombre, mensaje_id):
-        self._por_id(pid).update(estado="enviada", chat_nombre=chat_nombre, intento_en=self.minuto)
+        self._por_id(pid).update(estado="enviada", chat_id=chat_id, chat_nombre=chat_nombre,
+                                 mensaje_id=mensaje_id, mensaje_borrado=None, intento_en=self.minuto)
+
+    async def mensajes_por_borrar(self):
+        return [{"id": p["id"], "titulo": p["titulo"], "chat_id": p["chat_id"], "mensaje_id": p["mensaje_id"]}
+                for p in self.peticiones.values()
+                if p["estado"] == "conseguida" and p.get("mensaje_borrado") is None
+                and p.get("chat_id") is not None and p.get("mensaje_id") is not None]
+
+    async def marcar_mensaje(self, pid, resultado):
+        self._por_id(pid)["mensaje_borrado"] = resultado
 
     async def marcar_fallida(self, pid, error):
         self._por_id(pid).update(estado="fallida", error=error, intento_en=self.minuto)
@@ -170,9 +180,18 @@ class Telegram:
         self.temas = []
         self.romper = None
         self.sin_fotos = False
+        self.borrados = []          # (destino, id) de los mensajes borrados
+        self.no_borra = None        # lo que contesta Telegram al borrar
+        self.conectado = True
 
     def is_connected(self):
-        return True
+        return self.conectado
+
+    async def delete_messages(self, destino, ids, revoke=True):
+        if self.no_borra:
+            raise RuntimeError(self.no_borra)
+        assert revoke, "se borra para todos, no solo para la cuenta"
+        self.borrados.extend((destino, i) for i in ids)
 
     async def get_input_entity(self, chat_id):
         return f"chat{chat_id}"
@@ -206,7 +225,7 @@ def montar():
     for nombre in ("en_catalogo", "de_titulo", "mandadas_hoy", "encolar", "cola", "cuantas_en_cola",
                    "puesto", "segundos_para_siguiente", "por_id", "mover", "descartar",
                    "marcar_enviada", "marcar_fallida", "sumar", "llegadas", "marcar_conseguida",
-                   "marcar_avisado"):
+                   "marcar_avisado", "mensajes_por_borrar", "marcar_mensaje"):
         setattr(db, nombre, getattr(base, nombre))
     sys.modules["app.database.peticiones"] = db
     import app.database
@@ -261,7 +280,12 @@ def montar():
                 "pausadas": base.ajustes.get("pausa", False),
                 "plantilla": base.ajustes.get("plantilla", s.PLANTILLA_POR_DEFECTO)}
     s.ajustes = ajustes
-    s._cliente = lambda: tg
+    def cliente():
+        # Como el de verdad: sin conexion no hay cliente.
+        if not tg.is_connected():
+            raise s.PeticionError("Telegram no está conectado en el servidor", 503)
+        return tg
+    s._cliente = cliente
     return base, tg
 
 
@@ -470,6 +494,46 @@ avisos.clear()
 comprueba("justo antes de mandarla se vuelve a buscar: no se manda", (False, enviados), (despachar(), len(tg.enviados)))
 comprueba("queda conseguida", "conseguida", base.peticiones[(161, "movie")]["estado"])
 comprueba("y se avisa a quien la pidio", [(5, "Titulo 161 ya se puede ver o descargar", "movie")], avisos)
+
+print("\nAl conseguirse, su mensaje se borra del grupo")
+base.ajustes["chat"] = -100777
+r = pedir(99, 170, admin=True)
+esperar(120)
+despachar()
+p170 = base.peticiones[(170, "movie")]
+comprueba("mandada, con su mensaje apuntado", ("enviada", True), (p170["estado"], p170.get("mensaje_id") is not None))
+tg.borrados.clear()
+base.catalogo.add((170, "movie"))
+asyncio.run(s.repasar())
+comprueba("al llegar se borra justo ese mensaje", [("chat-100777", p170["mensaje_id"])], tg.borrados)
+comprueba("y queda apuntado", "si", p170.get("mensaje_borrado"))
+asyncio.run(s.repasar())
+comprueba("no se intenta borrar dos veces", 1, len(tg.borrados))
+comprueba("lo que se consiguio sin escribirse (la 161) no tiene nada que borrar", None,
+          base.peticiones[(161, "movie")].get("mensaje_borrado"))
+
+r = pedir(99, 171, admin=True)
+esperar(120)
+despachar()
+base.catalogo.add((171, "movie"))
+tg.conectado = False
+asyncio.run(s.repasar())
+comprueba("sin Telegram conectado se queda pendiente", (None, 1),
+          (base.peticiones[(171, "movie")].get("mensaje_borrado"), len(tg.borrados)))
+tg.conectado = True
+asyncio.run(s.repasar())
+comprueba("y se borra en la siguiente pasada", ("si", 2),
+          (base.peticiones[(171, "movie")].get("mensaje_borrado"), len(tg.borrados)))
+
+r = pedir(99, 172, admin=True)
+esperar(120)
+despachar()
+base.catalogo.add((172, "movie"))
+tg.no_borra = "MESSAGE_DELETE_FORBIDDEN"
+asyncio.run(s.repasar())
+comprueba("si Telegram no deja, se apunta el motivo y no se insiste", "no: MESSAGE_DELETE_FORBIDDEN",
+          base.peticiones[(172, "movie")].get("mensaje_borrado"))
+tg.no_borra = None
 
 print(f"\n{total - len(fallos)} correctas, {len(fallos)} fallidas")
 sys.exit(1 if fallos else 0)

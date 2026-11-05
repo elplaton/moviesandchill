@@ -56,6 +56,9 @@ export interface PeticionAdmin {
   estado: EstadoPeticion;
   chat_nombre: string | null;
   error: string | null;
+  /** Qué pasó con el mensaje del grupo al conseguirse: null pendiente, 'si'
+   *  borrado, 'antes' (conseguida antes de que se borraran) o 'no: <motivo>'. */
+  mensaje_borrado?: string | null;
   creada_en: string | null;
   conseguida_en: string | null;
   /** Ultima vez que se intento mandar (la de una fallida, cuando fallo). */

@@ -837,6 +837,13 @@ async def index_live_message(downloader, channel_id: int, msg, api_key: str = ""
                 indexed = True
                 logger.info("Nuevo en %s: %s (%s)", name, file_name[:80],
                             item.get("media_type") or "sin clasificar")
+                # Antes de que lo empareje el bucle de TMDB: si es algo que
+                # alguien ha pedido, ya sabemos su ficha (la de la peticion).
+                try:
+                    from app.services.buscar_peticion import contra_peticiones
+                    await asyncio.wait_for(contra_peticiones(item, api_key), 20)
+                except Exception as e:
+                    logger.warning("No se pudo comparar %s con las peticiones: %s", file_name[:80], e)
                 ensure_enrich_worker(api_key, broadcast)
 
     await log_novedad(

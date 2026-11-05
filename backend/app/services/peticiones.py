@@ -19,6 +19,10 @@ Tres cosas a tener presentes:
   al pedir y otra vez justo antes de mandarla. Si ya estaba publicado (sin
   ficha, con otra o sin indexar), se indexa con la ficha de TMDB de la
   peticion y se da por pedida y conseguida sin escribir en ningun grupo.
+* **Al llegar, el mensaje se borra del grupo** (`borrar_mensajes`): una
+  peticion ya conseguida que sigue ahi parece pendiente para quien lee el
+  grupo. Se borra para todos (`revoke`); una cuenta puede borrar sus propios
+  mensajes de un grupo sin limite de tiempo.
 * **"Ha llegado" es que haya un archivo del titulo con ficha valida**
   (`tmdb_valid`), lo mismo que hace falta para salir en la portada. Lo mira
   un vigilante cada pocos minutos: cuando el archivo se indexa todavia no se
@@ -67,6 +71,9 @@ PENDIENTES = ("en_cola", "enviada")
 # Un solo envio a la vez: dos personas pidiendo lo mismo en el mismo segundo
 # mandarian dos mensajes, porque ninguna veria aun la fila de la otra.
 _envio = asyncio.Lock()
+# Una pasada de recogida a la vez: la lanzan el vigilante y lo que llega en
+# vivo (buscar_peticion.contra_peticiones), y dos a la vez avisarian dos veces.
+_repaso = asyncio.Lock()
 
 
 class PeticionError(Exception):
@@ -489,6 +496,11 @@ async def probar(api_key: str, plantilla: str | None = None) -> str:
 async def repasar() -> int:
     """Una pasada del vigilante: lo pedido que ya esta en el catalogo se da
     por conseguido y se avisa a quien lo esperaba. Devuelve cuantos avisos."""
+    async with _repaso:
+        return await _repasar()
+
+
+async def _repasar() -> int:
     from app.database import peticiones as db
     from app.services.push import enviar
 
@@ -514,7 +526,41 @@ async def repasar() -> int:
             await db.marcar_avisado(p["id"], user_id)
             avisos += 1 if llego else 0
         logger.info("Peticion conseguida: %s (%d esperando)", p["titulo"], len(p["por_avisar"] or []))
+    await borrar_mensajes()
     return avisos
+
+
+async def borrar_mensajes() -> int:
+    """Borra del grupo el mensaje de cada peticion conseguida. Lo que solo
+    tuvo que esperar en la cola nunca llego a escribirse y no tiene mensaje.
+    Si Telegram no esta conectado, se queda pendiente para la siguiente
+    pasada; si dice que no (el grupo ya no existe, la cuenta ya no esta), se
+    apunta el motivo y no se insiste. Devuelve cuantos ha borrado."""
+    from app.database import peticiones as db
+
+    pendientes = await db.mensajes_por_borrar()
+    if not pendientes:
+        return 0
+    try:
+        cliente = _cliente()
+    except PeticionError:
+        return 0   # sin conexion: a la siguiente pasada
+    borrados = 0
+    for p in pendientes:
+        try:
+            destino = await _destino(cliente, p["chat_id"])
+            await cliente.delete_messages(destino, [p["mensaje_id"]], revoke=True)
+        except Exception as e:
+            if not cliente.is_connected():
+                return borrados   # se ha caido a mitad: lo que queda, luego
+            motivo = str(e)[:200]
+            await db.marcar_mensaje(p["id"], f"no: {motivo}")
+            logger.warning("Peticion «%s»: no se pudo borrar su mensaje del grupo: %s", p["titulo"], motivo)
+            continue
+        await db.marcar_mensaje(p["id"], "si")
+        borrados += 1
+        logger.info("Peticion «%s» conseguida: su mensaje se ha borrado del grupo", p["titulo"])
+    return borrados
 
 
 async def vigilante(minutos: float = MINUTOS_VIGILANTE) -> None:

@@ -381,6 +381,12 @@ export default function AdminPeticiones({ onToast }: { onToast: (m: string) => v
                   {p.usuarios?.length ? ` · ${p.usuarios.join(', ')}` : ''}
                 </p>
                 {p.estado === 'fallida' && p.error && <p className="text-xs text-nf-faint">{p.error}</p>}
+                {p.estado === 'conseguida' && p.mensaje_borrado === 'si' && (
+                  <p className="text-xs text-nf-faint">Su mensaje se ha borrado del grupo</p>
+                )}
+                {p.estado === 'conseguida' && p.mensaje_borrado?.startsWith('no') && (
+                  <p className="text-xs text-nf-faint">No se pudo borrar su mensaje del grupo: {p.mensaje_borrado.slice(4)}</p>
+                )}
               </div>
               {/* Lo que no salió (o se quitó) puede volver: entra al final,
                   como si se pidiera ahora. */}

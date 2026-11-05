@@ -286,6 +286,52 @@ async def _indexar(aceptados: list[dict], peticion: dict, detalles: dict) -> int
     return len(filas)
 
 
+async def contra_peticiones(item: dict, api_key: str) -> bool:
+    """Lo que acaba de llegar a un canal, contra lo que alguien ha pedido.
+
+    Sin esto, una peticion se daba por conseguida cuando el bucle de TMDB le
+    ponia al archivo **la misma** ficha, y eso falla justo con lo que mas se
+    pide: un estreno con el mismo titulo que otra pelicula («Animales» de
+    2026) acababa con la otra y la peticion seguia esperando, con su mensaje
+    en el grupo. Aqui la ficha la sabemos de antemano (la de la peticion), asi
+    que se compara con `veredicto`, lo mismo que la busqueda de antes de
+    pedir, y lo que es ese titulo se indexa con ella (`tmdb_manual`: el bucle
+    de TMDB ya no la cambia) y se recoge la peticion en el momento.
+
+    `item` es la fila recien metida en `media_items`. Devuelve si era algo
+    pedido."""
+    from app.database import peticiones as db
+    from app.services.tmdb import get_details
+
+    activas = await db.activas()
+    if not activas:
+        return False
+    for p in activas:
+        if not p.get("titulo_original") and api_key:
+            # Las de antes de guardar el original: se pregunta una vez.
+            ficha = await get_details(api_key, p["tmdb_id"], p["media_type"])
+            if ficha and ficha.get("original_title"):
+                p["titulo_original"] = ficha["original_title"]
+                await db.guardar_original(p["id"], p["titulo_original"])
+        si, por_que = veredicto(item["file_name"], item.get("pistas"), p)
+        if not si:
+            continue
+        detalles = await get_details(api_key, p["tmdb_id"], p["media_type"]) if api_key else None
+        if not detalles:
+            logger.warning("Llega lo pedido («%s»: %s) pero TMDB no da su ficha; lo emparejara el bucle",
+                           p["titulo"], item["file_name"][:90])
+            return False
+        await _indexar([{**item, "indexado": True}], p, detalles)
+        logger.info("Llega lo pedido: «%s» es %s (%s)", p["titulo"], item["file_name"][:90], por_que)
+        # Recogerla (avisar y borrar el mensaje del grupo) en segundo plano:
+        # el indexado en vivo no espera a Telegram ni al push.
+        from app.services.peticiones import repasar
+        from app.tasks import spawn
+        spawn(repasar(), "peticion_llegada")
+        return True
+    return False
+
+
 async def buscar_e_indexar(peticion: dict, detalles: dict) -> int:
     """Busca la peticion en los canales y, lo que sea ese titulo, lo indexa
     con su ficha. Devuelve cuantos archivos; 0 si no hay nada (o si la

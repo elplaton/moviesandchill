@@ -1407,6 +1407,12 @@ function Peticiones() {
                   <p className="text-[12px] text-nf-text3 truncate">
                     {p.usuarios?.length ? `La esperan: ${p.usuarios.join(', ')}` : 'Ya no la espera nadie'}
                   </p>
+                  {p.estado === 'conseguida' && p.mensaje_borrado === 'si' && (
+                    <p className="text-[12px] text-nf-text3">Su mensaje se ha borrado del grupo</p>
+                  )}
+                  {p.estado === 'conseguida' && p.mensaje_borrado?.startsWith('no') && (
+                    <p className="text-[12px] text-nf-text3 break-words">No se pudo borrar su mensaje: {p.mensaje_borrado.slice(4)}</p>
+                  )}
                   {p.estado === 'fallida' && p.error && (
                     <p className="text-[12px] text-red-300 mt-0.5 break-words">
                       {p.error}{p.intento_en ? ` (${cuando(p.intento_en)})` : ''}

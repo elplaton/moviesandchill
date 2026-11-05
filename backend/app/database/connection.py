@@ -304,6 +304,19 @@ async def _ensure_tables():
         # es lo que marca cuando puede salir la siguiente.
         await conn.execute("ALTER TABLE peticiones ADD COLUMN IF NOT EXISTS orden DOUBLE PRECISION")
         await conn.execute("ALTER TABLE peticiones ADD COLUMN IF NOT EXISTS intento_en TIMESTAMP")
+        # Que paso con el mensaje del grupo al conseguirse (services/peticiones
+        # `borrar_mensajes`): NULL pendiente, 'si' borrado, 'antes' conseguida
+        # antes de que esto existiera (no se toca) o 'no: <motivo>'.
+        nueva = not await conn.fetchval("""
+            SELECT 1 FROM information_schema.columns
+            WHERE table_name = 'peticiones' AND column_name = 'mensaje_borrado'""")
+        await conn.execute("ALTER TABLE peticiones ADD COLUMN IF NOT EXISTS mensaje_borrado TEXT")
+        # Para reconocer lo pedido cuando llega con el nombre en el idioma
+        # original (buscar_peticion.contra_peticiones).
+        await conn.execute("ALTER TABLE peticiones ADD COLUMN IF NOT EXISTS titulo_original TEXT")
+        if nueva:
+            await conn.execute("""
+                UPDATE peticiones SET mensaje_borrado = 'antes' WHERE estado = 'conseguida'""")
         # Quien espera cada peticion. `origen` es quien la mando de verdad (lo
         # que cuenta para el limite diario); sumarse a una ya mandada no
         # escribe nada en Telegram y por eso no cuenta.

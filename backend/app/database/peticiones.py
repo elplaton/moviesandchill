@@ -99,15 +99,18 @@ async def encolar(datos: dict) -> int:
     """La pone al final de la cola (o la vuelve a poner, si una anterior habia
     fallado o se habia descartado). Devuelve su id."""
     fila = await _uno("""
-        INSERT INTO peticiones (tmdb_id, media_type, titulo, year, poster, estado, orden, error, creada_en)
+        INSERT INTO peticiones (tmdb_id, media_type, titulo, year, poster, estado, orden, error, creada_en,
+                                titulo_original)
         VALUES ($1, $2, $3, $4, $5, 'en_cola',
-                (SELECT COALESCE(MAX(orden), 0) + 1 FROM peticiones WHERE estado = 'en_cola'), NULL, NOW())
+                (SELECT COALESCE(MAX(orden), 0) + 1 FROM peticiones WHERE estado = 'en_cola'), NULL, NOW(), $6)
         ON CONFLICT (tmdb_id, media_type) DO UPDATE
            SET titulo = $3, year = $4, poster = $5, estado = 'en_cola', error = NULL,
+               titulo_original = COALESCE($6, peticiones.titulo_original),
                orden = (SELECT COALESCE(MAX(orden), 0) + 1 FROM peticiones WHERE estado = 'en_cola'),
                creada_en = NOW(), conseguida_en = NULL
         RETURNING id
-    """, datos["tmdb_id"], datos["media_type"], datos["titulo"], datos.get("year"), datos.get("poster"))
+    """, datos["tmdb_id"], datos["media_type"], datos["titulo"], datos.get("year"), datos.get("poster"),
+        datos.get("titulo_original"))
     return fila["id"] if fila else 0
 
 
@@ -207,7 +210,7 @@ async def marcar_intento(peticion_id: int) -> None:
 async def marcar_enviada(peticion_id: int, chat_id: int, chat_nombre: str, mensaje_id: int | None) -> None:
     await _ejecutar("""
         UPDATE peticiones SET estado = 'enviada', chat_id = $2, chat_nombre = $3, mensaje_id = $4,
-                              error = NULL, intento_en = NOW()
+                              error = NULL, intento_en = NOW(), mensaje_borrado = NULL
         WHERE id = $1
     """, peticion_id, chat_id, chat_nombre, mensaje_id)
 
@@ -292,6 +295,32 @@ async def llegadas() -> list[dict]:
 async def marcar_conseguida(peticion_id: int) -> None:
     await _ejecutar("UPDATE peticiones SET estado = 'conseguida', conseguida_en = NOW() WHERE id = $1",
                     peticion_id)
+
+
+async def activas() -> list[dict]:
+    """Las que alguien sigue esperando (en cola o ya mandadas al grupo)."""
+    return await _varios("""
+        SELECT id, tmdb_id, media_type, titulo, titulo_original, year FROM peticiones
+        WHERE estado IN ('en_cola', 'enviada')
+    """)
+
+
+async def guardar_original(peticion_id: int, titulo_original: str) -> None:
+    await _ejecutar("UPDATE peticiones SET titulo_original = $2 WHERE id = $1", peticion_id, titulo_original)
+
+
+async def mensajes_por_borrar() -> list[dict]:
+    """Las conseguidas cuyo mensaje sigue en el grupo de peticiones."""
+    return await _varios("""
+        SELECT id, titulo, chat_id, mensaje_id FROM peticiones
+        WHERE estado = 'conseguida' AND mensaje_borrado IS NULL
+          AND chat_id IS NOT NULL AND mensaje_id IS NOT NULL
+        ORDER BY conseguida_en
+    """)
+
+
+async def marcar_mensaje(peticion_id: int, resultado: str) -> None:
+    await _ejecutar("UPDATE peticiones SET mensaje_borrado = $2 WHERE id = $1", peticion_id, resultado[:300])
 
 
 async def marcar_avisado(peticion_id: int, user_id: int) -> None:

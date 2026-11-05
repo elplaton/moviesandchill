@@ -153,7 +153,7 @@ async def update_media_tmdb_many(rows: list[tuple]):
     async with pool.acquire() as conn:
         await conn.executemany("""
             UPDATE media_items SET tmdb_id=$1, tmdb_type=$2, tmdb_valid=$3, tmdb_searched=TRUE
-            WHERE channel_id=$4 AND message_id=$5
+            WHERE channel_id=$4 AND message_id=$5 AND tmdb_manual IS NOT TRUE
         """, rows)
 
 
