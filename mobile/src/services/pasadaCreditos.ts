@@ -11,7 +11,7 @@ import { apiFetch } from './api';
 const MILES = { useGrouping: 'always' } as unknown as Intl.NumberFormatOptions;
 
 export interface Pasada {
-  estado: 'parada' | 'en_marcha' | 'pausada' | 'terminada' | 'error';
+  estado: 'parada' | 'en_marcha' | 'al_dia' | 'pausada' | 'terminada' | 'error';
   lanzada: boolean;
   total?: number;
   hechos?: number;
@@ -49,6 +49,9 @@ export function estadoPasada(p: Pasada): string {
     return 'En marcha, tres a la vez';
   }
   if (p.estado === 'pausada') return p.lanzada ? 'En marcha' : 'En pausa';
+  // Ya no se para al acabar: se queda mirando cada 15 min si ha entrado algo
+  // nuevo que medir (un título o una temporada que no tiene sus créditos).
+  if (p.estado === 'al_dia') return 'Al día: mide lo nuevo según entra';
   if (p.estado === 'terminada') return 'Terminada';
   if (p.estado === 'error') return 'Se ha parado por un error (mira los registros)';
   // `hechos` puede no ser 0 sin haberla lanzado nunca: lo que se mide al ver

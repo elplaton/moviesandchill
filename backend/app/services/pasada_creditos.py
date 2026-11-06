@@ -8,8 +8,14 @@ todas las peliculas y temporadas que se pueden ver sin descargar. Son unas
 Telegram: uno o dos dias. Por eso:
 
 - **Se lanza y se pausa a mano**, desde Admin -> Ajustes. Lanzada, se apunta en
-  `app_settings` y **sigue sola tras un reinicio o un despliegue**; pausada o
-  terminada, no.
+  `app_settings` y **sigue sola tras un reinicio o un despliegue**; pausada, no.
+- **Va segun entra**: la lista no se calcula solo al lanzarla. Cada
+  `REFRESCO_S` (15 min) se vuelve a mirar que peliculas y temporadas no tienen
+  sus creditos y se meten en la cola, y al acabar la cola **no se para**: se
+  queda «al dia», vigilando lo nuevo. Un capitulo nuevo de una temporada ya
+  medida no necesita nada (su inicio se predice de la referencia de la
+  temporada); lo que entra en la cola son los titulos nuevos y las temporadas
+  nuevas, que mientras tanto tiran de la referencia general de la serie.
 - **Va a tres a la vez** (`TAREAS`), pero **cede**: con una descarga en marcha
   se para del todo hasta que acabe (se pidio que las descargas tengan
   preferencia), y con alguien viendo algo sin descargar sigue con una sola
@@ -32,11 +38,16 @@ TAREAS = 3
 VIENDO_S = 90
 # Cada cuanto se vuelve a mirar si ya se puede seguir.
 ESPERA_S = 15
+# Cada cuanto se mira si ha entrado algo nuevo que medir.
+REFRESCO_S = 15 * 60
 
 _estado: dict = {"estado": "parada"}
 _tareas: list[asyncio.Task] = []
 _activa = False
 _pendientes: list[tuple] = []
+# Lo que se esta midiendo ahora: aun no tiene fila en `creditos_proceso`, y al
+# refrescar la lista no puede volver a entrar en la cola.
+_en_curso: set[tuple] = set()
 _duraciones: list[float] = []
 
 
@@ -91,7 +102,14 @@ async def _tarea(n: int) -> None:
     from app.services import analisis_creditos as ac
     from app.services import proceso_creditos as pc
 
-    while _activa and _pendientes:
+    while _activa:
+        if not _pendientes:
+            # Al dia: se espera a que el refresco meta algo nuevo.
+            if n == 0 and _estado.get("estado") == "en_marcha" and not _en_curso:
+                _estado["estado"] = "al_dia"
+                logger.info("Pasada de creditos al dia: %s. Sigue vigilando lo nuevo", _estado["resultados"])
+            await asyncio.sleep(ESPERA_S)
+            continue
         # Ceder: con una descarga, todas esperan; con alguien viendo, solo
         # sigue la primera. Y sin Telegram no hay nada que hacer.
         quien = _quien_tiene_preferencia()
@@ -102,7 +120,11 @@ async def _tarea(n: int) -> None:
             continue
         if n == 0:
             _estado["cediendo"] = None
+        if not _pendientes:
+            continue
         tipo, tmdb_id, temporada, titulo = _pendientes.pop(0)
+        _en_curso.add((tipo, tmdb_id, temporada))
+        _estado["estado"] = "en_marcha"
         nombre = f"{titulo or tmdb_id}" + (f" · T{temporada}" if tipo == "tv" else "")
         _estado["actuales"][n] = nombre
         t0 = time.monotonic()
@@ -126,11 +148,36 @@ async def _tarea(n: int) -> None:
         _estado["resultados"][r] = _estado["resultados"].get(r, 0) + 1
         _estado["hechos"] += 1
         _estado["actuales"][n] = None
+        _en_curso.discard((tipo, tmdb_id, temporada))
+
+
+async def _refrescar() -> None:
+    """Cada `REFRESCO_S`, lo nuevo que no tenga sus creditos entra en la cola
+    (por votos, como el resto: lo mas visto primero)."""
+    global _pendientes
+    while _activa:
+        await asyncio.sleep(REFRESCO_S)
+        if not _activa:
+            break
+        try:
+            pendientes, total = await _lista()
+        except Exception as e:
+            logger.warning("Pasada de creditos: no se ha podido refrescar la lista: %s", e)
+            continue
+        en_cola = {p[:3] for p in _pendientes}
+        nuevos = [p for p in pendientes if p[:3] not in en_cola and p[:3] not in _en_curso]
+        _estado["total"] = total
+        if nuevos:
+            # `pendientes` viene ordenado por votos: se respeta ese orden con
+            # lo que ya estaba en la cola.
+            orden = {p[:3]: i for i, p in enumerate(pendientes)}
+            _pendientes = sorted(_pendientes + nuevos, key=lambda p: orden.get(p[:3], len(orden)))
+            logger.info("Pasada de creditos: %d nuevos que medir (%s)", len(nuevos),
+                        ", ".join(f"{p[3] or p[1]}" + (f" T{p[2]}" if p[0] == "tv" else "") for p in nuevos[:5]))
 
 
 async def _correr() -> None:
-    global _activa, _pendientes
-    from app.database.connection import set_app_settings
+    global _pendientes
     try:
         pendientes, total = await _lista()
         _pendientes = pendientes
@@ -138,12 +185,8 @@ async def _correr() -> None:
                        al_lanzar=total - len(pendientes), resultados={}, actuales=[None] * TAREAS,
                        cediendo=None, empezada=time.time())
         logger.info("Pasada de creditos: %d de %d por hacer, %d tareas", len(pendientes), total, TAREAS)
-        await asyncio.gather(*(_tarea(n) for n in range(TAREAS)))
-        if _activa and not _pendientes:
-            _estado["estado"] = "terminada"
-            _activa = False
-            await set_app_settings({CLAVE: "0"})
-            logger.info("Pasada de creditos terminada: %s", _estado["resultados"])
+        # Las tareas no acaban al vaciarse la cola: siguen hasta que se pausa.
+        await asyncio.gather(_refrescar(), *(_tarea(n) for n in range(TAREAS)))
     except Exception:
         logger.exception("Pasada de creditos")
         _estado["estado"] = "error"
@@ -175,7 +218,7 @@ async def pausar() -> dict:
     from app.database.connection import set_app_settings
     _activa = False
     await set_app_settings({CLAVE: "0"})
-    if _estado.get("estado") == "en_marcha":
+    if _estado.get("estado") in ("en_marcha", "al_dia"):
         _estado["estado"] = "pausada"
     return estado()
 

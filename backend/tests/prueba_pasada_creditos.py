@@ -74,6 +74,7 @@ async def _lista():
     return falta, len(TODO)
 p._lista = _lista
 p.ESPERA_S = 0.05
+p.REFRESCO_S = 0.2
 
 
 async def esperar_a(cond, max_s=5.0):
@@ -113,10 +114,24 @@ async def main():
     comprueba("pausada no avanza", antes, len(hechos))
     comprueba("y dice que esta en pausa", "pausada", p.estado()["estado"])
     await p.lanzar()
-    await esperar_a(lambda: p.estado()["estado"] == "terminada")
-    comprueba("reanudada termina", "terminada", p.estado()["estado"])
+    await esperar_a(lambda: p.estado()["estado"] == "al_dia")
+    comprueba("reanudada acaba al dia", "al_dia", p.estado()["estado"])
     comprueba("sin repetir ni saltarse nada", sorted((x[0], x[1], x[2]) for x in TODO), sorted(hechos))
-    comprueba("y al terminar se desmarca (no se relanza al reiniciar)", "0", ajustes.get(p.CLAVE))
+    comprueba("y sigue lanzada: tras un reinicio sigue vigilando lo nuevo", "1", ajustes.get(p.CLAVE))
+
+    print("Lo nuevo entra solo")
+    # Entran un titulo y una temporada nueva despues de acabar.
+    TODO.extend([("movie", 500, 0, "Peli nueva"), ("tv", 100, 2, "Serie 0")])
+    await esperar_a(lambda: ("tv", 100, 2) in hechos and ("movie", 500, 0) in hechos, 3.0)
+    comprueba("se miden sin relanzar nada", True, ("movie", 500, 0) in hechos and ("tv", 100, 2) in hechos)
+    await esperar_a(lambda: p.estado()["estado"] == "al_dia", 2.0)
+    comprueba("y vuelve a quedarse al dia", "al_dia", p.estado()["estado"])
+    # Lo que se esta midiendo cuando se refresca la lista no entra dos veces.
+    TODO.extend([("movie", 600 + i, 0, f"Lote {i}") for i in range(12)])
+    await esperar_a(lambda: all(("movie", 600 + i, 0) in hechos for i in range(12)), 4.0)
+    await asyncio.sleep(0.5)
+    comprueba("nada se mide dos veces", len(set(hechos)), len(hechos))
+    await p.pausar()
 
 
 asyncio.run(main())

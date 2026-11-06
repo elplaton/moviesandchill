@@ -1946,6 +1946,7 @@ const plural = (n: number, uno: string, varios: string) => n === 1 ? uno : vario
 function pasadaCorta(p: { estado: string; lanzada: boolean; cediendo: string | null }): string {
   if (p.estado === 'en_marcha') return p.cediendo ? 'Esperando' : 'En marcha';
   if (p.estado === 'pausada') return p.lanzada ? 'En marcha' : 'En pausa';
+  if (p.estado === 'al_dia') return 'Al día';
   if (p.estado === 'terminada') return 'Terminada';
   if (p.estado === 'error') return 'Parada por un error';
   return 'Sin lanzar';

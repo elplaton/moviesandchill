@@ -132,7 +132,7 @@ export default function AdminResumen() {
         <Tarjeta titulo="Créditos" onClick={() => ir('creditos')}
           estado={!pas ? 'nada' : pas.estado === 'error' ? 'aviso' : 'ok'}
           cifra={pas?.total ? `${pctPasada} %` : '—'}
-          linea={!cre ? '' : cre.activos === false ? 'desactivados' : `pasada ${pas?.lanzada ? 'en marcha' : pas?.estado === 'terminada' ? 'terminada' : 'parada'} · al ver ${cre.al_ver ? 'sí' : 'no'}`} />
+          linea={!cre ? '' : cre.activos === false ? 'desactivados' : `pasada ${pas?.estado === 'al_dia' ? 'al día' : pas?.lanzada ? 'en marcha' : pas?.estado === 'terminada' ? 'terminada' : 'parada'} · al ver ${cre.al_ver ? 'sí' : 'no'}`} />
         <Tarjeta titulo="Comprimidos" onClick={() => ir('canales')}
           estado={!com ? 'nada' : 'ok'}
           cifra={n(com?.ver)}
