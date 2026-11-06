@@ -331,6 +331,7 @@ async def _enrich_batch(api_key: str, items: list[dict]):
     sem = asyncio.Semaphore(TMDB_CONCURRENCY)
     enriched = 0
     lock = asyncio.Lock()
+    antes = await _titulos_de(items)
 
     async def _enrich_group(grp):
         nonlocal enriched
@@ -353,6 +354,16 @@ async def _enrich_batch(api_key: str, items: list[dict]):
                 # resultado del tipo equivocado no la sustituye (la sacaria de
                 # la portada), y lo que no encuentra nada ni llega aqui.
                 filas = [it for it in grp["items"] if valid or it.get("tmdb_valid") is not True]
+                # Y una ficha que se parece al nombre del archivo no la quita
+                # otra que no se le parece: eso es una ficha del canal mal
+                # pegada ("Gladiator" con la de "Equipo a la fuerza"), no un
+                # arreglo. Un enlace a TMDB o IMDb si manda.
+                if not result.get("por_enlace") and parsed.title:
+                    nueva = title_similarity(parsed.title, result.get("title", ""), result.get("original_title", ""))
+                    filas = [it for it in filas
+                             if not (it.get("tmdb_valid") is True and nueva < 0.5
+                                     and title_similarity(parsed.title, *antes.get((it.get("tmdb_id"), it.get("tmdb_type")),
+                                                                                   ("", ""))) >= 0.8)]
                 cambian = [it for it in filas if it.get("tmdb_id") and
                            (it["tmdb_id"], it.get("tmdb_type")) != (result["tmdb_id"], result["media_type"])]
                 await update_media_tmdb_many([
@@ -373,6 +384,21 @@ async def _enrich_batch(api_key: str, items: list[dict]):
     await asyncio.gather(*[_enrich_group(g) for g in groups.values()], return_exceptions=True)
     await mark_batch_tmdb_searched(items)
     return enriched
+
+
+async def _titulos_de(items: list[dict]) -> dict:
+    """{(tmdb_id, tipo): (titulo, original)} de la ficha que ya tienen."""
+    claves = {(it["tmdb_id"], it["tmdb_type"]) for it in items if it.get("tmdb_id") and it.get("tmdb_type")}
+    pool = get_pool()
+    if not claves or not pool:
+        return {}
+    async with pool.acquire() as conn:
+        filas = await conn.fetch("""
+            SELECT tc.tmdb_id, tc.media_type, tc.title, tc.original_title
+              FROM tmdb_cache tc
+              JOIN unnest($1::int[], $2::text[]) AS k(id, tipo) ON tc.tmdb_id = k.id AND tc.media_type = k.tipo
+        """, [c[0] for c in claves], [c[1] for c in claves])
+    return {(f["tmdb_id"], f["media_type"]): (f["title"] or "", f["original_title"] or "") for f in filas}
 
 
 def _item_from_message(downloader, channel_id, channel_name, msg, file_name, size, ctx=None):

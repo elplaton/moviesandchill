@@ -106,6 +106,11 @@ comprueba("una sinopsis no es un titulo", None,
 comprueba("las etiquetas de Telegram tampoco", None,
           p("Temp.6 El reencuentro de los mellizos #EsdPV #EsdPVT6 Capítulos 1031 a 1230 El descubrimiento"))
 
+comprueba("un cartel del canal no es un titulo", None, p("💎 RECOMENDADA "))
+comprueba("y si va encima, el titulo es la linea siguiente", ("Un hombre llamado Ove", 2015, None),
+          p("💎 RECOMENDADA\nUn hombre llamado Ove (2015)\nGénero: Drama"))
+comprueba("Saga: es una etiqueta", ("JACK RYAN", None, None), p("Saga: JACK RYAN (6 películas)"))
+
 print("\nEl tema dice si es serie")
 comprueba("Series", "series", tipo_de_tema("Series"))
 comprueba("Dibujos de Nuestra Infancia", "series", tipo_de_tema("Dibujos de Nuestra Infancia"))
@@ -232,6 +237,14 @@ comprueba("y una linea de texto sin año tambien es cabecera", "Fragguel Rock", 
 con_nombre.ver(msg(404, 4, tema=2503, texto="Alguien tiene la pelicula de the iron claw?"))
 c = con_nombre.ver(msg(405, 5, tema=2503, archivo="12 - Algo.mp4"))
 comprueba("fuera de un tema de series una pregunta no es cabecera", None, c.ficha)
+
+canal = Seguidor(es_foto=es["foto"], es_sticker=es["sticker"], es_archivo=es["archivo"],
+                 nombre_de=lambda m: m._archivo, tipo_tema=lambda t: "movie")
+canal.ver(msg(500, 0, tema=4, texto="EQUIPO A LA FUERZA (2026)\nGénero: Acción", foto=True))
+c = canal.ver(msg(501, 1, tema=4, archivo="Gladiator (2000).mkv"))
+comprueba("la ficha de una pelicula no se pega a la siguiente", None, c.ficha)
+c = canal.ver(msg(502, 2, tema=4, archivo="IMG_6846.MP4"))
+comprueba("pero un archivo sin nombre si se la lleva", "EQUIPO A LA FUERZA (2026)", (c.ficha or "").splitlines()[0])
 
 print(f"\n{total - len(fallos)} correctas, {len(fallos)} fallidas")
 sys.exit(1 if fallos else 0)

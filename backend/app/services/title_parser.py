@@ -271,8 +271,8 @@ def parse_filename(filename: str) -> ParsedName:
 
 # Nombres que no dicen nada del titulo: lo que sale de grabar un directo o de
 # bajar un video de una web ("chunklist_b1024000 (480p_aac).mp4").
-_GENERICO_RE = re.compile(r"^(?:output|chunklist|videoplayback|video|vid|file|archivo|capitulo|capítulo|episodio)\b",
-                          re.IGNORECASE)
+_GENERICO_RE = re.compile(r"^(?:output|chunklist|videoplayback|video|vid|file|archivo|capitulo|capítulo|episodio|"
+                          r"img|dsc|mvi|pxl|recording|grabaci[oó]n|screen|whatsapp)\b", re.IGNORECASE)
 
 
 def numero_suelto(filename: str) -> int | None:

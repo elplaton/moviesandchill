@@ -46,7 +46,7 @@ VIGENCIA = timedelta(minutes=5)
 TEMA_GENERAL = 1
 # Sube cuando cambia como se leen las fichas: lo ya releido se vuelve a leer
 # (services/relectura.py), porque lo que se guardo se saco con las reglas viejas.
-VERSION = 3
+VERSION = 4
 
 _TMDB_RE = re.compile(r"themoviedb\.org/(movie|tv)/(\d+)", re.IGNORECASE)
 _IMDB_RE = re.compile(r"imdb\.com/title/(tt\d{5,10})", re.IGNORECASE)
@@ -57,7 +57,7 @@ _STREAMING_RE = re.compile(r"en streaming\s*:\s*([^\n]+)", re.IGNORECASE)
 _AÑO_PAR_RE = re.compile(r"[\(\[]\s*((?:19|20)\d{2})\s*[\)\]]")
 _AÑO_RE = re.compile(r"(?<![\w.])((?:19|20)\d{2}|[12]\.\d{3})(?![\w.]|\.\d)")
 # Lo que va delante del titulo en las fichas con campos ("Nombre: King Kong").
-_ETIQUETA_RE = re.compile(r"^\s*(?:nombre|t[ií]tulo|title|pel[ií]cula|serie)\s*:\s*", re.IGNORECASE)
+_ETIQUETA_RE = re.compile(r"^\s*(?:nombre|t[ií]tulo|title|pel[ií]cula|serie|saga)\s*:\s*", re.IGNORECASE)
 _ORIGINAL_CAMPO_RE = re.compile(r"^\s*t[ií]tulo original\s*:\s*(.+)$", re.IGNORECASE | re.MULTILINE)
 # Lo que entre parentesis no es parte del titulo sino la calidad o el idioma.
 _CALIDAD = (r"\d{3,4}p|4k|uhd|hdr\d*|sdr|remux|blu-?ray|bdrip|brrip|web-?dl|webrip|hdtv|dvdrip|"
@@ -78,6 +78,11 @@ _NO_TITULO = re.compile(
     r"^(?:audio|idioma|g[eé]nero|g[eé]neros|estreno|puntuaci[oó]n|duraci[oó]n|sinopsis|calidad|"
     r"formato|tama[nñ]o|castellano|latino|subt[ií]tulos?)\b",
     re.IGNORECASE)
+# Lo que es un cartel del canal y no un titulo: "💎 RECOMENDADA" va encima de
+# algunas fichas, y se acabo buscando en TMDB ("Captura recomendada" para
+# Vaiana 2, Karate Kid Legends, Un hombre llamado Ove...).
+_CARTEL_RE = re.compile(r"^(?:recomendad[oa]s?|estrenos?|novedad(?:es)?|exclusiv[oa]|destacad[oa]s?|nuevo|"
+                        r"top(?:\s*\d+)?|imprescindible|joya|cl[aá]sico|aviso|importante)$", re.IGNORECASE)
 # Un trozo hecho solo de generos ("THRILLER SUSPENSE") tampoco es titulo. Solo
 # si es entero: "Historia de una hierba errante" y "Crimen perfecto" si lo son.
 _GENERO = (r"thriller|drama|terror|comedia|suspense|acci[oó]n|animaci[oó]n|documental|romance|"
@@ -139,6 +144,9 @@ def pistas_de(texto: str | None) -> Pistas | None:
     if n_linea is None:
         return None
     linea = lineas[n_linea]
+    while n_linea + 1 < len(lineas) and _CARTEL_RE.match(_limpia(re.sub(r"^[^\w¡¿\"«]+", "", linea))):
+        n_linea += 1
+        linea = lineas[n_linea]
     # Lo de delante que no es texto ("🎬 Nombre:", "▪️ Titulo:", "🎬 - CORAZONES
     # EN LA ATLANTIDA") y las etiquetas de Telegram ("#EsdPV") no son titulo.
     linea = re.sub(r"#\w+", " ", linea)
@@ -168,7 +176,9 @@ def pistas_de(texto: str | None) -> Pistas | None:
     entre = []
     def _fuera(m):
         dentro = _limpia(m.group(1))
-        if dentro and not _CALIDAD_RE.search(dentro) and not _año(dentro)[0]:
+        # Un recuento ("6 películas", "13 capítulos") tampoco es un titulo.
+        if (dentro and not _CALIDAD_RE.search(dentro) and not _año(dentro)[0]
+                and not re.search(r"\b\d+\s*(?:pel[ií]culas|cap[ií]tulos|episodios|temporadas|partes)\b", dentro, re.I)):
             entre.append(dentro)
         return " "
     cabeza = _PARENTESIS_RE.sub(_fuera, cabeza)
@@ -177,7 +187,7 @@ def pistas_de(texto: str | None) -> Pistas | None:
     for t in _SEPARADORES.split(cabeza):
         t = _limpia(t)
         if ((re.search(r"[^\W\d_]", t) or (con_etiqueta and not trozos and re.search(r"\d", t)))
-                and not _NO_TITULO.match(t) and not _SOLO_GENEROS_RE.match(t)
+                and not _NO_TITULO.match(t) and not _SOLO_GENEROS_RE.match(t) and not _CARTEL_RE.match(t)
                 and not _TEMPORADA_RE.match(t)):
             trozos.append(t)
     if not trozos:
@@ -246,9 +256,19 @@ def concuerda(pistas: Pistas | None, nombre: str | None) -> bool:
     # Las abreviaturas que quitan letras: "LyOuve" es "Ley y orden UVE" y
     # "FLX" es "Félix el gato". Vale si las letras del nombre estan, en orden,
     # en el titulo y empiezan igual.
-    corto = _compacto(parse_filename(nombre or "").title)
+    corto = _compacto(_sin_leet(parse_filename(nombre or "").title))
     return len(corto) >= 3 and any(t and t[0] == corto[0] and _subsecuencia(corto, t)
                                    for t in (_compacto(pistas.titulo), _compacto(pistas.original or "")))
+
+
+_LEET = str.maketrans("4310572", "aeiostz")
+
+
+def _sin_leet(texto: str) -> str:
+    """"m4d464sk4r3" -> "madagaskare": las palabras que mezclan letras y cifras
+    (para que no las encuentre un buscador) se leen con las cifras como letras."""
+    return " ".join(w.translate(_LEET) if re.search(r"[a-z]", w, re.I) and re.search(r"\d", w) else w
+                    for w in (texto or "").split())
 
 
 def _compacto(texto: str) -> str:
@@ -448,10 +468,6 @@ class _Ficha:
     # Lo ultimo que se publico en el tema despues de la ficha: la vigencia se
     # cuenta desde aqui (pausas), no desde la ficha.
     ultimo: object = None
-    remitente: object = None
-    # Lo que ya se ha llevado esta ficha, para saber si el bloque es de una
-    # sola cosa (las calidades de una pelicula) o de varias.
-    archivos: list = field(default_factory=list)
 
 
 @dataclass
@@ -489,8 +505,6 @@ class Seguidor:
         if self.es_archivo(msg):
             if ficha and self.nombre_de and not self._le_toca(ficha, msg, tema):
                 ficha = None
-            elif ficha and self.nombre_de:
-                ficha.archivos.append(self.nombre_de(msg) or "")
             pie = texto or None
             pistas = pistas_de_contexto(ficha.texto if ficha else None, pie)
             return Contexto(tema=tema, pie=pie, ficha=ficha.texto if ficha else None, pistas=pistas)
@@ -499,8 +513,7 @@ class Seguidor:
         if texto and pistas_de(texto) and (self.es_foto(msg) or getattr(msg, "rich_message", None) is not None
                                            or _AÑO_PAR_RE.search(texto) or _parece_ficha(texto)
                                            or (self._en_series(tema) and _cabecera_corta(texto))):
-            self._fichas[tema] = _Ficha(texto=texto[:2000], fecha=msg.date, ultimo=msg.date,
-                                        remitente=getattr(msg, "sender_id", None))
+            self._fichas[tema] = _Ficha(texto=texto[:2000], fecha=msg.date, ultimo=msg.date)
         return None
 
     def _le_toca(self, ficha: "_Ficha", msg, tema: int) -> bool:
@@ -515,18 +528,15 @@ class Seguidor:
             # Un capitulo que dice su serie ("Ninja Hattori S01E001") tiene
             # que ser de la serie de la cabecera.
             return False
-        if self._en_series(tema) and numero_suelto(nombre) is not None:
-            # Un capitulo que solo dice su numero y su titulo ("12 -
-            # Televisatron") es de la serie de su tanda.
-            return True
-        # Una pelicula con el nombre en otro idioma ("Your Fault_ London" bajo
-        # "Culpa tuya: Londres (2026)"): vale si la cabecera es una ficha de
-        # verdad, la subio el mismo que el archivo (en un tema de conversacion
-        # la foto de uno y el archivo de otro pueden ir seguidos) y el bloque
-        # es de una sola cosa (lo anterior que se llevo era esto mismo).
-        if not _parece_ficha(ficha.texto) or getattr(msg, "sender_id", None) != ficha.remitente:
-            return False
-        return all(concuerda(pistas_de(parse_filename(a).title or a), nombre) for a in ficha.archivos)
+        # Un capitulo que solo dice su numero y su titulo ("12 - Televisatron")
+        # es de la serie de su tanda. Nada mas: se probo a aceptar tambien una
+        # pelicula con el nombre en otro idioma ("Your Fault_ London" bajo
+        # "Culpa tuya: Londres") si la subia el mismo que la ficha, y en un
+        # canal todo lo sube el mismo, asi que la ficha de una pelicula se
+        # pegaba a la siguiente que llegara ("Gladiator" con la de "Equipo a
+        # la fuerza", 700 archivos). Con el nombre en otro idioma TMDB ya la
+        # encuentra por el original.
+        return self._en_series(tema) and numero_suelto(nombre) is not None
 
     def _en_series(self, tema: int) -> bool:
         return bool(self.tipo_tema) and self.tipo_tema(tema) == "series"
