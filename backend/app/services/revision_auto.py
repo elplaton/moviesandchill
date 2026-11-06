@@ -436,6 +436,8 @@ async def de_fondo(api_key: str) -> None:
         try:
             if await revision_ia.recoger():
                 await revision_ia.mandar(api_key)
+            # Lo cobrado por lotes que aqui no constaban (ver `conciliar`).
+            await revision_ia.conciliar()
             # Lo que no se resuelve con candidatas lo busca Claude en TMDB el
             # mismo (no va en lote). Por tandas y aparte, para no frenar este
             # bucle; el cerrojo evita dos a la vez.

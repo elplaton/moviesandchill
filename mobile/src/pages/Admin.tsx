@@ -427,6 +427,7 @@ interface MotivoRevision { clave: string; titulo: string; descripcion: string; g
 interface EstadoIA {
   preparando?: { hechos: number; total: number } | null;
   buscando?: { hechos: number; total: number } | null;
+  lote_progreso?: { hechos: number; total: number } | null;
   activa: boolean; configurada: boolean; error: string | null; tope: number; gasto_mes: number;
   lote: string | null; pendientes: number;
   ultimo: { aplicadas: number; sugeridas: number; ninguna: number; fallos: number; dolares: number } | null;
@@ -771,6 +772,25 @@ const DatoMovil = ({ valor, texto, ok }: { valor: number; texto: string; ok?: bo
   </span>
 );
 
+/** Algo en marcha, con su barra: cuántos lleva de cuántos (o moviéndose, si aún no se sabe). */
+function ProgresoMovil({ texto, hechos, total }: { texto: string; hechos?: number; total?: number }) {
+  const conTotal = !!total && total > 0;
+  const pct = conTotal ? Math.min(100, Math.round((hechos! / total!) * 100)) : 0;
+  return (
+    <div className="mt-2" role="progressbar" aria-label={texto} aria-valuemin={0} aria-valuemax={100} aria-valuenow={conTotal ? pct : undefined}>
+      <div className="flex justify-between text-[11px]">
+        <span className="text-nf-text2">{texto}</span>
+        {conTotal && <span className="tabular-nums text-nf-text3">{num(hechos!)}/{num(total!)} · {pct} %</span>}
+      </div>
+      <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-white/10">
+        {conTotal
+          ? <div className="h-full rounded-full bg-white/70 transition-[width] duration-700" style={{ width: `${Math.max(pct, 2)}%` }} />
+          : <div className="h-full w-1/3 animate-progreso motion-reduce:animate-none rounded-full bg-white/50" />}
+      </div>
+    </div>
+  );
+}
+
 /**
  * Lo automático, como en la web pero apilado: coincidencia exacta, Claude (con
  * su interruptor y su tope) y lo que te queda. Mismo orden y mismas cifras.
@@ -812,10 +832,14 @@ function TiraMovil({ auto, sugeridas, enLista, onCambio, onRevisar, lanzando, on
           </button>
         </div>
         <div className="mt-1.5"><DatoMovil valor={pasos?.exacta.grupos ?? auto.cuentas?.aplicada?.grupos ?? 0} texto="aplicadas solas" ok /></div>
-        <p className="mt-1 flex items-center text-[11px] text-nf-text3">
-          <span className={`mr-1.5 h-1.5 w-1.5 rounded-full ${auto.corriendo ? 'animate-pulse bg-nf-warn' : 'bg-nf-ok'}`} />
-          {auto.corriendo ? `Revisando ${num(auto.mirados)} de ${num(auto.por_mirar)}` : auto.termino ? `Al día, último repaso ${haceMov(auto.termino)}` : 'Esperando al primer repaso'}
-        </p>
+        {auto.corriendo ? (
+          <ProgresoMovil texto="Buscando coincidencias en TMDB" hechos={auto.mirados} total={auto.por_mirar} />
+        ) : (
+          <p className="mt-1 flex items-center text-[11px] text-nf-text3">
+            <span className="mr-1.5 h-1.5 w-1.5 rounded-full bg-nf-ok" />
+            {auto.termino ? `Al día, último repaso ${haceMov(auto.termino)}` : 'Esperando al primer repaso'}
+          </p>
+        )}
       </section>
 
       <section className="p-4">
@@ -846,17 +870,15 @@ function TiraMovil({ auto, sugeridas, enLista, onCambio, onRevisar, lanzando, on
           <div className="mt-2 h-1 w-full overflow-hidden rounded-full bg-white/10">
             <div className={`h-full ${pct >= 1 ? 'bg-nf-red' : pct >= 0.8 ? 'bg-nf-warn' : 'bg-white/60'}`} style={{ width: `${pct * 100}%` }} />
           </div>
-          {ia.buscando && <p className="mt-1.5 text-[11px] text-nf-text3">Claude buscando en TMDB, {num(ia.buscando.hechos)} de {num(ia.buscando.total)}</p>}
+          {ia.preparando && <ProgresoMovil texto="Preparando el lote" hechos={ia.preparando.hechos} total={ia.preparando.total} />}
+          {ia.lote && !ia.preparando && <ProgresoMovil texto="Lote en Claude (menos de una hora)" hechos={ia.lote_progreso?.hechos} total={ia.lote_progreso?.total} />}
+          {ia.buscando && <ProgresoMovil texto="Claude buscando en TMDB" hechos={ia.buscando.hechos} total={ia.buscando.total} />}
           {alTope && <p className="mt-1.5 text-[11px] text-nf-red">Tope del mes alcanzado: Claude no recibe nada hasta el mes que viene.</p>}
           {!encendida && ia.pendientes > 0 && <p className="mt-1.5 text-[11px] text-nf-text3">Apagado: {num(ia.pendientes)} grupos que podría mirar pasan directamente a ti.</p>}
-          {encendida && (ia.preparando
-            ? <p className="mt-1.5 text-[11px] text-nf-text3">Preparando el lote, {num(ia.preparando.hechos)} de {num(ia.preparando.total)}</p>
-            : ia.lote
-            ? <p className="mt-1.5 text-[11px] text-nf-text3">Lote en Claude, suele tardar menos de una hora</p>
-            : !alTope && ia.pendientes > 0 && (
+          {encendida && !ia.preparando && !ia.lote && !alTope && ia.pendientes > 0 && (
               <button onClick={() => pedir('mandar', '/admin/revision/ia/mandar', undefined, 'Preparando el lote para Claude')} disabled={!!haciendo}
                 className="mt-1.5 text-[12px] text-nf-text2">{haciendo === 'mandar' ? 'Mandando…' : `Mandar los ${num(ia.pendientes)} pendientes`}</button>
-            ))}
+            )}
           {ia.error && <p className="mt-1.5 text-[11px] text-nf-red">{ia.error}</p>}
         </>) : (
           <p className="mt-1.5 text-[12px] text-nf-text3">Para que Claude revise lo que la coincidencia exacta no resuelve, pon TMD_ANTHROPIC_API_KEY en el servidor.</p>

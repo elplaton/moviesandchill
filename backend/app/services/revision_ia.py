@@ -135,6 +135,26 @@ async def _ajustes() -> dict:
     }
 
 
+# Cuanto lleva Anthropic del lote en marcha, para la barra del panel: se le
+# pregunta como mucho una vez por minuto.
+_progreso_lote: dict = {"t": 0.0, "lote": None, "hechos": 0, "total": 0}
+
+
+async def _progreso(lote_id: str, clave: str) -> dict | None:
+    if _progreso_lote["lote"] != lote_id or time.time() - _progreso_lote["t"] > 60:
+        try:
+            b = await _cliente(clave).messages.batches.retrieve(lote_id)
+            rc = b.request_counts
+            hechos = (rc.succeeded or 0) + (rc.errored or 0) + (rc.canceled or 0) + (rc.expired or 0)
+            _progreso_lote.update(t=time.time(), lote=lote_id, hechos=hechos, total=hechos + (rc.processing or 0))
+        except Exception as e:
+            logger.warning("Revision con IA: no se ha podido mirar el lote %s: %s", lote_id, e)
+            _progreso_lote.update(t=time.time(), lote=lote_id)
+    if _progreso_lote["lote"] != lote_id or not _progreso_lote["total"]:
+        return None
+    return {"hechos": _progreso_lote["hechos"], "total": _progreso_lote["total"]}
+
+
 async def estado() -> dict:
     """Lo que enseña el panel. La clave nunca sale: solo si esta puesta en el
     `.env` y, si Anthropic la rechazo, el motivo."""
@@ -158,6 +178,7 @@ async def estado() -> dict:
             "buscando": dict(_investigando) if _investigando["activo"] else None,
             "tope": a["tope"],
             "gasto_mes": round(a["gasto_mes"], 4), "lote": a["lote"] or None, "pendientes": pendientes,
+            "lote_progreso": await _progreso(a["lote"], a["clave"]) if a["lote"] and a["clave"] else None,
             "ultimo": a["ultimo"]}
 
 
@@ -423,8 +444,13 @@ async def _mandar(api_key_tmdb: str) -> dict:
         async with pool.acquire() as conn:
             await conn.execute("INSERT INTO revision_ia_lotes (lote, modelo, grupos) VALUES ($1, $2, $3) "
                                "ON CONFLICT (lote) DO NOTHING", lote.id, MODELO, len(peticiones))
+            # `default=str`: las candidatas traen la fecha de estreno como
+            # `date`, y sin esto json.dumps fallaba aqui: el lote quedaba
+            # cobrado sin sus grupos, se recogia con 0 $ y se volvia a mandar
+            # (cuatro veces el 6-11-2026, 8,94 $). `recoger` ya no depende de esto.
             await conn.executemany("UPDATE revision_auto SET candidatas = $2::jsonb, ia_lote = $3 WHERE id = $1",
-                                   [(id_, json.dumps(cands), lote.id) for id_, cands, marca in apuntes if not marca])
+                                   [(id_, json.dumps(cands, default=str), lote.id)
+                                    for id_, cands, marca in apuntes if not marca])
     await asyncio.shield(apuntar())
     logger.info("Revision con IA: lote %s con %d grupos", lote.id, len(peticiones))
     return await estado()
@@ -444,12 +470,24 @@ async def recoger() -> dict | None:
     pool = get_pool()
     resumen = {"aplicadas": 0, "sugeridas": 0, "ninguna": 0, "fallos": 0, "dolares": 0.0}
     gasto, entrada, salida = 0.0, 0, 0
-    # Solo los grupos apuntados a este lote: uno adoptado puede traer alguno
-    # que ya no esperaba a Claude, y ese no se toca.
+    # Los grupos de este lote: los apuntados a el y, por si apuntarlos fallo,
+    # los que siguen esperando a Claude sin lote. Uno que ya no esperaba (lo
+    # resolvio otro lote, o se corrigio a mano) no se toca.
     async with pool.acquire() as conn:
-        mios = {f["id"] for f in await conn.fetch("SELECT id FROM revision_auto WHERE ia_lote = $1", lote.id)}
+        mios = {f["id"] for f in await conn.fetch("""
+            SELECT id FROM revision_auto
+             WHERE ia_lote = $1
+                OR (ia IS NULL AND ia_lote IS NULL AND estado IN ('sugerida', 'sin_candidato'))
+        """, lote.id)}
     async for r in await cliente.messages.batches.results(lote.id):
-        id_ = int(r.custom_id[1:])
+        id_ = int(r.custom_id[1:]) if r.custom_id[1:].isdigit() else -1
+        if r.result.type == "succeeded":
+            # Lo cobrado se apunta siempre, sea de un grupo que se aplica o no.
+            u = r.result.message.usage
+            gasto += _coste(u)
+            entrada += (u.input_tokens or 0) + (getattr(u, "cache_read_input_tokens", 0) or 0) \
+                + (getattr(u, "cache_creation_input_tokens", 0) or 0)
+            salida += u.output_tokens or 0
         if id_ not in mios:
             continue
         if r.result.type != "succeeded":
@@ -461,10 +499,6 @@ async def recoger() -> dict | None:
                 await conn.execute("UPDATE revision_auto SET ia_lote = NULL WHERE id = $1", id_)
             continue
         msg = r.result.message
-        gasto += _coste(msg.usage)
-        entrada += (msg.usage.input_tokens or 0) + (getattr(msg.usage, "cache_read_input_tokens", 0) or 0) \
-            + (getattr(msg.usage, "cache_creation_input_tokens", 0) or 0)
-        salida += msg.usage.output_tokens or 0
         if msg.stop_reason in ("refusal", "max_tokens"):
             # Se marca para no volver a mandarlo en cada lote: queda a mano.
             logger.warning("Revision con IA: el grupo %d acabo en %s", id_, msg.stop_reason)
@@ -504,6 +538,57 @@ async def recoger() -> dict | None:
     logger.info("Revision con IA: lote %s recogido: %d aplicadas, %d sugeridas, %d ninguna, %d fallos, %.2f $",
                 lote.id, resumen["aplicadas"], resumen["sugeridas"], resumen["ninguna"], resumen["fallos"], gasto)
     return resumen
+
+
+async def conciliar() -> float:
+    """Lo cobrado por lotes que la cuenta tiene en Anthropic y aqui no consta
+    (o consta a 0 $): un lote que no llego a apuntarse, o cuyos grupos no se
+    vincularon. Se pide la lista a Anthropic con la clave normal, se calcula
+    lo que costo cada uno por su `usage` y se apunta, sumandolo al gasto del
+    mes si es de este mes. Devuelve lo sumado. El lote en marcha no: ese lo
+    apunta `recoger`."""
+    from app.database.connection import get_pool
+
+    a = await _ajustes()
+    if not a["clave"]:
+        return 0.0
+    cliente = _cliente(a["clave"])
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        apuntados = {f["lote"]: f["dolares"] for f in await conn.fetch("SELECT lote, dolares FROM revision_ia_lotes")}
+    sumado = 0.0
+    async for b in cliente.messages.batches.list(limit=100):
+        if b.processing_status != "ended" or b.id == a["lote"]:
+            continue
+        if apuntados.get(b.id) is not None and float(apuntados[b.id]) > 0:
+            continue
+        coste, entrada, salida, modelo = 0.0, 0, 0, MODELO
+        async for r in await cliente.messages.batches.results(b.id):
+            if r.result.type == "succeeded":
+                u = r.result.message.usage
+                modelo = r.result.message.model
+                coste += _coste(u)
+                entrada += (u.input_tokens or 0) + (getattr(u, "cache_read_input_tokens", 0) or 0) \
+                    + (getattr(u, "cache_creation_input_tokens", 0) or 0)
+                salida += u.output_tokens or 0
+        if coste <= 0:
+            continue
+        rc = b.request_counts
+        total = (rc.succeeded or 0) + (rc.errored or 0) + (rc.canceled or 0) + (rc.expired or 0)
+        async with pool.acquire() as conn:
+            await conn.execute("""
+                INSERT INTO revision_ia_lotes (lote, modelo, grupos, creado, terminado, entrada, salida, dolares)
+                VALUES ($1, $2, $3, $4, COALESCE($5, NOW()), $6, $7, $8)
+                ON CONFLICT (lote) DO UPDATE SET dolares = EXCLUDED.dolares, entrada = EXCLUDED.entrada,
+                       salida = EXCLUDED.salida, terminado = COALESCE(revision_ia_lotes.terminado, EXCLUDED.terminado)
+            """, b.id, modelo, total, b.created_at.replace(tzinfo=None), b.ended_at.replace(tzinfo=None) if b.ended_at else None,
+                entrada, salida, round(coste, 4))
+        if b.created_at.strftime("%Y-%m") == a["mes"]:
+            sumado += coste
+        logger.warning("Revision con IA: lote %s no constaba (%.2f $): apuntado", b.id, coste)
+    if sumado:
+        await _sumar_gasto(sumado)
+    return sumado
 
 
 async def _aplicar(id_: int, respuesta: dict) -> str:

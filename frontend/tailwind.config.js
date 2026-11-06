@@ -50,11 +50,14 @@ export default {
         'fade-in': 'fadeIn 0.3s ease-out',
         'slide-up': 'slideUp 0.35s cubic-bezier(0.22,0.61,0.36,1)',
         'scale-in': 'scaleIn 0.22s cubic-bezier(0.22,0.61,0.36,1)',
+        // La barra de algo en marcha cuyo total aún no se sabe.
+        progreso: 'progreso 1.4s ease-in-out infinite',
       },
       keyframes: {
         fadeIn: { '0%': { opacity: '0' }, '100%': { opacity: '1' } },
         slideUp: { '0%': { opacity: '0', transform: 'translateY(14px)' }, '100%': { opacity: '1', transform: 'translateY(0)' } },
         scaleIn: { '0%': { opacity: '0', transform: 'scale(0.97)' }, '100%': { opacity: '1', transform: 'scale(1)' } },
+        progreso: { '0%': { transform: 'translateX(-100%)' }, '100%': { transform: 'translateX(300%)' } },
       },
     },
   },

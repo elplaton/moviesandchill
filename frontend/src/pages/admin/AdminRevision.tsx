@@ -45,6 +45,8 @@ interface EstadoIA {
   preparando?: { hechos: number; total: number } | null;
   /** Mientras Claude busca en TMDB lo que no tiene carátula. */
   buscando?: { hechos: number; total: number } | null;
+  /** Cuánto lleva Anthropic del lote en marcha (se le pregunta cada minuto). */
+  lote_progreso?: { hechos: number; total: number } | null;
 }
 
 /** Lo hecho por cada paso: coincidencia exacta, Claude y lo aceptado a mano. */
@@ -357,6 +359,30 @@ function Tramo({ titulo, extra, children }: { titulo: React.ReactNode; extra?: R
   );
 }
 
+/**
+ * Algo en marcha: qué es, cuántos lleva de cuántos y la barra. Sin total
+ * todavía (Anthropic aún no ha contestado), la barra se mueve sola para que
+ * se vea que no está parado.
+ */
+function Progreso({ texto, hechos, total }: { texto: string; hechos?: number; total?: number }) {
+  const conTotal = !!total && total > 0;
+  const pct = conTotal ? Math.min(100, Math.round((hechos! / total!) * 100)) : 0;
+  return (
+    <div className="space-y-1" role="progressbar" aria-label={texto} aria-valuemin={0} aria-valuemax={100}
+      aria-valuenow={conTotal ? pct : undefined}>
+      <div className="flex items-baseline justify-between gap-3 text-xs">
+        <span className="text-nf-dim">{texto}</span>
+        {conTotal && <span className="tabular-nums text-nf-faint">{num(hechos!)} de {num(total!)} · {pct} %</span>}
+      </div>
+      <div className="h-1.5 overflow-hidden rounded-pill bg-white/10">
+        {conTotal
+          ? <div className="h-full rounded-pill bg-white/70 transition-[width] duration-700" style={{ width: `${Math.max(pct, 2)}%` }} />
+          : <div className="h-full w-1/3 animate-progreso motion-reduce:animate-none rounded-pill bg-white/50" />}
+      </div>
+    </div>
+  );
+}
+
 function Dato({ valor, texto, ok }: { valor: number; texto: string; ok?: boolean }) {
   return (
     <span className="whitespace-nowrap text-sm text-nf-dim">
@@ -417,12 +443,14 @@ function TiraEstado({ auto, sugeridas, enLista, onCambio, onToast, onRevisar, la
           </button>
         )}>
         <Dato valor={pasos?.exacta.grupos ?? auto.cuentas?.aplicada?.grupos ?? 0} texto="aplicadas solas" ok />
-        <p className="flex items-center gap-2 text-xs text-nf-faint">
-          <span className={`h-1.5 w-1.5 rounded-full ${auto.corriendo ? 'animate-pulse bg-nf-warn' : 'bg-nf-ok'}`} aria-hidden />
-          {auto.corriendo
-            ? `Revisando ${num(auto.mirados)} de ${num(auto.por_mirar)}`
-            : auto.termino ? `Al día, último repaso ${haceMin(Date.now() - auto.termino * 1000)}` : 'Esperando al primer repaso'}
-        </p>
+        {auto.corriendo ? (
+          <Progreso texto="Buscando coincidencias en TMDB" hechos={auto.mirados} total={auto.por_mirar} />
+        ) : (
+          <p className="flex items-center gap-2 text-xs text-nf-faint">
+            <span className="h-1.5 w-1.5 rounded-full bg-nf-ok" aria-hidden />
+            {auto.termino ? `Al día, último repaso ${haceMin(Date.now() - auto.termino * 1000)}` : 'Esperando al primer repaso'}
+          </p>
+        )}
       </Tramo>
 
       <Tramo
@@ -463,19 +491,22 @@ function TiraEstado({ auto, sugeridas, enLista, onCambio, onToast, onRevisar, la
             <span className="h-1 w-24 overflow-hidden rounded-pill bg-white/10" title={`${Math.round(pct * 100)} % del tope`}>
               <span className={`block h-full ${pct >= 1 ? 'bg-nf-red' : pct >= 0.8 ? 'bg-nf-warn' : 'bg-white/60'}`} style={{ width: `${pct * 100}%` }} />
             </span>
-            {encendida && (ia.preparando
-              ? <span>Preparando el lote, {num(ia.preparando.hechos)} de {num(ia.preparando.total)}</span>
-              : ia.lote
-              ? <span>Lote en Claude, suele tardar menos de una hora</span>
-              : !alTope && ia.pendientes > 0 && (
+            {encendida && !ia.preparando && !ia.lote && !alTope && ia.pendientes > 0 && (
                 <button onClick={() => pedir('mandar', '/admin/revision/ia/mandar')} disabled={!!guardando}
                   className="text-nf-dim hover:text-white">
                   {guardando === 'mandar' ? 'Mandando…' : `Mandar los ${num(ia.pendientes)} pendientes`}
                 </button>
-              ))}
+              )}
           </div>
+          {ia.preparando && (
+            <Progreso texto="Preparando el lote: buscando candidatas en TMDB" hechos={ia.preparando.hechos} total={ia.preparando.total} />
+          )}
+          {ia.lote && !ia.preparando && (
+            <Progreso texto="Lote en Claude (suele tardar menos de una hora)"
+              hechos={ia.lote_progreso?.hechos} total={ia.lote_progreso?.total} />
+          )}
           {ia.buscando && (
-            <p className="text-xs text-nf-faint">Claude buscando en TMDB, {num(ia.buscando.hechos)} de {num(ia.buscando.total)}</p>
+            <Progreso texto="Claude buscando en TMDB" hechos={ia.buscando.hechos} total={ia.buscando.total} />
           )}
           {alTope && <p className="text-xs text-nf-red">Tope del mes alcanzado: Claude no recibe nada hasta el mes que viene.</p>}
           {!encendida && ia.pendientes > 0 && (

@@ -10,6 +10,9 @@ export default {
         },
       },
       fontFamily: { sans: ['-apple-system', 'BlinkMacSystemFont', 'Helvetica Neue', 'Helvetica', 'Arial', 'sans-serif'] },
+      // La barra de algo en marcha cuyo total aún no se sabe.
+      animation: { progreso: 'progreso 1.4s ease-in-out infinite' },
+      keyframes: { progreso: { '0%': { transform: 'translateX(-100%)' }, '100%': { transform: 'translateX(300%)' } } },
     },
   },
   plugins: [],
