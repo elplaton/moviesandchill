@@ -453,7 +453,7 @@ interface GrupoRevision {
   ejemplos?: string[] | null;
 }
 interface Aplicada { id: number; titulo: string; porque: string | null; ficha: Sugerencia | null; archivos: number; creado: string; por_ia?: boolean }
-interface LoteIA { lote: string; grupos: number; creado: string; terminado: string | null; aplicadas: number | null; sugeridas: number | null; ninguna: number | null; fallos: number | null; dolares: number | null }
+interface LoteIA { lote: string; modelo?: string; grupos: number; creado: string; terminado: string | null; aplicadas: number | null; sugeridas: number | null; ninguna: number | null; fallos: number | null; dolares: number | null }
 interface HistorialIA { lotes: LoteIA[]; meses: { mes: string; dolares: number }[]; total: number }
 
 const POR_PAGINA = 30;
@@ -671,7 +671,7 @@ function HistorialIAMovil() {
       {h.lotes.map(l => (
         <div key={l.lote} className="py-1.5 border-b border-white/5">
           <div className="flex justify-between text-[13px]">
-            <span className="text-nf-text2">{fechaIA(l.creado)} · {num(l.grupos)} grupos{l.lote.startsWith('busqueda-') ? ' · búsqueda en TMDB' : l.lote.startsWith('prueba-') ? ' · prueba' : ''}</span>
+            <span className="text-nf-text2">{fechaIA(l.creado)} · {num(l.grupos)} grupos · {l.lote.startsWith('busqueda-') ? 'búsqueda en TMDB' : l.lote.startsWith('prueba-') ? 'prueba' : l.modelo?.includes('verifica') ? 'Sonnet verifica' : l.modelo?.includes('haiku') ? 'Haiku' : 'Sonnet'}</span>
             <span className="tabular-nums">{l.dolares != null ? dolar(l.dolares) : 'en marcha…'}</span>
           </div>
           {l.terminado && (
@@ -844,7 +844,7 @@ function TiraMovil({ auto, sugeridas, enLista, onCambio, onRevisar, lanzando, on
 
       <section className="p-4">
         <div className="flex items-center justify-between">
-          <p className="text-[14px] font-semibold">Claude <span className="font-normal text-nf-text3">Sonnet 5.5</span></p>
+          <p className="text-[14px] font-semibold">Claude <span className="font-normal text-nf-text3">Haiku, verifica Sonnet</span></p>
           {ia?.configurada ? (
             <span className="flex items-center text-[12px] text-nf-text2">
               <span className="mr-2">{haciendo === 'activa' ? 'Comprobando…' : encendida ? 'Encendido' : 'Apagado'}</span>

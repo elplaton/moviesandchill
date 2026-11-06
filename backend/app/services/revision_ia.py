@@ -41,16 +41,32 @@ from datetime import datetime, timezone
 
 logger = logging.getLogger("tmd")
 
-MODELO = "claude-sonnet-5-5"
-# $ por millon de tokens: entrada, salida, lectura de cache, escritura de cache.
-# La Batch API cobra la mitad de todo.
-PRECIOS = (2.00, 10.00, 0.20, 2.50)
+# Haiku hace el trabajo (elegir entre candidatas, buscar en TMDB) y Sonnet solo
+# verifica lo que Haiku propone: se aplica solo lo que Sonnet confirma. Haiku
+# cuesta 20 veces menos y en la prueba de 35 grupos acerto lo mismo que Sonnet
+# (34), solo que se atrevia menos con «alta»; lo que Haiku da por «ninguna» no
+# le cuesta nada a Sonnet.
+MODELO = "claude-haiku-5-5"
+VERIFICADOR = "claude-sonnet-5-5"
+# Lo que antes hacia Sonnet solo (hasta el 6-11-2026): sus marcas en `ia` se
+# siguen entendiendo.
+MODELO_ANTES = "claude-sonnet-5-5"
+# $ por millon de tokens: entrada, salida, lectura de cache, escritura de cache
+# (Haiku 5.5 con prompts de menos de 100K, que es siempre el caso aqui). La
+# Batch API cobra la mitad de todo.
+PRECIOS = {"claude-haiku-5-5": (0.10, 0.50, 0.01, 0.125), "claude-sonnet-5-5": (2.00, 10.00, 0.20, 2.50)}
 DESCUENTO_LOTE = 0.5
-# Lo que cuesta de media un grupo (medido: 0,66 centimos sin lote, 0,33 en
-# lote), con un 50 % de margen: el tope se comprueba antes de mandar con esta
-# cuenta y lo real se apunta al volver, asi que un lote no puede pasarse por
-# haber calculado de menos.
-COSTE_GRUPO_ESTIMADO = 0.0066 * DESCUENTO_LOTE * 1.5
+# Lo que cuesta de media un grupo, con un 50 % de margen: el tope se comprueba
+# antes de mandar con esta cuenta y lo real se apunta al volver, asi que un
+# lote no puede pasarse por haber calculado de menos. Medido sin lote: Haiku
+# 0,034 centimos por grupo; Sonnet 0,66 decidiendo entre 8 candidatas (verificar
+# una sola ficha es bastante menos).
+COSTE_GRUPO_ESTIMADO = 0.00034 * DESCUENTO_LOTE * 1.5
+COSTE_VERIFICAR_ESTIMADO = 0.0066 * DESCUENTO_LOTE * 1.5
+# En `ia`: lo que Haiku ha propuesto y espera a que Sonnet lo verifique (la
+# propuesta va en `propuesta`).
+POR_VERIFICAR = "por_verificar"
+MARCA_VERIFICADA = MODELO + "+" + VERIFICADOR
 CANDIDATAS_MAX = 10
 # Al cambiar como se buscan las candidatas, lo que se quedo «sin candidatas»
 # se vuelve a intentar (se le quita la marca una vez, al mandar el siguiente
@@ -60,8 +76,8 @@ CANDIDATAS_VERSION = "2"
 LOTE_MAX = 2000
 TOPE_MES_DEFECTO = 20.0
 # Sin respaldo de otro modelo (`fallbacks`): la Batch API no lo admite (400
-# «not supported for batch requests», comprobado). Un grupo que Sonnet rechace
-# se queda sin tocar, para revisarlo a mano.
+# «not supported for batch requests», comprobado). Un grupo que el modelo
+# rechace se queda sin tocar, para revisarlo a mano.
 
 SISTEMA = """Eres el revisor del catálogo de una app de películas y series. El catálogo sale de canales de Telegram: cada grupo son archivos de vídeo que el sistema cree que son el mismo título (una película en varias calidades o partes, o los capítulos de una serie). Tu trabajo es decir a qué ficha de TMDB corresponde el grupo, eligiendo entre las candidatas que te damos, o decir que ninguna es.
 
@@ -92,6 +108,53 @@ Ejemplos:
 - Canal "La familia Addams", sin año, 2 archivos; candidatas "La familia Addams" de 1991 y de 2019 (películas) y de 1964 (serie) -> la más probable con seguridad media o baja: sin año no se puede saber cuál.
 - Canal "Star Wars" (2002), archivos de los episodios 1 a 6; candidatas "La guerra de las galaxias" (1977) y la serie "Star Wars: La guerra de los clones" -> ninguna: el grupo mezcla varias películas.
 """
+
+SISTEMA_VERIFICAR = """Eres el verificador del catálogo de una app de películas y series. El catálogo sale de canales de Telegram: cada grupo son archivos de vídeo que el sistema cree que son el mismo título (una película en varias calidades o partes, o los capítulos de una serie). Otro revisor ha propuesto a qué ficha de TMDB corresponde el grupo, y tu trabajo es comprobar si es la correcta. Si confirmas con seguridad alta, la ficha se pondrá a todos los archivos sin que nadie más lo mire.
+
+Lo que recibes: lo que dice el canal del grupo (titulo_canal, original, año, n_archivos, archivos, ficha, pie) y la ficha propuesta (título, título original, año, tipo, votos y el principio de la sinopsis).
+
+Reglas:
+1. Tiene que ser exactamente ese título, no uno parecido. Una secuela, una parte distinta, un spin-off, un especial, una película de una serie (o la serie de una película) o un documental sobre el título NO valen.
+2. El tipo importa. Si los archivos son capítulos (S01E02, 1x03, numerados por episodio) es una serie; una película en varias partes de un comprimido (.part1.rar, .7z.001, .zip.002) sigue siendo una película.
+3. El año desempata remakes y homónimos. En una película, el año del canal debe coincidir con el de la ficha con un año de margen. En una serie, el año del canal puede ser el de una temporada posterior: vale una serie que empezó ese año o antes. Sin año en ningún sitio y con remakes posibles, no puedes estar seguro.
+4. Los títulos pueden estar en otro idioma: compara también con el título original.
+5. correcta: true si la ficha propuesta es ese título; false si es otro o si el grupo mezcla varios títulos.
+6. confianza: "alta" solo si apostarías por tu respuesta sin mirar nada más; "media" o "baja" si hay dudas.
+7. motivo: una frase corta en español con la razón.
+"""
+
+ESQUEMA_VERIFICAR = {
+    "type": "object",
+    "properties": {
+        "correcta": {"type": "boolean"},
+        "confianza": {"type": "string", "enum": ["alta", "media", "baja"]},
+        "motivo": {"type": "string"},
+    },
+    "required": ["correcta", "confianza", "motivo"],
+    "additionalProperties": False,
+}
+
+
+def mensaje_verificar(g: dict, ficha: dict) -> str:
+    """Lo que ve Sonnet para verificar: el grupo y la ficha propuesta. Sin el
+    motivo de Haiku, para que no se deje llevar."""
+    visible = json.loads(mensaje(g, []))
+    visible.pop("candidatas", None)
+    visible["propuesta"] = {
+        "titulo": ficha.get("title"), "original": ficha.get("original_title"), "año": ficha.get("year"),
+        "tipo": "serie" if ficha.get("media_type") in ("tv", "series") else "película",
+        "votos": ficha.get("vote_count"), "sinopsis": (ficha.get("overview") or "")[:300],
+    }
+    return json.dumps(visible, ensure_ascii=False, indent=1)
+
+
+def params_verificar(g: dict, ficha: dict) -> dict:
+    return {
+        "model": VERIFICADOR, "max_tokens": 1500,
+        "system": [{"type": "text", "text": SISTEMA_VERIFICAR, "cache_control": {"type": "ephemeral"}}],
+        "output_config": {"effort": "low", "format": {"type": "json_schema", "schema": ESQUEMA_VERIFICAR}},
+        "messages": [{"role": "user", "content": mensaje_verificar(g, ficha)}],
+    }
 
 
 # Preparar un lote (buscar las candidatas de cada grupo en TMDB) tarda minutos.
@@ -171,9 +234,10 @@ async def estado() -> dict:
             pendientes = await conn.fetchval("""
                 SELECT COUNT(*) FROM revision_auto
                  WHERE estado IN ('sugerida', 'sin_candidato')
-                   AND (ia IS NULL OR ia = 'sin_candidatas' OR (ia = $1 AND estado = 'sin_candidato'))
-            """, MODELO)
-    return {"modelo": MODELO, "activa": a["activa"], "configurada": bool(a["clave"]), "error": a["error"],
+                   AND (ia IS NULL OR ia IN ('sin_candidatas', $2)
+                        OR (ia = ANY($1::text[]) AND estado = 'sin_candidato'))
+            """, [MODELO, MODELO_ANTES, MARCA_VERIFICADA], POR_VERIFICAR)
+    return {"modelo": MODELO, "verificador": VERIFICADOR, "activa": a["activa"], "configurada": bool(a["clave"]), "error": a["error"],
             "preparando": dict(_preparando) if _preparando["activo"] else None,
             "buscando": dict(_investigando) if _investigando["activo"] else None,
             "tope": a["tope"],
@@ -283,11 +347,13 @@ async def candidatas_de(g: dict, api_key_tmdb: str) -> list[dict]:
 
 # --- El lote -------------------------------------------------------------------
 
-def _coste(u) -> float:
-    ent, sal, lee, esc = PRECIOS
+def _coste(u, modelo: str = MODELO, lote: bool = True) -> float:
+    """Lo que cuesta una respuesta por su `usage`, con los precios de su modelo
+    (uno desconocido, al de Sonnet: mejor contar de mas que de menos)."""
+    ent, sal, lee, esc = PRECIOS.get(modelo) or PRECIOS[VERIFICADOR]
     return ((u.input_tokens or 0) * ent + (u.output_tokens or 0) * sal
             + (getattr(u, "cache_read_input_tokens", 0) or 0) * lee
-            + (getattr(u, "cache_creation_input_tokens", 0) or 0) * esc) / 1e6 * DESCUENTO_LOTE
+            + (getattr(u, "cache_creation_input_tokens", 0) or 0) * esc) / 1e6 * (DESCUENTO_LOTE if lote else 1)
 
 
 async def _sumar_gasto(dolares: float) -> None:
@@ -364,13 +430,37 @@ async def _mandar(api_key_tmdb: str) -> dict:
     if not a["activa"] or not a["clave"] or a["lote"] or not api_key_tmdb:
         return await estado()
     margen = a["tope"] - a["gasto_mes"]
-    cuantos = min(LOTE_MAX, int(margen / COSTE_GRUPO_ESTIMADO))
-    if cuantos <= 0:
+    if margen < COSTE_VERIFICAR_ESTIMADO:
         logger.info("Revision con IA: tope del mes alcanzado (%.2f de %.2f $)", a["gasto_mes"], a["tope"])
         await avisar_gasto()
         return await estado()
 
     pool = get_pool()
+    grupos = {g["clave"]: g for lista in (await revision.grupos()).values() for g in lista}
+    # Primero lo que Haiku ya propuso: un lote de Sonnet que solo verifica.
+    async with pool.acquire() as conn:
+        por_verificar = await conn.fetch("""SELECT id, clave, propuesta FROM revision_auto
+                                             WHERE ia = $1 AND ia_lote IS NULL ORDER BY archivos DESC""", POR_VERIFICAR)
+    if por_verificar:
+        cuantos = min(LOTE_MAX, int(margen / COSTE_VERIFICAR_ESTIMADO))
+        peticiones, vincular, fuera = [], [], []
+        for f in por_verificar[:cuantos]:
+            g = grupos.get(f["clave"])
+            prop = json.loads(f["propuesta"]) if isinstance(f["propuesta"], str) else f["propuesta"]
+            if g is None or not prop:
+                fuera.append(f["id"])       # ya no esta en la lista (se arreglo por otro lado)
+                continue
+            peticiones.append({"custom_id": f"v{f['id']}", "params": params_verificar(g, prop["ficha"])})
+            vincular.append((f["id"], None))
+        if fuera:
+            async with pool.acquire() as conn:
+                await conn.execute("UPDATE revision_auto SET ia = $2 WHERE id = ANY($1::int[])", fuera,
+                                   MODELO + ":fuera")
+        if peticiones:
+            # En el historial, «verifica»: el modelo es el de antes, el trabajo no.
+            return await _crear_lote(a, peticiones, vincular, VERIFICADOR + " verifica")
+
+    cuantos = min(LOTE_MAX, int(margen / COSTE_GRUPO_ESTIMADO))
     from app.database.connection import get_app_settings
     if (await get_app_settings()).get("revision_ia_candidatas") != CANDIDATAS_VERSION:
         async with pool.acquire() as conn:
@@ -381,12 +471,6 @@ async def _mandar(api_key_tmdb: str) -> dict:
         filas = await conn.fetch("""SELECT id, clave FROM revision_auto
                                      WHERE estado IN ('sugerida', 'sin_candidato') AND ia IS NULL
                                      ORDER BY archivos DESC""")
-    grupos = {}
-    for lista in (await revision.grupos()).values():
-        for g in lista:
-            grupos[g["clave"]] = g
-
-    import anthropic
     # Ya no estan en la lista, o no dicen de que serie son: fuera.
     # Lo de «Sin carátula» no va al lote: lo busca Claude en TMDB el mismo
     # (`investigar_pendientes`), porque las candidatas fijas no la encuentran.
@@ -424,7 +508,16 @@ async def _mandar(api_key_tmdb: str) -> dict:
                 await conn.execute("UPDATE revision_auto SET ia = $2 WHERE id = $1", id_, marca)
     if not peticiones:
         return await estado()
+    return await _crear_lote(a, peticiones, [(id_, cands) for id_, cands, marca in apuntes if not marca], MODELO)
 
+
+async def _crear_lote(a: dict, peticiones: list[dict], vincular: list[tuple], modelo: str) -> dict:
+    """Manda el lote y lo apunta, con sus grupos vinculados (`vincular`:
+    (id, candidatas o None))."""
+    import anthropic
+    from app.database.connection import get_pool, set_app_settings
+
+    pool = get_pool()
     try:
         lote = await _cliente(a["clave"]).messages.batches.create(requests=peticiones)
     except anthropic.APIError as e:
@@ -443,16 +536,17 @@ async def _mandar(api_key_tmdb: str) -> dict:
         await set_app_settings({"revision_ia_lote": lote.id, "revision_ia_error": ""})
         async with pool.acquire() as conn:
             await conn.execute("INSERT INTO revision_ia_lotes (lote, modelo, grupos) VALUES ($1, $2, $3) "
-                               "ON CONFLICT (lote) DO NOTHING", lote.id, MODELO, len(peticiones))
+                               "ON CONFLICT (lote) DO NOTHING", lote.id, modelo, len(peticiones))
             # `default=str`: las candidatas traen la fecha de estreno como
             # `date`, y sin esto json.dumps fallaba aqui: el lote quedaba
             # cobrado sin sus grupos, se recogia con 0 $ y se volvia a mandar
             # (cuatro veces el 6-11-2026, 8,94 $). `recoger` ya no depende de esto.
-            await conn.executemany("UPDATE revision_auto SET candidatas = $2::jsonb, ia_lote = $3 WHERE id = $1",
-                                   [(id_, json.dumps(cands, default=str), lote.id)
-                                    for id_, cands, marca in apuntes if not marca])
+            await conn.executemany("""UPDATE revision_auto SET candidatas = COALESCE($2::jsonb, candidatas), ia_lote = $3
+                                       WHERE id = $1""",
+                                   [(id_, json.dumps(cands, default=str) if cands is not None else None, lote.id)
+                                    for id_, cands in vincular])
     await asyncio.shield(apuntar())
-    logger.info("Revision con IA: lote %s con %d grupos", lote.id, len(peticiones))
+    logger.info("Revision con IA: lote %s (%s) con %d grupos", lote.id, modelo, len(peticiones))
     return await estado()
 
 
@@ -468,27 +562,34 @@ async def recoger() -> dict | None:
     if lote.processing_status != "ended":
         return None
     pool = get_pool()
-    resumen = {"aplicadas": 0, "sugeridas": 0, "ninguna": 0, "fallos": 0, "dolares": 0.0}
-    gasto, entrada, salida = 0.0, 0, 0
+    resumen = {"aplicadas": 0, "sugeridas": 0, "ninguna": 0, "fallos": 0, "propuestas": 0, "dolares": 0.0}
+    gasto, entrada, salida, modelo = 0.0, 0, 0, None
     # Los grupos de este lote: los apuntados a el y, por si apuntarlos fallo,
-    # los que siguen esperando a Claude sin lote. Uno que ya no esperaba (lo
-    # resolvio otro lote, o se corrigio a mano) no se toca.
+    # los que siguen esperando sin lote. «r<id>» es la decision de Haiku (el
+    # grupo esperaba a Claude), «v<id>» la verificacion de Sonnet (esperaba
+    # con una propuesta). Uno que ya no esperaba (lo resolvio otro lote, o se
+    # corrigio a mano) no se toca.
     async with pool.acquire() as conn:
-        mios = {f["id"] for f in await conn.fetch("""
+        mios_r = {f["id"] for f in await conn.fetch("""
             SELECT id FROM revision_auto
-             WHERE ia_lote = $1
+             WHERE (ia_lote = $1 AND ia IS NULL)
                 OR (ia IS NULL AND ia_lote IS NULL AND estado IN ('sugerida', 'sin_candidato'))
         """, lote.id)}
+        mios_v = {f["id"] for f in await conn.fetch("""
+            SELECT id FROM revision_auto WHERE ia = $2 AND (ia_lote = $1 OR ia_lote IS NULL)
+        """, lote.id, POR_VERIFICAR)}
     async for r in await cliente.messages.batches.results(lote.id):
+        tipo = r.custom_id[:1]
         id_ = int(r.custom_id[1:]) if r.custom_id[1:].isdigit() else -1
         if r.result.type == "succeeded":
             # Lo cobrado se apunta siempre, sea de un grupo que se aplica o no.
             u = r.result.message.usage
-            gasto += _coste(u)
+            modelo = r.result.message.model
+            gasto += _coste(u, modelo)
             entrada += (u.input_tokens or 0) + (getattr(u, "cache_read_input_tokens", 0) or 0) \
                 + (getattr(u, "cache_creation_input_tokens", 0) or 0)
             salida += u.output_tokens or 0
-        if id_ not in mios:
+        if id_ not in (mios_v if tipo == "v" else mios_r):
             continue
         if r.result.type != "succeeded":
             resumen["fallos"] += 1
@@ -505,11 +606,11 @@ async def recoger() -> dict | None:
             resumen["fallos"] += 1
             async with pool.acquire() as conn:
                 await conn.execute("UPDATE revision_auto SET ia = $2, ia_lote = NULL WHERE id = $1",
-                                   id_, f"{MODELO}:{msg.stop_reason}")
+                                   id_, f"{msg.model}:{msg.stop_reason}")
             continue
         try:
             respuesta = json.loads(next(b.text for b in msg.content if b.type == "text"))
-            cual = await _aplicar(id_, respuesta)
+            cual = await (_verificado(id_, respuesta) if tipo == "v" else _aplicar(id_, respuesta, msg.model))
         except Exception as e:
             logger.warning("Revision con IA: el grupo %d no se ha podido aplicar: %s", id_, e)
             cual = "fallos"
@@ -523,20 +624,21 @@ async def recoger() -> dict | None:
     async with pool.acquire() as conn:
         await conn.execute("""
             INSERT INTO revision_ia_lotes (lote, modelo, grupos) VALUES ($1, $2, 0) ON CONFLICT (lote) DO NOTHING
-        """, lote.id, MODELO)
+        """, lote.id, modelo or MODELO)
         await conn.execute("""
             UPDATE revision_ia_lotes
                SET terminado = NOW(), aplicadas = $2, sugeridas = $3, ninguna = $4, fallos = $5,
-                   entrada = $6, salida = $7, dolares = $8
+                   entrada = $6, salida = $7, dolares = $8, propuestas = $9
              WHERE lote = $1
         """, lote.id, resumen["aplicadas"], resumen["sugeridas"], resumen["ninguna"], resumen["fallos"],
-            entrada, salida, round(gasto, 4))
+            entrada, salida, round(gasto, 4), resumen["propuestas"])
     await set_app_settings({"revision_ia_lote": "",
                             "revision_ia_ultimo": json.dumps({**resumen, "terminado": time.time()})})
     from app.services import revision
     revision.olvidar()
-    logger.info("Revision con IA: lote %s recogido: %d aplicadas, %d sugeridas, %d ninguna, %d fallos, %.2f $",
-                lote.id, resumen["aplicadas"], resumen["sugeridas"], resumen["ninguna"], resumen["fallos"], gasto)
+    logger.info("Revision con IA: lote %s recogido: %d aplicadas, %d sugeridas, %d ninguna, %d propuestas a Sonnet, "
+                "%d fallos, %.2f $", lote.id, resumen["aplicadas"], resumen["sugeridas"], resumen["ninguna"],
+                resumen["propuestas"], resumen["fallos"], gasto)
     return resumen
 
 
@@ -567,7 +669,7 @@ async def conciliar() -> float:
             if r.result.type == "succeeded":
                 u = r.result.message.usage
                 modelo = r.result.message.model
-                coste += _coste(u)
+                coste += _coste(u, modelo)
                 entrada += (u.input_tokens or 0) + (getattr(u, "cache_read_input_tokens", 0) or 0) \
                     + (getattr(u, "cache_creation_input_tokens", 0) or 0)
                 salida += u.output_tokens or 0
@@ -591,8 +693,10 @@ async def conciliar() -> float:
     return sumado
 
 
-async def _aplicar(id_: int, respuesta: dict) -> str:
-    """Hace lo que toque con la respuesta de un grupo del lote."""
+async def _aplicar(id_: int, respuesta: dict, modelo: str = MODELO) -> str:
+    """Hace lo que toque con la decision de un grupo del lote: la de Haiku
+    queda como propuesta para que Sonnet la verifique (`proponer`); la de un
+    lote de antes, que decidia Sonnet solo, se aplica como entonces."""
     from app.database.connection import get_pool
 
     pool = get_pool()
@@ -609,7 +713,90 @@ async def _aplicar(id_: int, respuesta: dict) -> str:
         if tid.isdigit():
             det = await get_details(_api_key(), int(tid), "tv" if tipo == "tv" else "movie")
             cands = [det] if det else []
-    return await aplicar_eleccion(id_, f["clave"], respuesta, cands, MODELO)
+    if modelo.startswith("claude-sonnet"):
+        return await aplicar_eleccion(id_, f["clave"], respuesta, cands, MODELO_ANTES)
+    return await proponer(id_, f["clave"], respuesta, cands)
+
+
+def _misma_sin_caratula(g: dict | None, elegida: dict) -> bool:
+    """La misma ficha sin caratula que ya tiene el grupo: elegirla no arregla nada."""
+    actual = (g or {}).get("actual")
+    return bool(actual and clave_de(actual) == clave_de(elegida) and not elegida.get("poster"))
+
+
+async def _marcar(id_: int, estado: str, porque: str, marca: str) -> None:
+    from app.database.connection import get_pool
+
+    async with get_pool().acquire() as conn:
+        await conn.execute("""UPDATE revision_auto
+                                 SET estado = $2, porque = $3, sugerencia = NULL, antes = NULL, ia = $4,
+                                     ia_lote = NULL, propuesta = NULL, creado = NOW()
+                               WHERE id = $1""", id_, estado, porque[:300], marca)
+
+
+async def proponer(id_: int, clave: str, respuesta: dict, cands: list[dict]) -> str:
+    """Lo que ha elegido Haiku. Una ficha de las candidatas queda como
+    propuesta (`ia` = POR_VERIFICAR) para el siguiente lote, que es de Sonnet
+    y solo verifica; «ninguna» se queda como esta, para la busqueda en TMDB o
+    para ti."""
+    from app.database.connection import get_pool
+    from app.services import revision
+
+    elegida = next((c for c in cands if clave_de(c) == respuesta.get("eleccion")), None)
+    g = await revision.grupo(clave)
+    if elegida is not None and _misma_sin_caratula(g, elegida):
+        elegida = None
+    if elegida is None:
+        return await aplicar_eleccion(id_, clave, {**respuesta, "eleccion": "ninguna"}, [], MODELO)
+    if g is None:
+        await _marcar(id_, "sin_candidato", "el grupo ya no está en la lista", MODELO)
+        return "fallos"
+    prop = {"ficha": elegida, "confianza": respuesta.get("confianza"), "motivo": (respuesta.get("motivo") or "")[:300]}
+    async with get_pool().acquire() as conn:
+        await conn.execute("UPDATE revision_auto SET ia = $2, ia_lote = NULL, propuesta = $3::jsonb WHERE id = $1",
+                           id_, POR_VERIFICAR, json.dumps(prop, default=str))
+    return "propuestas"
+
+
+async def _verificado(id_: int, verif: dict) -> str:
+    """La verificacion de Sonnet de lo que propuso Haiku, desde un lote."""
+    from app.database.connection import get_pool
+
+    async with get_pool().acquire() as conn:
+        f = await conn.fetchrow("SELECT clave, propuesta FROM revision_auto WHERE id = $1", id_)
+    prop = json.loads(f["propuesta"]) if isinstance(f["propuesta"], str) else f["propuesta"]
+    if not prop:
+        return "fallos"
+    return await resolver_verificacion(id_, f["clave"], prop, verif, MARCA_VERIFICADA)
+
+
+async def resolver_verificacion(id_: int, clave: str, prop: dict, verif: dict, marca: str,
+                                solo_sugerir: bool = False) -> str:
+    """Sonnet confirma -> se aplica (con alta y las comprobaciones de siempre)
+    o queda como sugerencia (media o baja); Sonnet dice que no -> se queda
+    para ti, con lo que propuso Haiku y por que no."""
+    ficha = prop["ficha"]
+    if verif.get("correcta"):
+        motivo = f"{verif.get('motivo', '')} (propuesta de Haiku: {prop.get('motivo', '')})"
+        return await aplicar_eleccion(id_, clave, {"eleccion": clave_de(ficha), "confianza": verif.get("confianza"),
+                                                   "motivo": motivo}, [ficha], marca, solo_sugerir)
+    año = f" ({ficha.get('year')})" if ficha.get("year") else ""
+    await _marcar(id_, "sin_candidato",
+                  f"Haiku propuso «{ficha.get('title')}{año}» y Sonnet dice que no: {verif.get('motivo', '')}", marca)
+    return "ninguna"
+
+
+async def verificar_ahora(g: dict, ficha: dict, clave_api: str) -> tuple[dict | None, float]:
+    """La verificacion de Sonnet en el momento (sin lote): para la busqueda en
+    TMDB, que no va en lote. (respuesta o None, coste)."""
+    r = await _cliente(clave_api).messages.create(**params_verificar(g, ficha))
+    coste = _coste(r.usage, VERIFICADOR, lote=False)
+    if r.stop_reason != "end_turn":
+        return None, coste
+    try:
+        return json.loads(next(b.text for b in r.content if b.type == "text")), coste
+    except (StopIteration, ValueError):
+        return None, coste
 
 
 async def adoptar(lote_id: str) -> dict:
@@ -671,7 +858,7 @@ async def aplicar_eleccion(id_: int, clave: str, respuesta: dict, cands: list[di
         async with pool.acquire() as conn:
             await conn.execute("""UPDATE revision_auto
                                      SET estado = $2, porque = $3, sugerencia = $4::jsonb, antes = $5::jsonb,
-                                         ia = $6, ia_lote = NULL, creado = NOW()
+                                         ia = $6, ia_lote = NULL, propuesta = NULL, creado = NOW()
                                    WHERE id = $1""",
                                id_, estado, porque, json.dumps(sugerencia) if sugerencia else None,
                                json.dumps(antes) if antes else None, marca)
@@ -721,7 +908,7 @@ async def historial(limite: int = 30) -> dict:
 
     pool = get_pool()
     async with pool.acquire() as conn:
-        lotes = await conn.fetch("""SELECT lote, modelo, grupos, creado, terminado, aplicadas, sugeridas, ninguna,
+        lotes = await conn.fetch("""SELECT lote, modelo, grupos, creado, terminado, aplicadas, sugeridas, ninguna, propuestas,
                                            fallos, entrada, salida, dolares
                                       FROM revision_ia_lotes ORDER BY creado DESC LIMIT $1""", limite)
         meses = await conn.fetch("""SELECT to_char(creado, 'YYYY-MM') AS mes, COUNT(*) AS lotes,
@@ -733,7 +920,7 @@ async def historial(limite: int = 30) -> dict:
                   "dolares": float(f["dolares"])} for f in meses]
     total = float(total or 0)
     return {
-        "lotes": [{**{k: f[k] for k in ("lote", "modelo", "grupos", "aplicadas", "sugeridas", "ninguna", "fallos",
+        "lotes": [{**{k: f[k] for k in ("lote", "modelo", "grupos", "aplicadas", "sugeridas", "ninguna", "propuestas", "fallos",
                                         "entrada", "salida")},
                    "dolares": float(f["dolares"]) if f["dolares"] is not None else None,
                    "creado": f["creado"].isoformat(), "terminado": f["terminado"].isoformat() if f["terminado"] else None}
@@ -768,9 +955,10 @@ async def historial(limite: int = 30) -> dict:
 # y sale en el historial como «Búsqueda».
 
 BUSQUEDAS_MAX = 6
-# Medido sobre 4 grupos reales (Gomorrah, FoQ, The Punisher, Batallas Navales):
-# entre 0,45 y 1,1 centimos por grupo. Con el doble de margen.
-COSTE_BUSQUEDA_ESTIMADO = 0.02
+# Con Sonnet buscando costaba entre 0,45 y 1,1 centimos por grupo (medido sobre
+# 23 grupos reales, ~0,9). Ahora busca Haiku (20 veces menos) y Sonnet solo
+# verifica lo que encuentra, una llamada corta; con margen.
+COSTE_BUSQUEDA_ESTIMADO = 0.01
 MARCA_BUSQUEDA = MODELO + "+tmdb"
 _investigando: dict = {"activo": False, "hechos": 0, "total": 0}
 _cerrojo_investigar = asyncio.Lock()
@@ -883,7 +1071,7 @@ async def investigar(g: dict, api_key_tmdb: str, clave_api: str,
             output_config={"effort": "low", "format": {"type": "json_schema", "schema": ESQUEMA_FINAL}},
             messages=mensajes,
         )
-        coste += _coste(r.usage) / DESCUENTO_LOTE    # a precio normal: no va en lote
+        coste += _coste(r.usage, MODELO, lote=False)    # no va en lote
         if r.stop_reason != "tool_use":
             if r.stop_reason != "end_turn":
                 return None, list(vistas.values()), coste
@@ -918,8 +1106,9 @@ async def investigar(g: dict, api_key_tmdb: str, clave_api: str,
 def situacion_de(f, g: dict) -> str | None:
     """Por que le toca a un grupo que Claude lo busque el mismo, o None si no
     le toca (aun espera al lote, o Claude ya sugirio algo y lo decides tu)."""
-    if f["ia"] == MARCA_BUSQUEDA or (f["ia"] or "").startswith(MARCA_BUSQUEDA + ":"):
-        return None                                      # ya se busco
+    for m in (MARCA_BUSQUEDA, MODELO_ANTES + "+tmdb"):
+        if f["ia"] == m or (f["ia"] or "").startswith(m + ":"):
+            return None                                  # ya se busco (con Haiku, o antes con Sonnet)
     if g.get("sin_nombre"):
         return "sin_nombre" if f["ia"] is None else None
     from app.services.revision_auto import titulo_buscable
@@ -930,10 +1119,11 @@ def situacion_de(f, g: dict) -> str | None:
         return None
     if f["ia"] == "sin_candidatas":
         return "sin_candidatas"
-    if f["motivo"] == "sin_caratula" and (f["ia"] is None or f["ia"] == MODELO):
+    if f["motivo"] == "sin_caratula" and (f["ia"] is None or f["ia"] in (MODELO, MODELO_ANTES)):
         return "sin_caratula"
-    if f["ia"] == MODELO and f["estado"] == "sin_candidato":
-        return "ninguna"                                 # el lote dijo que ninguna
+    if f["ia"] in (MODELO, MODELO_ANTES, MARCA_VERIFICADA) and f["estado"] == "sin_candidato":
+        # El lote dijo que ninguna, o Sonnet no confirmo lo que propuso Haiku.
+        return "ninguna"
     return None
 
 
@@ -1005,8 +1195,24 @@ async def _investigar_pendientes(api_key_tmdb: str) -> dict | None:
                                            id_, MARCA_BUSQUEDA + ":sin_respuesta")
                     resumen["fallos"] += 1
                 else:
-                    resumen[await aplicar_eleccion(id_, g["clave"], respuesta, vistas, MARCA_BUSQUEDA,
-                                                   solo_sugerir=sit == "sin_nombre")] += 1
+                    elegida = next((c for c in vistas if clave_de(c) == respuesta.get("eleccion")), None)
+                    if elegida is not None and not _misma_sin_caratula(g, elegida):
+                        # Lo que encuentra Haiku lo verifica Sonnet antes de aplicarse.
+                        verif, c2 = await verificar_ahora(g, elegida, a["clave"])
+                        gasto += c2
+                        if verif is None:
+                            async with pool.acquire() as conn:
+                                await conn.execute("UPDATE revision_auto SET ia = $2 WHERE id = $1",
+                                                   id_, MARCA_BUSQUEDA + ":sin_respuesta")
+                            resumen["fallos"] += 1
+                        else:
+                            prop = {"ficha": elegida, "confianza": respuesta.get("confianza"),
+                                    "motivo": respuesta.get("motivo", "")}
+                            resumen[await resolver_verificacion(id_, g["clave"], prop, verif, MARCA_BUSQUEDA,
+                                                                solo_sugerir=sit == "sin_nombre")] += 1
+                    else:
+                        resumen[await aplicar_eleccion(id_, g["clave"], {**respuesta, "eleccion": "ninguna"}, [],
+                                                       MARCA_BUSQUEDA)] += 1
             except Exception as e:
                 # Lo pasajero (TMDB, la API) no se marca: vuelve en la siguiente tanda.
                 logger.warning("Revision con IA: la busqueda de «%s» fallo: %s", g["titulo"], e)

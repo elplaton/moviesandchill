@@ -482,7 +482,8 @@ async def estado() -> dict:
                                            FROM revision_auto GROUP BY estado"""):
                 cuentas[f["estado"]] = {"grupos": f["grupos"], "archivos": f["archivos"]}
             for f in await conn.fetch("""
-                SELECT estado, ia IS NOT NULL AS por_ia, porque = 'aceptada a mano' AS a_mano,
+                SELECT estado, COALESCE(ia NOT IN ('por_verificar', 'sin_candidatas'), FALSE) AS por_ia,
+                       porque = 'aceptada a mano' AS a_mano,
                        COUNT(*) AS grupos, COALESCE(SUM(archivos), 0) AS archivos
                   FROM revision_auto GROUP BY 1, 2, 3"""):
                 if f["estado"] == "aplicada" and f["a_mano"]:

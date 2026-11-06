@@ -189,6 +189,33 @@ comprueba("ya buscado no se repite", None, S(fila("sin_ficha", "sin_candidato", 
 comprueba("ni sin respuesta", None,
           S(fila("sin_ficha", "sin_candidato", revision_ia.MARCA_BUSQUEDA + ":sin_respuesta"), {}))
 
+print("\nHaiku trabaja, Sonnet verifica")
+class _U:
+    def __init__(s, e, o): s.input_tokens, s.output_tokens, s.cache_read_input_tokens, s.cache_creation_input_tokens = e, o, 0, 0
+comprueba("Haiku en lote: 1M de entrada y 1M de salida", 0.30, round(revision_ia._coste(_U(1e6, 1e6), "claude-haiku-5-5"), 4))
+comprueba("Sonnet sin lote, lo mismo", 12.0, round(revision_ia._coste(_U(1e6, 1e6), "claude-sonnet-5-5", lote=False), 4))
+comprueba("un modelo desconocido se cuenta como Sonnet", 6.0, round(revision_ia._coste(_U(1e6, 1e6), "otro"), 4))
+comprueba("marcas de antes: Sonnet dijo ninguna -> se busca", "ninguna",
+          S(fila("sin_ficha", "sin_candidato", revision_ia.MODELO_ANTES), T))
+comprueba("Sonnet no confirmó lo de Haiku -> se busca", "ninguna",
+          S(fila("sin_ficha", "sin_candidato", revision_ia.MARCA_VERIFICADA), T))
+comprueba("lo buscado antes con Sonnet no se repite", None,
+          S(fila("sin_ficha", "sin_candidato", revision_ia.MODELO_ANTES + "+tmdb"), T))
+comprueba("lo que espera a Sonnet no se busca", None, S(fila("sin_ficha", "sin_candidato", revision_ia.POR_VERIFICAR), T))
+_hechos = []
+async def _falso_aplicar(id_, clave, resp, cands, marca, solo_sugerir=False):
+    _hechos.append(("aplicar", resp["eleccion"], resp["confianza"], marca, solo_sugerir)); return "aplicadas"
+async def _falso_marcar(id_, estado, porque, marca):
+    _hechos.append(("marcar", estado, porque[:20], marca))
+_orig2 = (revision_ia.aplicar_eleccion, revision_ia._marcar)
+revision_ia.aplicar_eleccion, revision_ia._marcar = _falso_aplicar, _falso_marcar
+_prop = {"ficha": {"tmdb_id": 73223, "media_type": "tv", "title": "Black Clover", "year": 2017}, "motivo": "es la serie"}
+_asyncio.run(revision_ia.resolver_verificacion(1, "c", _prop, {"correcta": True, "confianza": "alta", "motivo": "sí"}, "m"))
+comprueba("Sonnet confirma: se aplica con su seguridad", ("aplicar", "tv:73223", "alta", "m", False), _hechos[-1])
+_asyncio.run(revision_ia.resolver_verificacion(1, "c", _prop, {"correcta": False, "confianza": "alta", "motivo": "no"}, "m"))
+comprueba("Sonnet dice que no: se queda para ti", ("marcar", "sin_candidato", "Haiku propuso «Black", "m"), _hechos[-1])
+revision_ia.aplicar_eleccion, revision_ia._marcar = _orig2
+
 print("\nLo aplicado sale de la lista en el momento")
 from app.services import revision as _rev
 _rev._cache["grupos"] = {"sin_ficha": [{"clave": "sin_ficha|movie|a|"}, {"clave": "sin_ficha|movie|b|"}]}

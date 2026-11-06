@@ -114,7 +114,7 @@ interface Aplicada {
 }
 
 interface LoteIA {
-  lote: string; grupos: number; creado: string; terminado: string | null;
+  lote: string; modelo?: string; grupos: number; creado: string; terminado: string | null; propuestas?: number | null;
   aplicadas: number | null; sugeridas: number | null; ninguna: number | null; fallos: number | null;
   dolares: number | null;
 }
@@ -155,6 +155,15 @@ const haceMin = (ms: number) => {
   if (min < 48 * 60) return `hace ${Math.round(min / 60)} h`;
   return `hace ${Math.round(min / 1440)} días`;
 };
+
+/** Qué fue cada fila del historial de gasto. */
+function queLote(l: LoteIA): string {
+  if (l.lote.startsWith('prueba-')) return 'prueba';
+  if (l.lote.startsWith('busqueda-')) return 'búsqueda en TMDB';
+  if (l.modelo?.includes('verifica')) return 'Sonnet verifica';
+  if (l.modelo?.includes('haiku')) return l.propuestas ? `Haiku, ${num(l.propuestas)} a verificar` : 'Haiku';
+  return 'Sonnet';
+}
 
 /** La carátula llega entera o como ruta de TMDB a secas: las dos se pintan. */
 function imagen(p: string | null): string | null {
@@ -454,7 +463,7 @@ function TiraEstado({ auto, sugeridas, enLista, onCambio, onToast, onRevisar, la
       </Tramo>
 
       <Tramo
-        titulo={<>Claude <span className="font-normal text-nf-faint">Sonnet 5.5</span></>}
+        titulo={<>Claude <span className="font-normal text-nf-faint">Haiku 5.5, verifica Sonnet 5.5</span></>}
         extra={ia?.configurada ? (
           <label className="flex items-center gap-2 text-xs text-nf-dim">
             {guardando === 'activa' ? 'Comprobando…' : encendida ? 'Encendido' : 'Apagado'}
@@ -925,8 +934,7 @@ function GastoClaude({ ia }: { ia: EstadoIA | null }) {
                 <tr key={l.lote} className="border-t border-nf-line text-right text-nf-dim">
                   <td className="py-2 text-left">
                     {fecha(l.creado)}
-                    {l.lote.startsWith('busqueda-') && <span className="ml-2 text-xs text-nf-faint">búsqueda en TMDB</span>}
-                    {l.lote.startsWith('prueba-') && <span className="ml-2 text-xs text-nf-faint">prueba</span>}
+                    <span className="ml-2 text-xs text-nf-faint">{queLote(l)}</span>
                   </td>
                   <td className="text-white">{num(l.grupos)}</td>
                   {l.terminado ? (<>

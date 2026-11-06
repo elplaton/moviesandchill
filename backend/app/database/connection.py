@@ -449,6 +449,8 @@ async def _ensure_tables():
         await conn.execute("ALTER TABLE revision_auto ADD COLUMN IF NOT EXISTS candidatas JSONB")
         await conn.execute("ALTER TABLE revision_auto ADD COLUMN IF NOT EXISTS ia VARCHAR(40)")
         await conn.execute("ALTER TABLE revision_auto ADD COLUMN IF NOT EXISTS ia_lote TEXT")
+        # Lo que propuso Haiku y espera a que Sonnet lo verifique (revision_ia.proponer).
+        await conn.execute("ALTER TABLE revision_auto ADD COLUMN IF NOT EXISTS propuesta JSONB")
         # Cada lote mandado a Claude, con lo que salio y lo que costo de verdad
         # (del `usage` de cada respuesta): el historial y el gasto por mes.
         await conn.execute("""
@@ -464,6 +466,7 @@ async def _ensure_tables():
                 dolares    NUMERIC(10, 4)
             )
         """)
+        await conn.execute("ALTER TABLE revision_ia_lotes ADD COLUMN IF NOT EXISTS propuestas INTEGER")
 
         # Donde mandar los avisos. Una cuenta tiene tantas como aparatos: el
         # telefono, la PWA instalada y el navegador del escritorio son
