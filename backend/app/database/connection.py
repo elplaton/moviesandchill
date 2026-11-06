@@ -424,6 +424,27 @@ async def _ensure_tables():
             )
         """)
 
+        # Revision automatica (services/revision_auto.py): lo que ya se ha
+        # mirado de cada grupo de Admin -> Revision, por su clave. `estado`:
+        # aplicada (se corrigio sola; `antes` guarda como estaba cada archivo
+        # para poder deshacerlo), sugerida (hay candidata pero no es segura),
+        # sin_candidato, deshecha o descartada (el admin dijo que no: ni se
+        # vuelve a aplicar ni se vuelve a sugerir).
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS revision_auto (
+                id          SERIAL PRIMARY KEY,
+                clave       TEXT NOT NULL UNIQUE,
+                titulo      TEXT NOT NULL,
+                motivo      VARCHAR(20) NOT NULL,
+                estado      VARCHAR(16) NOT NULL,
+                porque      TEXT,
+                sugerencia  JSONB,
+                archivos    INTEGER NOT NULL DEFAULT 0,
+                antes       JSONB,
+                creado      TIMESTAMP NOT NULL DEFAULT NOW()
+            )
+        """)
+
         # Donde mandar los avisos. Una cuenta tiene tantas como aparatos: el
         # telefono, la PWA instalada y el navegador del escritorio son
         # suscripciones distintas, y el `endpoint` es su identidad (por eso es

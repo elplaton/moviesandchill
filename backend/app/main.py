@@ -212,6 +212,12 @@ async def startup():
         from app.services.tops import fotografo
         _spawn(fotografo(api_key_tmdb), "fotografo_tops")
 
+    # Revision automatica: lo de Admin -> Revision que se puede arreglar solo
+    # (services/revision_auto.py). Solo si hay grupos sin mirar.
+    if api_key_tmdb:
+        from app.services.revision_auto import de_fondo as revision_de_fondo
+        _spawn(revision_de_fondo(api_key_tmdb), "revision_automatica")
+
     # Releer lo ya indexado para ponerle pie, ficha y tema (y volver a buscar
     # en TMDB lo que no tenia ficha). Una vez; luego solo lo que quede.
     from app.services.relectura import relectura_de_fondo

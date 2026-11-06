@@ -420,13 +420,20 @@ function Channels() {
   );
 }
 
-interface MotivoRevision { clave: string; titulo: string; descripcion: string; grupos: number; archivos: number }
-interface ResumenRevision { motivos: MotivoRevision[]; canales: { channel_id: number; nombre: string }[] }
+interface MotivoRevision { clave: string; titulo: string; descripcion: string; grupos: number; archivos: number; sugeridas: number }
+// Cómo va la revisión automática (services/revision_auto.py).
+interface EstadoAuto { corriendo: boolean; mirados: number; por_mirar: number; cuentas: Record<string, { grupos: number; archivos: number }> }
+interface ResumenRevision { motivos: MotivoRevision[]; canales: { channel_id: number; nombre: string }[]; auto: EstadoAuto }
 interface FichaActual { tmdb_id: number; media_type: TipoPeticion; title: string; year: number | null; poster: string | null }
+interface Sugerencia extends FichaActual { porque: string | null }
 interface GrupoRevision {
   clave: string; motivo: string; titulo: string; tipo: TipoPeticion; año: number | null; archivos: number;
   canales: string[]; ejemplo: string; ficha: string | null; pie: string | null; actual: FichaActual | null;
+  sugerencia: Sugerencia | null;
+  busqueda?: string;
+  ejemplos?: string[] | null;
 }
+interface Aplicada { id: number; titulo: string; porque: string | null; ficha: Sugerencia | null; archivos: number; creado: string }
 
 const POR_PAGINA = 30;
 const num = (n: number) => n.toLocaleString('es-ES', MILES);
@@ -446,7 +453,44 @@ function TextoCanal({ etiqueta, texto }: { etiqueta: string; texto: string }) {
   );
 }
 
-function TarjetaRevision({ g, onCorregir, onIgnorado }: { g: GrupoRevision; onCorregir: () => void; onIgnorado: (archivos: number) => void }) {
+/** La sugerencia de la revisión automática: «Sí, es esta» la pone (y se
+ *  puede deshacer desde «Corregido solo»); «No es esta» no vuelve a salir. */
+function CajaSugerencia({ g, onAceptada, onDescartada }: { g: GrupoRevision & { sugerencia: Sugerencia }; onAceptada: (archivos: number) => void; onDescartada: () => void }) {
+  const [haciendo, setHaciendo] = useState('');
+  const s = g.sugerencia;
+  const mandar = async (que: 'aceptar' | 'descartar') => {
+    setHaciendo(que);
+    try {
+      const r = await apiFetch(`/admin/revision/sugerencia/${que}`, { method: 'POST', body: JSON.stringify({ clave: g.clave }) });
+      const d = await leer(r);
+      if (!r.ok || !d.ok) throw new Error(d.detail || 'No se ha podido');
+      if (que === 'aceptar') onAceptada(d.archivos ?? g.archivos); else onDescartada();
+    } catch (e) { toast(e instanceof Error ? e.message : 'No se ha podido', 'error', 6000); setHaciendo(''); }
+  };
+  return (
+    <div className="mt-3 rounded-xl border border-nf-ok/25 bg-nf-ok/[0.07] p-3">
+      <div className="flex items-center space-x-3">
+        {s.poster
+          ? <img src={s.poster} alt="" loading="lazy" className="w-9 h-[54px] rounded object-cover shrink-0 bg-white/10" />
+          : <div className="w-9 h-[54px] rounded shrink-0 bg-white/10" />}
+        <div className="min-w-0">
+          <p className="text-[10px] uppercase tracking-wide text-nf-text3">Sugerencia · {TIPO_PETICION[s.media_type] || s.media_type}</p>
+          <p className="text-[14px] font-medium truncate">{conAño(s.title, s.year)}</p>
+          {s.porque && <p className="text-[11px] text-nf-text3 line-clamp-2">{s.porque}</p>}
+        </div>
+      </div>
+      <div className="flex mt-3 space-x-2">
+        <button onClick={() => mandar('descartar')} disabled={!!haciendo} className="flex-1 h-11 rounded-xl bg-white/10 text-[15px] font-medium disabled:opacity-40">{haciendo === 'descartar' ? '…' : 'No es esta'}</button>
+        <button onClick={() => mandar('aceptar')} disabled={!!haciendo} className="flex-1 h-11 rounded-xl bg-nf-red text-[15px] font-semibold disabled:opacity-40">{haciendo === 'aceptar' ? 'Poniendo…' : 'Sí, es esta'}</button>
+      </div>
+    </div>
+  );
+}
+
+function TarjetaRevision({ g, onCorregir, onIgnorado, onAceptada, onDescartada }: {
+  g: GrupoRevision; onCorregir: () => void; onIgnorado: (archivos: number) => void;
+  onAceptada: (archivos: number) => void; onDescartada: () => void;
+}) {
   // Ignorar pide confirmación en la propia tarjeta: no toca nada del catálogo,
   // pero el grupo desaparece de la lista y no hay dónde deshacerlo.
   const [confirmar, setConfirmar] = useState(false);
@@ -466,7 +510,9 @@ function TarjetaRevision({ g, onCorregir, onIgnorado }: { g: GrupoRevision; onCo
       <p className="text-[12px] text-nf-text3 mt-1">
         {TIPO_PETICION[g.tipo] || g.tipo}{g.año ? ` · ${g.año}` : ''} · {num(g.archivos)} {g.archivos === 1 ? 'archivo' : 'archivos'}{g.canales.length ? ` · ${g.canales.join(', ')}` : ''}
       </p>
-      <p className="mt-2 text-[11px] font-mono text-nf-text3 break-all line-clamp-2">{g.ejemplo}</p>
+      {(g.ejemplos?.length ? g.ejemplos : [g.ejemplo]).map((e, i) => (
+        <p key={i} className={`${i ? 'mt-0.5' : 'mt-2'} text-[11px] font-mono text-nf-text3 break-all line-clamp-2`}>{e}</p>
+      ))}
       {g.ficha && <TextoCanal etiqueta="Ficha del canal" texto={g.ficha} />}
       {g.pie && <TextoCanal etiqueta="Pie del archivo" texto={g.pie} />}
       {g.actual && (
@@ -479,6 +525,9 @@ function TarjetaRevision({ g, onCorregir, onIgnorado }: { g: GrupoRevision; onCo
             <p className="text-[13px] truncate">{conAño(g.actual.title, g.actual.year)}</p>
           </div>
         </div>
+      )}
+      {g.sugerencia && !confirmar && (
+        <CajaSugerencia g={g as GrupoRevision & { sugerencia: Sugerencia }} onAceptada={onAceptada} onDescartada={onDescartada} />
       )}
       {confirmar ? (
         <div className="mt-3 rounded-xl bg-white/10 p-3">
@@ -510,7 +559,7 @@ function TarjetaRevision({ g, onCorregir, onIgnorado }: { g: GrupoRevision; onCo
  * consultas por título, y el campo ya llega relleno con lo que hay que buscar.
  */
 function HojaCorregir({ g, onCerrar, onHecho }: { g: GrupoRevision; onCerrar: () => void; onHecho: (archivos: number, ficha: string) => void }) {
-  const [texto, setTexto] = useState(g.titulo);
+  const [texto, setTexto] = useState(g.busqueda ?? g.titulo);
   const [resultados, setResultados] = useState<ResultadoPeticion[] | null>(null);
   const [buscando, setBuscando] = useState(false);
   const [elegido, setElegido] = useState<ResultadoPeticion | null>(null);
@@ -593,6 +642,68 @@ function HojaCorregir({ g, onCerrar, onHecho }: { g: GrupoRevision; onCerrar: ()
   );
 }
 
+/** «Corregido solo»: lo que puso la revisión automática, con su deshacer. */
+function CorregidasMovil({ onCambio }: { onCambio: () => void }) {
+  const [items, setItems] = useState<Aplicada[]>([]);
+  const [total, setTotal] = useState<number | null>(null);
+  const [cargando, setCargando] = useState(false);
+  const [deshaciendo, setDeshaciendo] = useState<number | null>(null);
+  const cargar = async (offset: number) => {
+    setCargando(true);
+    try {
+      const r = await apiFetch(`/admin/revision/auto?offset=${offset}&limit=${POR_PAGINA}`);
+      const d = await leer(r);
+      if (!r.ok) throw new Error(d.detail || 'No se ha podido leer la lista');
+      setTotal(d.total ?? 0);
+      setItems(prev => offset ? [...prev, ...(d.items || [])] : (d.items || []));
+    } catch (e) { toast(e instanceof Error ? e.message : 'No se ha podido leer la lista', 'error', 6000); }
+    finally { setCargando(false); }
+  };
+  useEffect(() => { cargar(0); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  const deshacer = async (a: Aplicada) => {
+    setDeshaciendo(a.id);
+    try {
+      const r = await apiFetch('/admin/revision/auto/deshacer', { method: 'POST', body: JSON.stringify({ id: a.id }) });
+      const d = await leer(r);
+      if (!r.ok || !d.ok) throw new Error(d.detail || 'No se ha podido deshacer');
+      setItems(xs => xs.filter(x => x.id !== a.id));
+      setTotal(t => t == null ? t : Math.max(t - 1, 0));
+      onCambio();
+      toast(`«${a.titulo}» vuelve a como estaba`, 'ok');
+    } catch (e) { toast(e instanceof Error ? e.message : 'No se ha podido deshacer', 'error', 6000); }
+    finally { setDeshaciendo(null); }
+  };
+  return (
+    <div>
+      <p className="text-[12px] text-nf-text3 mb-3">
+        Lo que se puso sin preguntar porque coincidía exactamente con TMDB. «Deshacer» lo deja como estaba y no se vuelve a tocar.
+      </p>
+      {total != null && <p className="text-[12px] text-nf-text3 mb-2">{num(total)} corregidos solos</p>}
+      {total === 0 && <p className="rounded-2xl bg-white/5 p-4 text-[13px] text-nf-text2">Todavía no se ha corregido nada solo.</p>}
+      {items.map(a => (
+        <div key={a.id} className="rounded-2xl bg-white/5 p-3 mb-2 flex items-center space-x-3">
+          {a.ficha?.poster
+            ? <img src={a.ficha.poster} alt="" loading="lazy" className="w-9 h-[54px] rounded object-cover shrink-0 bg-white/10" />
+            : <div className="w-9 h-[54px] rounded shrink-0 bg-white/10" />}
+          <div className="min-w-0 flex-1">
+            <p className="text-[14px] font-medium truncate">{a.ficha ? conAño(a.ficha.title, a.ficha.year) : a.titulo}</p>
+            <p className="text-[11px] text-nf-text3 truncate">Era «{a.titulo}» · {num(a.archivos)} {a.archivos === 1 ? 'archivo' : 'archivos'}</p>
+            {a.porque && <p className="text-[11px] text-nf-text3 truncate">{a.porque}</p>}
+          </div>
+          <button onClick={() => deshacer(a)} disabled={deshaciendo !== null} className="tap shrink-0 h-9 px-3 rounded-full bg-white/10 text-[13px] disabled:opacity-40">
+            {deshaciendo === a.id ? '…' : 'Deshacer'}
+          </button>
+        </div>
+      ))}
+      {total != null && items.length < total && (
+        <button onClick={() => cargar(items.length)} disabled={cargando} className="mt-2 w-full h-11 rounded-xl bg-white/10 disabled:opacity-40 text-[15px] font-medium">
+          {cargando ? 'Cargando…' : `Cargar más (${num(total - items.length)})`}
+        </button>
+      )}
+    </div>
+  );
+}
+
 /**
  * Revisión: lo que se ha indexado mal, agrupado por título, para corregirlo a
  * mano (services/revision.py). Un grupo son todos los archivos que el
@@ -614,6 +725,9 @@ function Revision() {
   const [cargando, setCargando] = useState(false);
   const [error, setError] = useState('');
   const [corrigiendo, setCorrigiendo] = useState<GrupoRevision | null>(null);
+  const [verCorregidas, setVerCorregidas] = useState(false);
+  const [soloSugeridas, setSoloSugeridas] = useState(false);
+  const [lanzando, setLanzando] = useState(false);
   const peticion = useRef(0);
 
   const cargarResumen = async () => {
@@ -636,6 +750,7 @@ function Revision() {
       const params = new URLSearchParams({ motivo, offset: String(offset), limit: String(POR_PAGINA) });
       if (canal) params.set('channel_id', canal);
       if (q) params.set('q', q);
+      if (soloSugeridas) params.set('sugeridas', 'true');
       const r = await apiFetch(`/admin/revision?${params}`);
       const d = await leer(r);
       if (n !== peticion.current) return;
@@ -648,7 +763,33 @@ function Revision() {
       if (n === peticion.current) setCargando(false);
     }
   };
-  useEffect(() => { setGrupos([]); setTotal(null); cargar(0); }, [motivo, canal, q]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { setGrupos([]); setTotal(null); cargar(0); }, [motivo, canal, q, soloSugeridas]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Con la revisión automática en marcha se vuelve a pedir el resumen (cuántos
+  // lleva) y, al acabar, la lista.
+  const corriendo = !!resumen?.auto?.corriendo;
+  useEffect(() => {
+    if (!corriendo) return;
+    const t = setInterval(cargarResumen, 4000);
+    return () => clearInterval(t);
+  }, [corriendo]); // eslint-disable-line react-hooks/exhaustive-deps
+  const estabaCorriendo = useRef(false);
+  useEffect(() => {
+    if (estabaCorriendo.current && !corriendo) { setGrupos([]); cargar(0); }
+    estabaCorriendo.current = corriendo;
+  }, [corriendo]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const revisarAhora = async () => {
+    setLanzando(true);
+    try {
+      const r = await apiFetch('/admin/revision/auto/lanzar', { method: 'POST' });
+      const d = await leer(r);
+      if (!r.ok) throw new Error(d.detail || 'No se ha podido lanzar');
+      await cargarResumen();
+    } catch (e) { toast(e instanceof Error ? e.message : 'No se ha podido lanzar', 'error', 6000); }
+    finally { setLanzando(false); }
+  };
+  const auto = resumen?.auto;
 
   // Lo corregido o ignorado sale de la lista en el servidor, así que «Cargar
   // más» sigue pidiendo desde grupos.length sin saltarse a nadie.
@@ -663,6 +804,25 @@ function Revision() {
 
   return (
     <div>
+      {auto && (
+        <div className="rounded-2xl bg-white/5 p-4 mb-3">
+          <p className="text-[15px] font-semibold">Revisión automática</p>
+          <p className="text-[12px] text-nf-text2 mt-1">
+            {auto.corriendo
+              ? `Revisando… ${num(auto.mirados)} de ${num(auto.por_mirar)} grupos`
+              : `${num(auto.cuentas?.aplicada?.grupos ?? 0)} grupos corregidos solos · ${num(auto.cuentas?.sugerida?.grupos ?? 0)} con sugerencia`}
+          </p>
+          <div className="flex mt-3 space-x-2">
+            <button onClick={() => setVerCorregidas(v => !v)} className="tap flex-1 h-10 rounded-xl bg-white/10 text-[14px] font-medium">
+              {verCorregidas ? 'Volver' : 'Corregido solo'}
+            </button>
+            <button onClick={revisarAhora} disabled={lanzando || auto.corriendo} className="tap flex-1 h-10 rounded-xl bg-nf-red text-[14px] font-semibold disabled:opacity-40">
+              {auto.corriendo ? 'Revisando…' : lanzando ? 'Lanzando…' : 'Revisar ahora'}
+            </button>
+          </div>
+        </div>
+      )}
+      {verCorregidas ? <CorregidasMovil onCambio={() => { cargarResumen(); setGrupos([]); cargar(0); }} /> : (<>
       {/* En varias filas y no deslizando: deslizando, el ultimo motivo salia
           cortado por la derecha y parecia que no habia mas. */}
       <div className="flex flex-wrap gap-2 mb-2">
@@ -687,6 +847,10 @@ function Revision() {
           {(resumen?.canales || []).map(c => <option key={c.channel_id} value={String(c.channel_id)}>{c.nombre}</option>)}
         </select>
         <input className={input} type="search" placeholder="Filtrar por título o archivo" value={texto} onChange={e => setTexto(e.target.value)} />
+        <label className="flex items-center space-x-2 text-[13px] text-nf-text2 py-1">
+          <input type="checkbox" checked={soloSugeridas} onChange={e => setSoloSugeridas(e.target.checked)} className="w-4 h-4 accent-nf-red" />
+          <span>Solo con sugerencia{elegido?.sugeridas ? ` (${num(elegido.sugeridas)})` : ''}</span>
+        </label>
       </div>
       {total != null && <p className="text-[12px] text-nf-text3 mb-2">{num(total)} {total === 1 ? 'grupo' : 'grupos'}</p>}
       {error && (
@@ -699,13 +863,16 @@ function Revision() {
       {!cargando && !error && total === 0 && <p className="rounded-2xl bg-white/5 p-4 text-[13px] text-nf-text2">No hay nada que revisar aquí.</p>}
       {grupos.map(g => (
         <TarjetaRevision key={g.clave} g={g} onCorregir={() => setCorrigiendo(g)}
-          onIgnorado={n => { quitar(g.clave); toast(`Ignorado: ${num(n)} ${n === 1 ? 'archivo' : 'archivos'} dejan de salir aquí`, 'ok'); }} />
+          onIgnorado={n => { quitar(g.clave); toast(`Ignorado: ${num(n)} ${n === 1 ? 'archivo' : 'archivos'} dejan de salir aquí`, 'ok'); }}
+          onAceptada={n => { quitar(g.clave); toast(`«${conAño(g.sugerencia!.title, g.sugerencia!.year)}» puesta a ${num(n)} ${n === 1 ? 'archivo' : 'archivos'}`, 'ok', 5000); }}
+          onDescartada={() => setGrupos(gs => gs.map(x => x.clave === g.clave ? { ...x, sugerencia: null } : x))} />
       ))}
       {quedan && !error && (
         <button onClick={() => cargar(grupos.length)} disabled={cargando} className="mt-2 w-full h-11 rounded-xl bg-white/10 disabled:opacity-40 text-[15px] font-medium">
           {cargando ? 'Cargando…' : `Cargar más (${num(total! - grupos.length)})`}
         </button>
       )}
+      </>)}
       {corrigiendo && (
         <HojaCorregir g={corrigiendo} onCerrar={() => setCorrigiendo(null)}
           onHecho={(n, ficha) => {

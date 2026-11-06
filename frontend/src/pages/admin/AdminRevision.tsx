@@ -11,11 +11,45 @@ interface Motivo {
   descripcion: string;
   grupos: number;
   archivos: number;
+  sugeridas: number;
+}
+
+/** Cómo va la revisión automática (backend/app/services/revision_auto.py). */
+interface EstadoAuto {
+  corriendo: boolean;
+  empezo: number | null;
+  termino: number | null;
+  mirados: number;
+  por_mirar: number;
+  cuentas: Record<string, { grupos: number; archivos: number }>;
 }
 
 interface Resumen {
   motivos: Motivo[];
   canales: { channel_id: number; nombre: string }[];
+  auto: EstadoAuto;
+}
+
+/** La candidata que encontró la revisión automática y no era segura. */
+interface Sugerencia {
+  tmdb_id: number;
+  media_type: Tipo;
+  title: string;
+  year: number | null;
+  poster: string | null;
+  original_title?: string | null;
+  porque: string | null;
+}
+
+/** Algo que se corrigió solo (o una sugerencia aceptada), con su deshacer. */
+interface Aplicada {
+  id: number;
+  titulo: string;
+  motivo: ClaveMotivo;
+  porque: string | null;
+  ficha: Sugerencia | null;
+  archivos: number;
+  creado: string;
 }
 
 interface FichaActual {
@@ -38,6 +72,11 @@ interface Grupo {
   ficha: string | null;
   pie: string | null;
   actual: FichaActual | null;
+  sugerencia: Sugerencia | null;
+  /** Lo que se pone en el buscador de «Corregir» (vacío en los capítulos sin nombre de serie). */
+  busqueda?: string;
+  /** Capítulos sin nombre de serie: unos cuantos archivos del grupo, para ver que son de lo mismo. */
+  ejemplos?: string[] | null;
 }
 
 const CARD = 'bg-white/5 backdrop-blur-md border border-white/10 rounded-2xl p-6 shadow-xl';
@@ -99,6 +138,153 @@ function TextoCanal({ etiqueta, texto }: { etiqueta: string; texto: string }) {
 }
 
 /**
+ * La sugerencia de la revisión automática para un grupo: lo que encontró en
+ * TMDB y por qué no se atrevió a ponerlo solo. «Sí, es esta» la pone (y queda
+ * en «Corregido solo», con su deshacer); «No es esta» la quita y no vuelve a
+ * sugerirse, y el grupo se queda para corregirlo a mano.
+ */
+function CajaSugerencia({ g, onAceptada, onDescartada }: {
+  g: Grupo & { sugerencia: Sugerencia };
+  onAceptada: (archivos: number) => void;
+  onDescartada: () => void;
+}) {
+  const [haciendo, setHaciendo] = useState<'' | 'si' | 'no'>('');
+  const [error, setError] = useState('');
+  const s = g.sugerencia;
+
+  const mandar = async (que: 'aceptar' | 'descartar') => {
+    setHaciendo(que === 'aceptar' ? 'si' : 'no');
+    setError('');
+    try {
+      const res = await apiFetch(`/admin/revision/sugerencia/${que}`, { method: 'POST', body: JSON.stringify({ clave: g.clave }) });
+      if (!res.ok) { setError(await motivoDe(res)); setHaciendo(''); return; }
+      const r: { archivos?: number } = await res.json();
+      if (que === 'aceptar') onAceptada(r.archivos ?? g.archivos); else onDescartada();
+    } catch {
+      setError('Error de conexión');
+      setHaciendo('');
+    }
+  };
+
+  return (
+    <div className="mt-3 flex gap-3 items-center rounded-xl border border-nf-ok/25 bg-nf-ok/[0.07] px-3 py-3">
+      <Caratula src={s.poster} className="h-16 w-11" />
+      <div className="min-w-0 flex-1">
+        <p className="text-nf-faint text-[10px] uppercase tracking-wide">Sugerencia</p>
+        <p className="text-white text-sm truncate">
+          {conAño(s.title, s.year)} <span className="text-nf-dim text-xs">· {tipoTexto(s.media_type)}</span>
+        </p>
+        {s.porque && <p className="text-nf-dim text-[11px] truncate">{s.porque}</p>}
+        {error && <p className="text-red-400 text-xs mt-1">{error}</p>}
+      </div>
+      <div className="flex shrink-0 gap-2">
+        <button onClick={() => mandar('aceptar')} disabled={!!haciendo} className={ROJO}>
+          {haciendo === 'si' ? 'Poniendo…' : 'Sí, es esta'}
+        </button>
+        <button onClick={() => mandar('descartar')} disabled={!!haciendo} className={BOTON}>
+          {haciendo === 'no' ? '…' : 'No es esta'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+const hace = (iso: string) => {
+  const min = Math.round((Date.now() - new Date(iso + (iso.endsWith('Z') ? '' : 'Z')).getTime()) / 60000);
+  if (min < 1) return 'ahora';
+  if (min < 60) return `hace ${min} min`;
+  if (min < 48 * 60) return `hace ${Math.round(min / 60)} h`;
+  return `hace ${Math.round(min / 1440)} días`;
+};
+
+/**
+ * «Corregido solo»: lo que puso la revisión automática (y las sugerencias
+ * aceptadas), lo más nuevo primero. Deshacer devuelve cada archivo a como
+ * estaba y el grupo no se vuelve a tocar ni a sugerir.
+ */
+function Corregidas({ onToast, onCambio }: { onToast: (m: string) => void; onCambio: () => void }) {
+  const [items, setItems] = useState<Aplicada[]>([]);
+  const [total, setTotal] = useState(0);
+  const [cargando, setCargando] = useState(true);
+  const [error, setError] = useState('');
+  const [deshaciendo, setDeshaciendo] = useState<number | null>(null);
+
+  const cargar = useCallback(async (offset: number) => {
+    setCargando(true);
+    setError('');
+    try {
+      const res = await apiFetch(`/admin/revision/auto?offset=${offset}&limit=${POR_PAGINA}`);
+      if (!res.ok) { setError(await motivoDe(res)); return; }
+      const d: { total: number; items: Aplicada[] } = await res.json();
+      setTotal(d.total);
+      setItems(prev => (offset === 0 ? d.items : [...prev, ...d.items.filter(x => !prev.some(p => p.id === x.id))]));
+    } catch {
+      setError('Error de conexión');
+    } finally {
+      setCargando(false);
+    }
+  }, []);
+  useEffect(() => { cargar(0); }, [cargar]);
+
+  const deshacer = async (a: Aplicada) => {
+    setDeshaciendo(a.id);
+    try {
+      const res = await apiFetch('/admin/revision/auto/deshacer', { method: 'POST', body: JSON.stringify({ id: a.id }) });
+      if (!res.ok) { onToast(await motivoDe(res)); return; }
+      setItems(prev => prev.filter(x => x.id !== a.id));
+      setTotal(t => Math.max(0, t - 1));
+      onCambio();
+      onToast(`«${a.titulo}» vuelve a como estaba (${archivosTexto(a.archivos)})`);
+    } catch {
+      onToast('Error de conexión');
+    } finally {
+      setDeshaciendo(null);
+    }
+  };
+
+  return (
+    <div className={CARD}>
+      <h2 className="text-white text-lg font-semibold mb-1">
+        {cargando && !items.length ? 'Cargando…' : `${total.toLocaleString()} corregidos solos`}
+      </h2>
+      <p className="text-nf-dim text-sm mb-4">
+        Lo que la revisión automática puso sin preguntar, porque el título era exactamente el de TMDB y el año o los
+        capítulos cuadraban. Si alguno está mal, «Deshacer» lo deja como estaba y no se vuelve a tocar.
+      </p>
+      {error && <p className="text-red-400 text-sm mb-4">{error}</p>}
+      {!cargando && !items.length && !error && <p className="text-nf-dim text-sm">Todavía no se ha corregido nada solo.</p>}
+      <ul className="divide-y divide-white/5">
+        {items.map(a => (
+          <li key={a.id} className="flex items-center gap-3 py-3">
+            <Caratula src={a.ficha?.poster ?? null} className="h-14 w-10" />
+            <div className="min-w-0 flex-1">
+              <p className="text-white text-sm truncate">
+                {a.ficha ? conAño(a.ficha.title, a.ficha.year) : a.titulo}
+                {a.ficha && <span className="text-nf-dim text-xs"> · {tipoTexto(a.ficha.media_type)}</span>}
+              </p>
+              <p className="text-nf-dim text-xs truncate">
+                Era «{a.titulo}» · {archivosTexto(a.archivos)} · {hace(a.creado)}
+              </p>
+              {a.porque && <p className="text-nf-faint text-[11px] truncate">{a.porque}</p>}
+            </div>
+            <button onClick={() => deshacer(a)} disabled={deshaciendo !== null} className={BOTON}>
+              {deshaciendo === a.id ? 'Deshaciendo…' : 'Deshacer'}
+            </button>
+          </li>
+        ))}
+      </ul>
+      {!cargando && items.length < total && (
+        <div className="mt-4 flex justify-center">
+          <button onClick={() => cargar(items.length)} className={BOTON}>
+            Cargar más ({(total - items.length).toLocaleString()} más)
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
  * El panel de «Corregir»: buscar en TMDB la ficha buena y ponérsela a todo el
  * grupo. Se busca al pulsar y no por tecla, porque cada búsqueda es una
  * consulta a TMDB; el campo llega relleno con el título que dice el canal,
@@ -109,7 +295,7 @@ function Corregir({ grupo, onCerrar, onHecho }: {
   onCerrar: () => void;
   onHecho: (archivos: number, ficha: ResultadoTmdb) => void;
 }) {
-  const [q, setQ] = useState(grupo.titulo);
+  const [q, setQ] = useState(grupo.busqueda ?? grupo.titulo);
   const [resultados, setResultados] = useState<ResultadoTmdb[] | null>(null);
   const [buscando, setBuscando] = useState(false);
   const [elegido, setElegido] = useState<ResultadoTmdb | null>(null);
@@ -254,6 +440,10 @@ export default function AdminRevision({ onToast }: { onToast: (m: string) => voi
   const [resumen, setResumen] = useState<Resumen | null>(null);
   const [errorResumen, setErrorResumen] = useState('');
   const [motivo, setMotivo] = useState<ClaveMotivo>('sin_ficha');
+  // «Corregido solo» en vez de la lista de un motivo.
+  const [verCorregidas, setVerCorregidas] = useState(false);
+  const [soloSugeridas, setSoloSugeridas] = useState(false);
+  const [lanzando, setLanzando] = useState(false);
   const [canal, setCanal] = useState('');
   const [texto, setTexto] = useState('');
   const [q, setQ] = useState('');
@@ -296,6 +486,7 @@ export default function AdminRevision({ onToast }: { onToast: (m: string) => voi
     const params = new URLSearchParams({ motivo, offset: String(offset), limit: String(POR_PAGINA) });
     if (canal) params.set('channel_id', canal);
     if (q) params.set('q', q);
+    if (soloSugeridas) params.set('sugeridas', 'true');
     try {
       const res = await apiFetch(`/admin/revision?${params}`);
       if (n !== peticion.current) return;
@@ -309,7 +500,34 @@ export default function AdminRevision({ onToast }: { onToast: (m: string) => voi
     } finally {
       if (n === peticion.current) { setCargando(false); setCargandoMas(false); }
     }
-  }, [motivo, canal, q]);
+  }, [motivo, canal, q, soloSugeridas]);
+
+  // Mientras la revisión automática está en marcha, el resumen se vuelve a
+  // pedir cada pocos segundos (cuántos lleva) y, al acabar, la lista.
+  const corriendo = !!resumen?.auto?.corriendo;
+  useEffect(() => {
+    if (!corriendo) return;
+    const t = setInterval(cargarResumen, 4000);
+    return () => clearInterval(t);
+  }, [corriendo, cargarResumen]);
+  const estabaCorriendo = useRef(false);
+  useEffect(() => {
+    if (estabaCorriendo.current && !corriendo) cargar(0);
+    estabaCorriendo.current = corriendo;
+  }, [corriendo]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const revisarAhora = async () => {
+    setLanzando(true);
+    try {
+      const res = await apiFetch('/admin/revision/auto/lanzar', { method: 'POST' });
+      if (!res.ok) onToast(await motivoDe(res));
+      else await cargarResumen();
+    } catch {
+      onToast('Error de conexión');
+    } finally {
+      setLanzando(false);
+    }
+  };
 
   // La lista espera al resumen: los dos salen del mismo cálculo, que la
   // primera vez tarda unos segundos, y pedirlos a la vez lo haría dos veces.
@@ -363,8 +581,41 @@ export default function AdminRevision({ onToast }: { onToast: (m: string) => voi
   const elegido = resumen.motivos.find(m => m.clave === motivo);
   const conFicha = CON_FICHA.includes(motivo);
 
+  const auto = resumen.auto;
+  const aplicadas = auto?.cuentas?.aplicada;
+  const sugeridas = auto?.cuentas?.sugerida;
+
   return (
     <div className="space-y-6">
+      <div className={CARD}>
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div className="min-w-0">
+            <h2 className="text-white text-base font-semibold">Revisión automática</h2>
+            <p className="text-nf-dim text-sm mt-0.5">
+              {auto?.corriendo
+                ? `Revisando… ${auto.mirados.toLocaleString()} de ${auto.por_mirar.toLocaleString()} grupos`
+                : `${(aplicadas?.grupos ?? 0).toLocaleString()} grupos corregidos solos (${archivosTexto(aplicadas?.archivos ?? 0)})`
+                  + ` · ${(sugeridas?.grupos ?? 0).toLocaleString()} con sugerencia`}
+            </p>
+            <p className="text-nf-faint text-[11px] mt-1">
+              Lo que coincide exactamente con TMDB (título, y año o capítulos) se pone solo; lo dudoso queda
+              aquí con su sugerencia. Mira lo nuevo al arrancar y cada 6 h.
+            </p>
+          </div>
+          <div className="flex gap-2">
+            <button onClick={() => setVerCorregidas(v => !v)} className={BOTON}>
+              {verCorregidas ? 'Volver a la revisión' : 'Ver lo corregido solo'}
+            </button>
+            <button onClick={revisarAhora} disabled={lanzando || !!auto?.corriendo} className={ROJO}>
+              {auto?.corriendo ? 'Revisando…' : lanzando ? 'Lanzando…' : 'Revisar ahora'}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {verCorregidas ? (
+        <Corregidas onToast={onToast} onCambio={() => { cargarResumen(); cargar(0); }} />
+      ) : (<>
       <div className={CARD}>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           {resumen.motivos.map(m => {
@@ -379,6 +630,9 @@ export default function AdminRevision({ onToast }: { onToast: (m: string) => voi
                 <p className="text-nf-faint text-[11px]">
                   {m.grupos === 1 ? 'grupo' : 'grupos'} · {archivosTexto(m.archivos)}
                 </p>
+                {m.sugeridas > 0 && (
+                  <p className="text-nf-ok/80 text-[11px]">{m.sugeridas.toLocaleString()} con sugerencia</p>
+                )}
               </button>
             );
           })}
@@ -394,6 +648,11 @@ export default function AdminRevision({ onToast }: { onToast: (m: string) => voi
           </select>
           <input value={texto} onChange={e => setTexto(e.target.value)} placeholder="Buscar por título o archivo"
             className={`${CAMPO} flex-1 min-w-[220px]`} />
+          <label className="flex items-center gap-2 text-sm text-nf-dim cursor-pointer select-none">
+            <input type="checkbox" checked={soloSugeridas} onChange={e => setSoloSugeridas(e.target.checked)}
+              className="accent-nf-red" />
+            Solo con sugerencia
+          </label>
         </div>
       </div>
 
@@ -431,7 +690,9 @@ export default function AdminRevision({ onToast }: { onToast: (m: string) => voi
                     <p className="text-nf-dim text-xs mt-0.5">
                       {archivosTexto(g.archivos)}{g.canales.length > 0 && ` · ${g.canales.join(', ')}`}
                     </p>
-                    <p className="text-nf-faint text-[11px] font-mono break-all mt-1">{g.ejemplo}</p>
+                    {(g.ejemplos?.length ? g.ejemplos : [g.ejemplo]).map((e, i) => (
+                      <p key={i} className="text-nf-faint text-[11px] font-mono break-all mt-1">{e}</p>
+                    ))}
                   </div>
                   {g.ficha && <TextoCanal etiqueta="Ficha del canal" texto={g.ficha} />}
                   {g.pie && <TextoCanal etiqueta="Pie del archivo" texto={g.pie} />}
@@ -452,6 +713,15 @@ export default function AdminRevision({ onToast }: { onToast: (m: string) => voi
                   </div>
                 )}
               </div>
+
+              {g.sugerencia && ignorar !== g.clave && (
+                <CajaSugerencia g={g as Grupo & { sugerencia: Sugerencia }}
+                  onAceptada={n => {
+                    quitar(g.clave);
+                    onToast(`«${conAño(g.sugerencia!.title, g.sugerencia!.year)}» puesta a ${archivosTexto(n)}`);
+                  }}
+                  onDescartada={() => setGrupos(prev => prev.map(x => (x.clave === g.clave ? { ...x, sugerencia: null } : x)))} />
+              )}
 
               {ignorar === g.clave ? (
                 <div className="mt-3 rounded-xl border border-white/10 bg-white/5 px-4 py-3">
@@ -484,6 +754,7 @@ export default function AdminRevision({ onToast }: { onToast: (m: string) => voi
           </div>
         )}
       </div>
+      </>)}
 
       {corrigiendo && (
         <Corregir grupo={corrigiendo} onCerrar={cerrarCorregir}
