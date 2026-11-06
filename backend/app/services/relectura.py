@@ -25,7 +25,8 @@ PAUSA_S = 1.0
 # Mensajes que se leen antes del primer archivo pendiente, para encontrar la
 # ficha que le toca (va encima).
 MARGEN = 60
-# Espera al arrancar antes de la primera relectura, y cada cuanto se repite.
+# Espera al arrancar antes de mirar si hay algo que releer, y cada cuanto se
+# reintenta mientras quede algo pendiente (con nada pendiente no corre).
 ESPERA_ARRANQUE_S = 300
 CADA_S = 6 * 3600
 
@@ -238,17 +239,47 @@ async def _al_dia_con_las_reglas() -> None:
         logger.info("Relectura: %d archivos se dieron por leidos sin leerse, se vuelven a leer", n)
 
 
+async def _cuantos_pendientes() -> int:
+    from app.database.connection import get_pool
+
+    pool = get_pool()
+    if not pool:
+        return 0
+    async with pool.acquire() as conn:
+        return await conn.fetchval("SELECT COUNT(*) FROM media_items WHERE contexto_leido = FALSE") or 0
+
+
 async def relectura_de_fondo(downloader, api_key: str = "") -> None:
-    """Al arrancar, con margen para que acabe de conectar y de escanear lo
-    nuevo. Si queda algo (un reinicio a medias, un canal recien añadido que se
-    indexo antes de esto), se reintenta cada pocas horas."""
+    """Solo corre si hay algo pendiente, y eso solo puede aparecer al arrancar:
+    lo que se indexa entra ya con su contexto (`contexto_leido` a TRUE), asi
+    que lo pendiente es lo que deja un cambio de `contexto.VERSION` (que marca
+    todo para volver a pasarlo con las reglas nuevas) o lo que una relectura
+    anterior no llego a leer (un canal sin resolver, un fallo, un reinicio a
+    medias). Antes se despertaba cada 6 h aunque no hubiera nada.
+
+    Al arrancar, con margen para que acabe de conectar y de escanear lo nuevo,
+    se cuenta lo pendiente: si no hay nada, se acaba aqui hasta el siguiente
+    arranque. Si hay, se relee, y solo si queda algo se reintenta cada
+    `CADA_S` hasta dejarlo a cero. «Releer ahora» del panel va aparte."""
     _estado["siguiente"] = _en(ESPERA_ARRANQUE_S)
     await asyncio.sleep(ESPERA_ARRANQUE_S)
+    try:
+        await _al_dia_con_las_reglas()
+    except Exception as e:
+        logger.error("Relectura: no se ha podido comprobar la version de las reglas: %s", e)
     while True:
+        pendientes = await _cuantos_pendientes()
+        if not pendientes:
+            _estado["siguiente"] = None
+            logger.info("Relectura: nada pendiente, no se relee hasta el proximo arranque")
+            return
         if downloader.client and downloader.client.is_connected():
+            logger.info("Relectura: %d archivos pendientes", pendientes)
             try:
                 await releer_todo(downloader, api_key)
             except Exception as e:
                 logger.error("Relectura fallo: %s", e)
+            if not await _cuantos_pendientes():
+                continue
         _estado["siguiente"] = _en(CADA_S)
         await asyncio.sleep(CADA_S)
