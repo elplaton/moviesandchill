@@ -66,6 +66,9 @@ COSTE_VERIFICAR_ESTIMADO = 0.0066 * DESCUENTO_LOTE * 1.5
 # En `ia`: lo que Haiku ha propuesto y espera a que Sonnet lo verifique (la
 # propuesta va en `propuesta`).
 POR_VERIFICAR = "por_verificar"
+# Donde se apunta cada lote en marcha (`app_settings`).
+HUECO_ELIGE = "revision_ia_lote"
+HUECO_VERIFICA = "revision_ia_lote_verifica"
 MARCA_VERIFICADA = MODELO + "+" + VERIFICADOR
 CANDIDATAS_MAX = 10
 # Al cambiar como se buscan las candidatas, lo que se quedo «sin candidatas»
@@ -193,29 +196,34 @@ async def _ajustes() -> dict:
         # Anthropic exige una clave de administrador, y no se quiere otra clave.
         "gasto_mes": float(gasto.get("dolares") or 0) if gasto.get("mes") == mes else 0.0,
         "mes": mes,
+        # Dos lotes a la vez, uno de cada clase: el de Haiku eligiendo y el de
+        # Sonnet verificando. No se pisan (Haiku coge lo que nadie ha mirado;
+        # Sonnet, lo que ya tiene propuesta).
         "lote": a.get("revision_ia_lote") or "",
+        "lote_v": a.get(HUECO_VERIFICA) or "",
         "ultimo": json.loads(a.get("revision_ia_ultimo") or "null"),
     }
 
 
 # Cuanto lleva Anthropic del lote en marcha, para la barra del panel: se le
 # pregunta como mucho una vez por minuto.
-_progreso_lote: dict = {"t": 0.0, "lote": None, "hechos": 0, "total": 0}
+_progreso_lotes: dict[str, dict] = {}
 
 
 async def _progreso(lote_id: str, clave: str) -> dict | None:
-    if _progreso_lote["lote"] != lote_id or time.time() - _progreso_lote["t"] > 60:
+    p = _progreso_lotes.get(lote_id)
+    if p is None or time.time() - p["t"] > 60:
+        p = {"t": time.time(), "hechos": 0, "total": 0}
         try:
             b = await _cliente(clave).messages.batches.retrieve(lote_id)
             rc = b.request_counts
-            hechos = (rc.succeeded or 0) + (rc.errored or 0) + (rc.canceled or 0) + (rc.expired or 0)
-            _progreso_lote.update(t=time.time(), lote=lote_id, hechos=hechos, total=hechos + (rc.processing or 0))
+            p["hechos"] = (rc.succeeded or 0) + (rc.errored or 0) + (rc.canceled or 0) + (rc.expired or 0)
+            p["total"] = p["hechos"] + (rc.processing or 0)
         except Exception as e:
             logger.warning("Revision con IA: no se ha podido mirar el lote %s: %s", lote_id, e)
-            _progreso_lote.update(t=time.time(), lote=lote_id)
-    if _progreso_lote["lote"] != lote_id or not _progreso_lote["total"]:
-        return None
-    return {"hechos": _progreso_lote["hechos"], "total": _progreso_lote["total"]}
+        _progreso_lotes.clear() if len(_progreso_lotes) > 20 else None
+        _progreso_lotes[lote_id] = p
+    return {"hechos": p["hechos"], "total": p["total"]} if p["total"] else None
 
 
 async def estado() -> dict:
@@ -224,7 +232,7 @@ async def estado() -> dict:
     from app.database.connection import get_pool
 
     a = await _ajustes()
-    pendientes, cola = 0, {"haiku": 0, "busqueda": 0, "sonnet": 0}
+    pendientes, cola, lotes = 0, {"haiku": 0, "busqueda": 0, "sonnet": 0}, []
     pool = get_pool()
     if pool:
         async with pool.acquire() as conn:
@@ -245,12 +253,21 @@ async def estado() -> dict:
             """, [MODELO, MODELO_ANTES, MARCA_VERIFICADA], POR_VERIFICAR)
             cola = dict(c)
             pendientes = sum(cola.values())
+            # Que lotes estan en marcha y de que clase, para que el panel lo diga.
+            ids = [x for x in (a["lote"], a["lote_v"]) if x]
+            modelos = {f["lote"]: f["modelo"] for f in await conn.fetch(
+                "SELECT lote, modelo FROM revision_ia_lotes WHERE lote = ANY($1::text[])", ids)}
+            for x in ids:
+                lotes.append({"id": x, "tipo": "verifica" if "verifica" in (modelos.get(x) or "") else "elige",
+                              "progreso": await _progreso(x, a["clave"]) if a["clave"] else None})
     return {"modelo": MODELO, "verificador": VERIFICADOR, "activa": a["activa"], "configurada": bool(a["clave"]), "error": a["error"],
             "preparando": dict(_preparando) if _preparando["activo"] else None,
             "buscando": dict(_investigando) if _investigando["activo"] else None,
             "tope": a["tope"],
-            "gasto_mes": round(a["gasto_mes"], 4), "lote": a["lote"] or None, "pendientes": pendientes, "cola": cola,
-            "lote_progreso": await _progreso(a["lote"], a["clave"]) if a["lote"] and a["clave"] else None,
+            "gasto_mes": round(a["gasto_mes"], 4), "pendientes": pendientes, "cola": cola,
+            # Los lotes en marcha (hasta dos: Haiku eligiendo y Sonnet
+            # verificando), cada uno con su progreso. `lote`: si hay alguno.
+            "lote": (a["lote"] or a["lote_v"]) or None, "lotes": lotes,
             "ultimo": a["ultimo"]}
 
 
@@ -443,7 +460,16 @@ async def _mandar(api_key_tmdb: str) -> dict:
     from app.services import revision
 
     a = await _ajustes()
-    if not a["activa"] or not a["clave"] or a["lote"] or not api_key_tmdb:
+    pool = get_pool()
+    if a["lote"] and not a["lote_v"]:
+        # Un lote de Sonnet de antes de haber dos huecos esta en el de Haiku:
+        # se pasa a su sitio para que Haiku pueda mandar el suyo.
+        async with pool.acquire() as conn:
+            m = await conn.fetchval("SELECT modelo FROM revision_ia_lotes WHERE lote = $1", a["lote"])
+        if m and "verifica" in m:
+            await set_app_settings({HUECO_ELIGE: "", HUECO_VERIFICA: a["lote"]})
+            a = await _ajustes()
+    if not a["activa"] or not a["clave"] or not api_key_tmdb or (a["lote"] and a["lote_v"]):
         return await estado()
     margen = a["tope"] - a["gasto_mes"]
     if margen < COSTE_VERIFICAR_ESTIMADO:
@@ -451,13 +477,13 @@ async def _mandar(api_key_tmdb: str) -> dict:
         await avisar_gasto()
         return await estado()
 
-    pool = get_pool()
     grupos = {g["clave"]: g for lista in (await revision.grupos()).values() for g in lista}
-    # Primero lo que Haiku ya propuso: un lote de Sonnet que solo verifica.
+    # Lo que Haiku ya propuso: un lote de Sonnet que solo verifica, si no hay
+    # otro de Sonnet en marcha. El de Haiku va aparte, a la vez.
     async with pool.acquire() as conn:
         por_verificar = await conn.fetch("""SELECT id, clave, propuesta FROM revision_auto
                                              WHERE ia = $1 AND ia_lote IS NULL ORDER BY archivos DESC""", POR_VERIFICAR)
-    if por_verificar:
+    if por_verificar and not a["lote_v"]:
         cuantos = min(LOTE_MAX, int(margen / COSTE_VERIFICAR_ESTIMADO))
         peticiones, vincular, fuera = [], [], []
         for f in por_verificar[:cuantos]:
@@ -474,8 +500,12 @@ async def _mandar(api_key_tmdb: str) -> dict:
                                    MODELO + ":fuera")
         if peticiones:
             # En el historial, «verifica»: el modelo es el de antes, el trabajo no.
-            return await _crear_lote(a, peticiones, vincular, VERIFICADOR + " verifica")
+            await _crear_lote(a, peticiones, vincular, VERIFICADOR + " verifica", HUECO_VERIFICA)
+            a = await _ajustes()
+            margen = a["tope"] - a["gasto_mes"]
 
+    if a["lote"]:
+        return await estado()           # ya hay un lote de Haiku en marcha
     cuantos = min(LOTE_MAX, int(margen / COSTE_GRUPO_ESTIMADO))
     from app.database.connection import get_app_settings
     if (await get_app_settings()).get("revision_ia_candidatas") != CANDIDATAS_VERSION:
@@ -529,10 +559,11 @@ async def _mandar(api_key_tmdb: str) -> dict:
                 await conn.execute("UPDATE revision_auto SET ia = $2 WHERE id = $1", id_, marca)
     if not peticiones:
         return await estado()
-    return await _crear_lote(a, peticiones, [(id_, cands) for id_, cands, marca in apuntes if not marca], MODELO)
+    await _crear_lote(a, peticiones, [(id_, cands) for id_, cands, marca in apuntes if not marca], MODELO, HUECO_ELIGE)
+    return await estado()
 
 
-async def _crear_lote(a: dict, peticiones: list[dict], vincular: list[tuple], modelo: str) -> dict:
+async def _crear_lote(a: dict, peticiones: list[dict], vincular: list[tuple], modelo: str, hueco: str) -> str | None:
     """Manda el lote y lo apunta, con sus grupos vinculados (`vincular`:
     (id, candidatas o None))."""
     import anthropic
@@ -548,13 +579,13 @@ async def _crear_lote(a: dict, peticiones: list[dict], vincular: list[tuple], mo
         motivo = ("Anthropic no acepta la clave de TMD_ANTHROPIC_API_KEY"
                   if isinstance(e, anthropic.AuthenticationError) else f"No se ha podido mandar el lote: {e}")
         await set_app_settings({"revision_ia_error": motivo[:300]})
-        return await estado()
+        return None
     # Con el lote ya creado en Anthropic, apuntarlo no puede quedarse a medias:
     # si algo cancelara esta tarea aqui, el lote se cobraria y sus respuestas
     # no se recogerian nunca. Primero el id (es lo que permite recogerlo) y
     # protegido de cancelaciones.
     async def apuntar():
-        await set_app_settings({"revision_ia_lote": lote.id, "revision_ia_error": ""})
+        await set_app_settings({hueco: lote.id, "revision_ia_error": ""})
         async with pool.acquire() as conn:
             await conn.execute("INSERT INTO revision_ia_lotes (lote, modelo, grupos) VALUES ($1, $2, $3) "
                                "ON CONFLICT (lote) DO NOTHING", lote.id, modelo, len(peticiones))
@@ -568,18 +599,28 @@ async def _crear_lote(a: dict, peticiones: list[dict], vincular: list[tuple], mo
                                     for id_, cands in vincular])
     await asyncio.shield(apuntar())
     logger.info("Revision con IA: lote %s (%s) con %d grupos", lote.id, modelo, len(peticiones))
-    return await estado()
+    return lote.id
 
 
 async def recoger() -> dict | None:
-    """Si el lote en marcha ha acabado, aplica lo que ha dicho Claude."""
+    """Recoge los lotes en marcha que hayan acabado (el de Haiku y el de
+    Sonnet, cada uno en su hueco) y aplica lo que dicen. El resumen del
+    ultimo recogido, o None si ninguno habia acabado."""
+    a = await _ajustes()
+    if not a["clave"]:
+        return None
+    hecho = None
+    for hueco, lote_id in ((HUECO_ELIGE, a["lote"]), (HUECO_VERIFICA, a["lote_v"])):
+        if lote_id:
+            hecho = await _recoger(hueco, lote_id, a["clave"]) or hecho
+    return hecho
+
+
+async def _recoger(hueco: str, lote_id: str, clave: str) -> dict | None:
     from app.database.connection import get_pool, set_app_settings
 
-    a = await _ajustes()
-    if not a["lote"] or not a["clave"]:
-        return None
-    cliente = _cliente(a["clave"])
-    lote = await cliente.messages.batches.retrieve(a["lote"])
+    cliente = _cliente(clave)
+    lote = await cliente.messages.batches.retrieve(lote_id)
     if lote.processing_status != "ended":
         return None
     pool = get_pool()
@@ -653,8 +694,7 @@ async def recoger() -> dict | None:
              WHERE lote = $1
         """, lote.id, resumen["aplicadas"], resumen["sugeridas"], resumen["ninguna"], resumen["fallos"],
             entrada, salida, round(gasto, 4), resumen["propuestas"])
-    await set_app_settings({"revision_ia_lote": "",
-                            "revision_ia_ultimo": json.dumps({**resumen, "terminado": time.time()})})
+    await set_app_settings({hueco: "", "revision_ia_ultimo": json.dumps({**resumen, "terminado": time.time()})})
     # Sin recalcular la lista: cada grupo aplicado ya ha salido de ella (`quitar`).
     logger.info("Revision con IA: lote %s recogido: %d aplicadas, %d sugeridas, %d ninguna, %d propuestas a Sonnet, "
                 "%d fallos, %.2f $", lote.id, resumen["aplicadas"], resumen["sugeridas"], resumen["ninguna"],
@@ -680,7 +720,7 @@ async def conciliar() -> float:
         apuntados = {f["lote"]: f["dolares"] for f in await conn.fetch("SELECT lote, dolares FROM revision_ia_lotes")}
     sumado = 0.0
     async for b in cliente.messages.batches.list(limit=100):
-        if b.processing_status != "ended" or b.id == a["lote"]:
+        if b.processing_status != "ended" or b.id in (a["lote"], a["lote_v"]):
             continue
         if apuntados.get(b.id) is not None and float(apuntados[b.id]) > 0:
             continue

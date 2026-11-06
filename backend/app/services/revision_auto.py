@@ -474,6 +474,8 @@ async def pasada(api_key: str) -> dict:
 # Cada cuanto se mira si el lote de la revision con IA ha acabado, y cada
 # cuanto si el catalogo ha cambiado (archivos nuevos, fichas recien buscadas).
 MIRA_LOTE_S = 5 * 60
+# Cada cuanto se pregunta a Anthropic si un lote ha acabado (no cuesta nada).
+MIRA_RECOGER_S = 60
 MIRA_CAMBIOS_S = 15 * 60
 
 
@@ -500,31 +502,45 @@ async def de_fondo(api_key: str) -> None:
     """La revision va **segun entra**: cada 15 min se mira si el catalogo ha
     cambiado y, si si, la pasada exacta (lo que cuadra perfecto se acepta
     solo) y despues un lote para Claude con lo que quede (services/
-    revision_ia.py, si esta encendida). Cada 5 min se mira si el lote acabo y,
-    al acabar, se manda el siguiente si mientras tanto ha entrado mas. Lo que
+    revision_ia.py, si esta encendida). Cada minuto se mira si algun lote ha
+    acabado (se recoge y sale el siguiente en el momento) y cada 5 se manda lo
+    que espere y se lanza la busqueda en TMDB. Lo que
     se quedo sin coincidencia se vuelve a mirar cada 6 h (y a los 30 dias se
     busca otra vez en TMDB), por si TMDB añade la ficha despues."""
     from app.services import revision, revision_ia
 
+    from app.tasks import spawn
+
     await asyncio.sleep(ESPERA_ARRANQUE_S)
-    huella_vista, ultima_completa, ultimo_cambio = None, 0.0, 0.0
+    huella_vista, ultima_completa, ultimo_cambio, ultimo_envio = None, 0.0, 0.0, 0.0
+
+    async def repaso():
+        # La pasada exacta y, al acabar, el lote con lo que quede. Aparte, para
+        # que una pasada larga no retrase la recogida de los lotes.
+        if await _por_mirar():
+            await pasada(api_key)
+        await revision_ia.mandar(api_key)
+
     while True:
+        ahora = time.time()
         try:
-            await revision_ia.recoger()
-            # Cada vuelta: si no hay lote en marcha y algo espera (a Haiku, o a
-            # que Sonnet verifique lo que propuso Haiku), sale el siguiente.
-            await revision_ia.mandar(api_key)
-            # Lo cobrado por lotes que aqui no constaban (ver `conciliar`).
-            await revision_ia.conciliar()
-            # Lo que no se resuelve con candidatas lo busca Claude en TMDB el
-            # mismo (no va en lote). Por tandas y aparte, para no frenar este
-            # bucle; el cerrojo evita dos a la vez.
-            if not revision_ia._cerrojo_investigar.locked():
-                from app.tasks import spawn
-                spawn(revision_ia.investigar_pendientes(api_key), "revision_ia_investigar")
+            # Cada minuto: un lote que ha acabado se recoge enseguida (lo
+            # confirmado se aplica) y, si ha vuelto alguno, sale el siguiente
+            # sin esperar: las propuestas de Haiku van a Sonnet en el momento.
+            recogido = await revision_ia.recoger()
+            if recogido or ahora - ultimo_envio >= MIRA_LOTE_S:
+                ultimo_envio = ahora
+                # Si no hay lote de esa clase en marcha y algo espera (a Haiku,
+                # o a que Sonnet verifique), sale el siguiente.
+                await revision_ia.mandar(api_key)
+                # Lo cobrado por lotes que aqui no constaban (ver `conciliar`).
+                await revision_ia.conciliar()
+                # Lo que no se resuelve con candidatas lo busca Haiku en TMDB
+                # (no va en lote). Por tandas y aparte; el cerrojo evita dos.
+                if not revision_ia._cerrojo_investigar.locked():
+                    spawn(revision_ia.investigar_pendientes(api_key), "revision_ia_investigar")
         except Exception as e:
             logger.error("Revision con IA: no se ha podido recoger el lote: %s", e)
-        ahora = time.time()
         if ahora - ultimo_cambio >= MIRA_CAMBIOS_S or ahora - ultima_completa >= CADA_S:
             ultimo_cambio = ahora
             try:
@@ -533,12 +549,11 @@ async def de_fondo(api_key: str) -> None:
                     if huella_vista is not None and huella != huella_vista:
                         revision.olvidar()   # que los grupos se calculen con lo nuevo
                     huella_vista, ultima_completa = huella, ahora
-                    if await _por_mirar():
-                        await pasada(api_key)
-                    await revision_ia.mandar(api_key)
+                    if not _cerrojo.locked():
+                        spawn(repaso(), "revision_repaso")
             except Exception as e:
                 logger.error("Revision automatica fallo: %s", e)
-        await asyncio.sleep(MIRA_LOTE_S)
+        await asyncio.sleep(MIRA_RECOGER_S)
 
 
 # --- Lo que pide el panel ------------------------------------------------------

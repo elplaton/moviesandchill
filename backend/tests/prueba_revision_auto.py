@@ -216,6 +216,19 @@ _asyncio.run(revision_ia.resolver_verificacion(1, "c", _prop, {"correcta": False
 comprueba("Sonnet dice que no: se queda para ti", ("marcar", "sin_candidato", "Haiku propuso «Black", "m"), _hechos[-1])
 revision_ia.aplicar_eleccion, revision_ia._marcar = _orig2
 
+print("\nDos lotes a la vez: Haiku y Sonnet, cada uno en su hueco")
+_vistos = []
+async def _falsos_ajustes():
+    return {"clave": "k", "lote": "msgbatch_haiku", "lote_v": "msgbatch_sonnet"}
+async def _falso_recoger(hueco, lote_id, clave):
+    _vistos.append((hueco, lote_id)); return {"ok": 1} if lote_id == "msgbatch_sonnet" else None
+_orig3 = (revision_ia._ajustes, revision_ia._recoger)
+revision_ia._ajustes, revision_ia._recoger = _falsos_ajustes, _falso_recoger
+_r = _asyncio.run(revision_ia.recoger())
+comprueba("se miran los dos", [(revision_ia.HUECO_ELIGE, "msgbatch_haiku"), (revision_ia.HUECO_VERIFICA, "msgbatch_sonnet")], _vistos)
+comprueba("y se devuelve lo recogido", {"ok": 1}, _r)
+revision_ia._ajustes, revision_ia._recoger = _orig3
+
 print("\nUn grupo que cambia de clave conserva lo hecho")
 from app.services.revision_auto import _ident
 comprueba("mismo tipo y titulo con otro motivo y otra ficha", _ident("sin_ficha|series|shllw|"),

@@ -46,7 +46,8 @@ interface EstadoIA {
   /** Mientras Claude busca en TMDB lo que no tiene carátula. */
   buscando?: { hechos: number; total: number } | null;
   /** Cuánto lleva Anthropic del lote en marcha (se le pregunta cada minuto). */
-  lote_progreso?: { hechos: number; total: number } | null;
+  /** Los lotes en marcha (hasta dos a la vez): Haiku eligiendo entre candidatas y Sonnet verificando lo que propuso. */
+  lotes?: { id: string; tipo: 'elige' | 'verifica'; progreso: { hechos: number; total: number } | null }[];
   /** Lo que espera, por paso: Haiku (en lote), la búsqueda en TMDB y la verificación de Sonnet (en lote). */
   cola?: { haiku: number; busqueda: number; sonnet: number };
 }
@@ -521,10 +522,12 @@ function TiraEstado({ auto, sugeridas, enLista, onCambio, onToast, onRevisar, la
           {ia.preparando && (
             <Progreso texto="Preparando el lote: buscando candidatas en TMDB" hechos={ia.preparando.hechos} total={ia.preparando.total} />
           )}
-          {ia.lote && !ia.preparando && (
-            <Progreso texto="Lote en Claude (suele tardar menos de una hora)"
-              hechos={ia.lote_progreso?.hechos} total={ia.lote_progreso?.total} />
-          )}
+          {(ia.lotes ?? []).map(l => (
+            <Progreso key={l.id} hechos={l.progreso?.hechos} total={l.progreso?.total}
+              texto={l.tipo === 'verifica'
+                ? `Sonnet verificando ${l.progreso ? num(l.progreso.total) + ' ' : ''}propuestas de Haiku (lote, menos de una hora)`
+                : `Haiku eligiendo entre candidatas${l.progreso ? `, ${num(l.progreso.total)} grupos` : ''} (lote, menos de una hora)`} />
+          ))}
           {ia.buscando && (
             <Progreso texto="Claude buscando en TMDB" hechos={ia.buscando.hechos} total={ia.buscando.total} />
           )}

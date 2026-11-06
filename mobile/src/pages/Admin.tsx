@@ -427,7 +427,7 @@ interface MotivoRevision { clave: string; titulo: string; descripcion: string; g
 interface EstadoIA {
   preparando?: { hechos: number; total: number } | null;
   buscando?: { hechos: number; total: number } | null;
-  lote_progreso?: { hechos: number; total: number } | null;
+  lotes?: { id: string; tipo: 'elige' | 'verifica'; progreso: { hechos: number; total: number } | null }[];
   cola?: { haiku: number; busqueda: number; sonnet: number };
   activa: boolean; configurada: boolean; error: string | null; tope: number; gasto_mes: number;
   lote: string | null; pendientes: number;
@@ -879,7 +879,7 @@ function TiraMovil({ auto, sugeridas, enLista, onCambio, onRevisar, lanzando, on
             ].filter(Boolean).join(', ')}</p>
           )}
           {ia.preparando && <ProgresoMovil texto="Preparando el lote" hechos={ia.preparando.hechos} total={ia.preparando.total} />}
-          {ia.lote && !ia.preparando && <ProgresoMovil texto="Lote en Claude (menos de una hora)" hechos={ia.lote_progreso?.hechos} total={ia.lote_progreso?.total} />}
+          {(ia.lotes ?? []).map(l => <ProgresoMovil key={l.id} texto={l.tipo === 'verifica' ? 'Sonnet verificando propuestas de Haiku' : 'Haiku eligiendo entre candidatas'} hechos={l.progreso?.hechos} total={l.progreso?.total} />)}
           {ia.buscando && <ProgresoMovil texto="Claude buscando en TMDB" hechos={ia.buscando.hechos} total={ia.buscando.total} />}
           {alTope && <p className="mt-1.5 text-[11px] text-nf-red">Tope del mes alcanzado: Claude no recibe nada hasta el mes que viene.</p>}
           {!encendida && ia.pendientes > 0 && <p className="mt-1.5 text-[11px] text-nf-text3">Apagado: {num(ia.pendientes)} grupos que podría mirar pasan directamente a ti.</p>}
