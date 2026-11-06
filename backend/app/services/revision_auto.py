@@ -350,6 +350,14 @@ async def pasada(api_key: str) -> dict:
         finally:
             _estado.update(corriendo=False, termino=time.time())
             revision.olvidar()
+            # Para que el panel sepa cuando fue el ultimo repaso tambien tras un
+            # reinicio: en memoria se perdia con cada despliegue y decia
+            # «esperando al primer repaso» con todo ya revisado.
+            try:
+                from app.database.connection import set_app_settings
+                await set_app_settings({"revision_auto_ultima": str(_estado["termino"])})
+            except Exception as e:
+                logger.warning("Revision automatica: no se ha podido apuntar la hora del repaso: %s", e)
         logger.info("Revision automatica: %d grupos mirados, %d corregidos solos, %d con sugerencia",
                     _estado["mirados"], _estado["aplicadas"], _estado["sugeridas"])
         return dict(_estado)
@@ -455,7 +463,14 @@ async def estado() -> dict:
     except Exception as e:
         logger.warning("Revision con IA: no se ha podido leer su estado: %s", e)
         ia = None
-    return {**_estado, "cuentas": cuentas, "pasos": pasos, "ia": ia}
+    termino = _estado.get("termino")
+    if termino is None:
+        from app.database.connection import get_app_settings
+        try:
+            termino = float((await get_app_settings()).get("revision_auto_ultima") or 0) or None
+        except (ValueError, TypeError):
+            termino = None
+    return {**_estado, "termino": termino, "cuentas": cuentas, "pasos": pasos, "ia": ia}
 
 
 async def aplicadas(offset: int = 0, limit: int = 30, origen: str = "") -> dict:
