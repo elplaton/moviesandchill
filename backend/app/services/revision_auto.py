@@ -419,12 +419,35 @@ async def estado() -> dict:
     from app.database.connection import get_pool
 
     cuentas = {}
+    # Lo mismo, separado por quien lo hizo: el paso 1 (coincidencia exacta),
+    # el paso 2 (Claude) y lo aceptado a mano en el paso 3. Es lo que pinta
+    # el flujo del panel.
+    pasos = {"exacta": {"grupos": 0, "archivos": 0},
+             "ia": {"aplicadas": 0, "archivos": 0, "sugeridas": 0, "ninguna": 0},
+             "mano": {"grupos": 0, "archivos": 0}}
     pool = get_pool()
     if pool:
         async with pool.acquire() as conn:
             for f in await conn.fetch("""SELECT estado, COUNT(*) AS grupos, COALESCE(SUM(archivos), 0) AS archivos
                                            FROM revision_auto GROUP BY estado"""):
                 cuentas[f["estado"]] = {"grupos": f["grupos"], "archivos": f["archivos"]}
+            for f in await conn.fetch("""
+                SELECT estado, ia IS NOT NULL AS por_ia, porque = 'aceptada a mano' AS a_mano,
+                       COUNT(*) AS grupos, COALESCE(SUM(archivos), 0) AS archivos
+                  FROM revision_auto GROUP BY 1, 2, 3"""):
+                if f["estado"] == "aplicada" and f["a_mano"]:
+                    pasos["mano"]["grupos"] += f["grupos"]
+                    pasos["mano"]["archivos"] += f["archivos"]
+                elif f["estado"] == "aplicada" and f["por_ia"]:
+                    pasos["ia"]["aplicadas"] += f["grupos"]
+                    pasos["ia"]["archivos"] += f["archivos"]
+                elif f["estado"] == "aplicada":
+                    pasos["exacta"]["grupos"] += f["grupos"]
+                    pasos["exacta"]["archivos"] += f["archivos"]
+                elif f["por_ia"] and f["estado"] == "sugerida":
+                    pasos["ia"]["sugeridas"] += f["grupos"]
+                elif f["por_ia"] and f["estado"] == "sin_candidato":
+                    pasos["ia"]["ninguna"] += f["grupos"]
     from app.services import revision_ia
 
     try:
@@ -432,7 +455,7 @@ async def estado() -> dict:
     except Exception as e:
         logger.warning("Revision con IA: no se ha podido leer su estado: %s", e)
         ia = None
-    return {**_estado, "cuentas": cuentas, "ia": ia}
+    return {**_estado, "cuentas": cuentas, "pasos": pasos, "ia": ia}
 
 
 async def aplicadas(offset: int = 0, limit: int = 30, origen: str = "") -> dict:

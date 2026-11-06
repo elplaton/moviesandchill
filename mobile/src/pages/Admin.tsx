@@ -429,7 +429,16 @@ interface EstadoIA {
   lote: string | null; pendientes: number;
   ultimo: { aplicadas: number; sugeridas: number; ninguna: number; fallos: number; dolares: number } | null;
 }
-interface EstadoAuto { corriendo: boolean; mirados: number; por_mirar: number; cuentas: Record<string, { grupos: number; archivos: number }>; ia: EstadoIA | null }
+// Lo hecho, separado por paso: coincidencia exacta, Claude y lo aceptado a mano.
+interface Pasos {
+  exacta: { grupos: number; archivos: number };
+  ia: { aplicadas: number; archivos: number; sugeridas: number; ninguna: number };
+  mano: { grupos: number; archivos: number };
+}
+interface EstadoAuto {
+  corriendo: boolean; termino: number | null; mirados: number; por_mirar: number;
+  cuentas: Record<string, { grupos: number; archivos: number }>; pasos?: Pasos; ia: EstadoIA | null;
+}
 interface ResumenRevision { motivos: MotivoRevision[]; canales: { channel_id: number; nombre: string }[]; auto: EstadoAuto }
 interface FichaActual { tmdb_id: number; media_type: TipoPeticion; title: string; year: number | null; poster: string | null }
 interface Sugerencia extends FichaActual { porque: string | null }
@@ -690,78 +699,151 @@ function HistorialIAMovil() {
   );
 }
 
-/** La revisión con IA en el teléfono: estado, tope y «Mandar ahora» (la clave va en el .env del servidor). */
-function BloqueIAMovil({ ia, onCambio }: { ia: EstadoIA; onCambio: () => void }) {
-  const [abierto, setAbierto] = useState(false);
-  const [verGasto, setVerGasto] = useState(false);
-  const [tope, setTope] = useState(String(ia.tope));
+const haceMov = (t: number | null) => {
+  if (!t) return null;
+  const min = Math.round((Date.now() / 1000 - t) / 60);
+  return min < 1 ? 'ahora mismo' : min < 60 ? `hace ${min} min` : `hace ${Math.round(min / 60)} h`;
+};
+
+/** Un paso del flujo en el teléfono: número, título, qué hace y lo hecho. */
+function PasoMovil({ n, titulo, sub, apagado, children }: { n: number; titulo: string; sub: React.ReactNode; apagado?: boolean; children: React.ReactNode }) {
+  return (
+    <div className={`rounded-2xl p-4 ${apagado ? 'border border-dashed border-white/15' : 'bg-white/5'}`}>
+      <div className="flex items-center space-x-2">
+        <span className="w-6 h-6 shrink-0 rounded-full bg-white/10 text-[12px] font-semibold flex items-center justify-center">{n}</span>
+        <p className="text-[15px] font-semibold">{titulo}</p>
+      </div>
+      <p className="text-[12px] text-nf-text3 mt-1">{sub}</p>
+      <div className="mt-3 space-y-2">{children}</div>
+    </div>
+  );
+}
+
+const CifraMovil = ({ valor, texto, ok }: { valor: number; texto: string; ok?: boolean }) => (
+  <span className="text-[13px] text-nf-text2 mr-4 whitespace-nowrap">
+    <span className={`text-[18px] font-bold tabular-nums mr-1 ${ok ? 'text-nf-ok' : 'text-white'}`}>{num(valor)}</span>{texto}
+  </span>
+);
+
+const FlechaMovil = () => <p className="text-center text-nf-text3 text-[16px] leading-none my-1" aria-hidden>↓</p>;
+
+/**
+ * Cómo se revisa lo que entra, en el teléfono: los mismos tres pasos que en la
+ * web, uno debajo de otro. (1) coincidencia exacta, siempre y gratis; (2)
+ * Claude, si está encendido y por debajo del tope, con lo que el paso 1 no
+ * resolvió; (3) a mano, lo que queda. El interruptor y el tope, a la vista.
+ */
+function FlujoMovil({ auto, pendientes, sugeridas, onCambio, onRevisar, revisando, onVerCorregidas, onVerSugeridas }: {
+  auto: EstadoAuto; pendientes: number; sugeridas: number; onCambio: () => void;
+  onRevisar: () => void; revisando: boolean; onVerCorregidas: () => void; onVerSugeridas: () => void;
+}) {
+  const ia = auto.ia;
+  const pasos = auto.pasos;
+  const [tope, setTope] = useState(String(ia?.tope ?? 20));
   const [haciendo, setHaciendo] = useState('');
-  const pct = ia.tope > 0 ? Math.min(1, ia.gasto_mes / ia.tope) : 1;
-  const pedir = async (ruta: string, cuerpo?: object, ok?: string) => {
-    setHaciendo(ruta);
+  const [verGasto, setVerGasto] = useState(false);
+  useEffect(() => { if (ia) setTope(String(ia.tope)); }, [ia?.tope]); // eslint-disable-line react-hooks/exhaustive-deps
+  const pedir = async (que: string, ruta: string, cuerpo?: object, ok?: string) => {
+    setHaciendo(que);
     try {
       const r = await apiFetch(ruta, { method: 'POST', ...(cuerpo ? { body: JSON.stringify(cuerpo) } : {}) });
       const d = await leer(r);
       if (!r.ok) throw new Error(d.detail || 'No se ha podido');
       if (ok) toast(ok, 'ok');
       onCambio();
-      return true;
-    } catch (e) { toast(e instanceof Error ? e.message : 'No se ha podido', 'error', 6000); return false; }
+    } catch (e) { toast(e instanceof Error ? e.message : 'No se ha podido', 'error', 6000); }
     finally { setHaciendo(''); }
   };
-  const u = ia.ultimo;
+  const encendida = !!ia?.activa && !!ia?.configurada;
+  const alTope = !!ia && ia.gasto_mes >= ia.tope;
+  const pct = ia && ia.tope > 0 ? Math.min(1, ia.gasto_mes / ia.tope) : 1;
+  const esperanPaso1 = auto.corriendo ? Math.max(0, auto.por_mirar - auto.mirados) : 0;
+  const esperanClaude = encendida && !alTope ? ia!.pendientes : 0;
+  const topeCambiado = ia && Number(tope) !== ia.tope;
+
   return (
-    <div className="mt-3 border-t border-white/10 pt-3">
-      <div className="flex items-center justify-between">
-        <p className="text-[14px] font-semibold">Revisión con IA <span className="text-nf-text3 font-normal">· Sonnet 5.5</span></p>
-        <span className={`text-[11px] px-2 py-0.5 rounded-full ${ia.activa && ia.configurada ? 'bg-nf-ok/15 text-nf-ok' : 'bg-white/10 text-nf-text3'}`}>
-          {!ia.configurada ? 'sin clave' : ia.activa ? 'encendida' : 'apagada'}
-        </span>
-      </div>
-      <p className="text-[12px] text-nf-text2 mt-1">
-        {dolar(ia.gasto_mes)} de {dolar(ia.tope)} este mes · {num(ia.pendientes)} por mirar{ia.lote ? ' · lote en marcha' : ''}
-      </p>
-      {!ia.configurada && <p className="text-[11px] text-nf-warn mt-1">Falta la clave: TMD_ANTHROPIC_API_KEY en el .env del servidor.</p>}
-      {ia.error && <p className="text-[11px] text-nf-red mt-1">{ia.error}</p>}
-      {ia.configurada && (
-        <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-white/10">
-          <div className={`h-full ${pct >= 1 ? 'bg-nf-red' : pct >= 0.8 ? 'bg-nf-warn' : 'bg-nf-ok'}`} style={{ width: `${pct * 100}%` }} />
-        </div>
-      )}
-      {ia.configurada && pct >= 1 && <p className="text-[11px] text-nf-red mt-1">Tope del mes alcanzado: no se manda nada hasta el mes que viene.</p>}
-      {u && <p className="text-[11px] text-nf-text3 mt-1">Último lote: {u.aplicadas} solos, {u.sugeridas} sugerencias, {u.ninguna} sin ficha · {dolar(u.dolares)}</p>}
-      <div className="flex mt-2 space-x-2">
-        <button onClick={() => setVerGasto(v => !v)} className="tap flex-1 h-10 rounded-xl bg-white/10 text-[14px] font-medium">{verGasto ? 'Ocultar' : 'Gasto'}</button>
-        <button onClick={() => setAbierto(a => !a)} className="tap flex-1 h-10 rounded-xl bg-white/10 text-[14px] font-medium">{abierto ? 'Cerrar' : 'Ajustes'}</button>
-        {ia.configurada && ia.activa && (
-          <button onClick={() => pedir('/admin/revision/ia/mandar')} disabled={!!haciendo || !!ia.lote}
-            className="tap flex-1 h-10 rounded-xl bg-white/10 text-[14px] font-medium disabled:opacity-40">
-            {ia.lote ? 'Lote en marcha' : haciendo ? '…' : 'Mandar ahora'}
+    <div className="mb-4">
+      <p className="text-[15px] font-semibold">Cómo se revisa lo que entra</p>
+      <p className="text-[12px] text-nf-text3 mt-0.5 mb-3">Lo que no se empareja con TMDB pasa por estos tres pasos, en orden, según entra. Lo que se pone solo se puede deshacer.</p>
+
+      <PasoMovil n={1} titulo="Coincidencia exacta" sub="Siempre activa y gratis: si TMDB tiene algo que se llama exactamente igual y cuadra, se pone solo.">
+        <div><CifraMovil valor={pasos?.exacta.grupos ?? auto.cuentas?.aplicada?.grupos ?? 0} texto="corregidos solos" ok /></div>
+        <p className="text-[11px] text-nf-text3">
+          {auto.corriendo ? `Revisando… ${num(auto.mirados)} de ${num(auto.por_mirar)}` : auto.termino ? `Último repaso ${haceMov(auto.termino)}` : 'Aún sin repasar desde el arranque'}
+        </p>
+        <button onClick={onRevisar} disabled={revisando || auto.corriendo} className="tap w-full h-10 rounded-xl bg-white/10 text-[14px] font-medium disabled:opacity-40">
+          {auto.corriendo ? 'Revisando…' : revisando ? 'Lanzando…' : 'Revisar ahora'}
+        </button>
+      </PasoMovil>
+      <FlechaMovil />
+
+      <PasoMovil n={2} titulo="Claude (IA)" apagado={!encendida}
+        sub={ia?.configurada ? 'Lo que el paso 1 no resuelve, en lotes. Con seguridad alta se pone solo; lo dudoso te llega como sugerencia.'
+          : 'Falta la clave: TMD_ANTHROPIC_API_KEY en el .env del servidor.'}>
+        <div className="flex items-center space-x-3">
+          <button role="switch" aria-checked={encendida} disabled={!ia?.configurada || haciendo === 'activa'}
+            onClick={() => pedir('activa', '/admin/revision/ia', { activa: !encendida })}
+            className={`relative h-7 w-12 shrink-0 rounded-full transition-colors disabled:opacity-40 ${encendida ? 'bg-nf-ok' : 'bg-white/20'}`}>
+            <span className={`absolute left-0 top-0.5 h-6 w-6 rounded-full bg-white transition-transform ${encendida ? 'translate-x-[22px]' : 'translate-x-0.5'}`} />
           </button>
+          <span className="text-[14px]">{haciendo === 'activa' ? 'Comprobando la clave…' : encendida ? 'Encendida' : 'Apagada'}</span>
+          <span className="text-[11px] text-nf-text3">Sonnet 5.5</span>
+        </div>
+        {ia?.configurada && !encendida && (
+          <p className="text-[12px] text-nf-text2">Apagada: lo que el paso 1 no resuelve pasa directo al paso 3.{ia.pendientes > 0 ? ` Al encenderla mirará ${num(ia.pendientes)} grupos (unos ${dolar(ia.pendientes * 0.0033)}).` : ''}</p>
         )}
-      </div>
-      {verGasto && <HistorialIAMovil />}
-      {abierto && (
-        <div className="mt-3 space-y-2">
-          <label className="flex items-center space-x-2 text-[13px] text-nf-text2">
-            <span>Tope al mes ($)</span>
-            <input className={`${input} w-24`} type="number" min="0" inputMode="decimal" value={tope} onChange={e => setTope(e.target.value)} />
-          </label>
-          <div className="flex space-x-2">
-            <button disabled={!!haciendo} className="flex-1 h-11 rounded-xl bg-nf-red text-[15px] font-semibold disabled:opacity-40"
-              onClick={() => pedir('/admin/revision/ia', { tope: Number(tope) || 0 }, 'Tope guardado')}>
-              {haciendo === '/admin/revision/ia' ? 'Guardando…' : 'Guardar tope'}
-            </button>
-            {ia.configurada && (
-              <button disabled={!!haciendo} onClick={() => pedir('/admin/revision/ia', { activa: !ia.activa })}
-                className="flex-1 h-11 rounded-xl bg-white/10 text-[15px] font-medium disabled:opacity-40">
-                {ia.activa ? 'Apagar' : 'Encender'}
-              </button>
+        {ia?.configurada && (<>
+          {encendida && (
+            <div className="flex flex-wrap">
+              <CifraMovil valor={pasos?.ia.aplicadas ?? 0} texto="solos" ok />
+              <CifraMovil valor={pasos?.ia.sugeridas ?? 0} texto="sugerencias" />
+              <CifraMovil valor={pasos?.ia.ninguna ?? 0} texto="sin ficha" />
+            </div>
+          )}
+          <div className="flex items-center space-x-2 text-[13px] text-nf-text2">
+            <span className="text-white tabular-nums">{dolar(ia.gasto_mes)}</span><span>de</span>
+            <input className="w-16 h-8 rounded-lg bg-white/10 px-2 text-right text-white tabular-nums" type="number" min="0" inputMode="decimal"
+              aria-label="Tope de gasto al mes en dólares" value={tope} onChange={e => setTope(e.target.value)} />
+            <span>$ al mes</span>
+            {topeCambiado && (
+              <button onClick={() => pedir('tope', '/admin/revision/ia', { tope: Number(tope) || 0 }, 'Tope guardado')} disabled={haciendo === 'tope'}
+                className="h-8 px-3 rounded-lg bg-white text-black text-[13px] font-semibold disabled:opacity-40">Guardar</button>
             )}
           </div>
-          <p className="text-[11px] text-nf-text3">Lo que la revisión exacta no resuelve va a Claude en lotes. Con seguridad alta se aplica solo (con deshacer); lo demás queda como sugerencia. La clave va en el .env del servidor.</p>
+          <div className="h-1.5 w-full overflow-hidden rounded-full bg-white/10">
+            <div className={`h-full ${pct >= 1 ? 'bg-nf-red' : pct >= 0.8 ? 'bg-nf-warn' : 'bg-nf-ok'}`} style={{ width: `${pct * 100}%` }} />
+          </div>
+          {alTope && <p className="text-[11px] text-nf-red">Tope del mes alcanzado: no se manda nada hasta el mes que viene (o súbelo).</p>}
+          {encendida && <p className="text-[11px] text-nf-text3">{ia.lote ? 'Lote en marcha en Claude' : `${num(ia.pendientes)} grupos esperando a Claude`}</p>}
+          {ia.error && <p className="text-[11px] text-nf-red">{ia.error}</p>}
+          <div className="flex space-x-2">
+            {encendida && (
+              <button onClick={() => pedir('mandar', '/admin/revision/ia/mandar')} disabled={!!haciendo || !!ia.lote || alTope}
+                className="tap flex-1 h-10 rounded-xl bg-white/10 text-[14px] font-medium disabled:opacity-40">{ia.lote ? 'Lote en marcha' : 'Mandar ahora'}</button>
+            )}
+            <button onClick={() => setVerGasto(v => !v)} className="tap flex-1 h-10 rounded-xl bg-white/10 text-[14px] font-medium">{verGasto ? 'Ocultar gasto' : 'Gasto'}</button>
+          </div>
+          {verGasto && <HistorialIAMovil />}
+        </>)}
+      </PasoMovil>
+      <FlechaMovil />
+
+      <PasoMovil n={3} titulo="A mano" sub="Lo que queda: las sugerencias se aceptan de un toque; lo demás se corrige o se ignora en la lista de abajo.">
+        <div className="flex flex-wrap">
+          <CifraMovil valor={sugeridas} texto="con sugerencia" />
+          <CifraMovil valor={pendientes} texto="en la lista" />
         </div>
-      )}
+        {(esperanPaso1 > 0 || esperanClaude > 0) && (
+          <p className="text-[11px] text-nf-text3">
+            De ellos, {esperanPaso1 > 0 ? `${num(esperanPaso1)} aún no los ha mirado el paso 1` : ''}{esperanPaso1 > 0 && esperanClaude > 0 ? ' y ' : ''}{esperanClaude > 0 ? `${num(esperanClaude)} esperan a Claude` : ''}: no hace falta tocarlos todavía.
+          </p>
+        )}
+        {sugeridas > 0 && (
+          <button onClick={onVerSugeridas} className="tap w-full h-10 rounded-xl bg-white/10 text-[14px] font-medium">Ver las sugerencias</button>
+        )}
+      </PasoMovil>
+
+      <button onClick={onVerCorregidas} className="tap mt-3 w-full text-left text-[13px] text-nf-text2">Ver todo lo que se ha puesto solo (con deshacer) →</button>
     </div>
   );
 }
@@ -858,6 +940,8 @@ function Revision() {
   const [corrigiendo, setCorrigiendo] = useState<GrupoRevision | null>(null);
   const [verCorregidas, setVerCorregidas] = useState(false);
   const [soloSugeridas, setSoloSugeridas] = useState(false);
+  // Los motivos, para bajar hasta ellos desde «Ver las sugerencias».
+  const listaMovilRef = useRef<HTMLDivElement>(null);
   const [lanzando, setLanzando] = useState(false);
   const peticion = useRef(0);
 
@@ -935,29 +1019,24 @@ function Revision() {
 
   return (
     <div>
-      {auto && (
-        <div className="rounded-2xl bg-white/5 p-4 mb-3">
-          <p className="text-[15px] font-semibold">Revisión automática</p>
-          <p className="text-[12px] text-nf-text2 mt-1">
-            {auto.corriendo
-              ? `Revisando… ${num(auto.mirados)} de ${num(auto.por_mirar)} grupos`
-              : `${num(auto.cuentas?.aplicada?.grupos ?? 0)} grupos corregidos solos · ${num(auto.cuentas?.sugerida?.grupos ?? 0)} con sugerencia`}
-          </p>
-          <div className="flex mt-3 space-x-2">
-            <button onClick={() => setVerCorregidas(v => !v)} className="tap flex-1 h-10 rounded-xl bg-white/10 text-[14px] font-medium">
-              {verCorregidas ? 'Volver' : 'Corregido solo'}
-            </button>
-            <button onClick={revisarAhora} disabled={lanzando || auto.corriendo} className="tap flex-1 h-10 rounded-xl bg-nf-red text-[14px] font-semibold disabled:opacity-40">
-              {auto.corriendo ? 'Revisando…' : lanzando ? 'Lanzando…' : 'Revisar ahora'}
-            </button>
-          </div>
-          {auto.ia && <BloqueIAMovil ia={auto.ia} onCambio={cargarResumen} />}
-        </div>
-      )}
+      {auto && (verCorregidas ? (
+        <button onClick={() => setVerCorregidas(false)} className="tap mb-3 text-[14px] text-nf-text2">← Volver a la revisión</button>
+      ) : (
+        <FlujoMovil auto={auto} onCambio={cargarResumen} onRevisar={revisarAhora} revisando={lanzando}
+          pendientes={(resumen?.motivos || []).reduce((n, m) => n + m.grupos, 0)}
+          sugeridas={(resumen?.motivos || []).reduce((n, m) => n + (m.sugeridas ?? 0), 0)}
+          onVerCorregidas={() => setVerCorregidas(true)}
+          onVerSugeridas={() => {
+            const mas = [...(resumen?.motivos || [])].sort((a, b) => (b.sugeridas ?? 0) - (a.sugeridas ?? 0))[0];
+            if (mas) setMotivo(mas.clave);
+            setSoloSugeridas(true);
+            setTimeout(() => listaMovilRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
+          }} />
+      ))}
       {verCorregidas ? <CorregidasMovil onCambio={() => { cargarResumen(); setGrupos([]); cargar(0); }} /> : (<>
       {/* En varias filas y no deslizando: deslizando, el ultimo motivo salia
           cortado por la derecha y parecia que no habia mas. */}
-      <div className="flex flex-wrap gap-2 mb-2">
+      <div ref={listaMovilRef} className="flex flex-wrap gap-2 mb-2 scroll-mt-20">
         {(resumen?.motivos || []).map(m => (
           <button key={m.clave} onClick={() => setMotivo(m.clave)}
             className={`shrink-0 h-9 px-3.5 rounded-full text-[13px] font-semibold ${motivo === m.clave ? 'bg-white text-black' : 'bg-white/10 text-nf-text2'}`}>

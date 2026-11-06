@@ -30,8 +30,16 @@ interface EstadoIA {
   ultimo: { aplicadas: number; sugeridas: number; ninguna: number; fallos: number; dolares: number; terminado: number } | null;
 }
 
+/** Lo hecho, separado por paso: coincidencia exacta, Claude y lo aceptado a mano. */
+interface Pasos {
+  exacta: { grupos: number; archivos: number };
+  ia: { aplicadas: number; archivos: number; sugeridas: number; ninguna: number };
+  mano: { grupos: number; archivos: number };
+}
+
 interface EstadoAuto {
   ia: EstadoIA | null;
+  pasos?: Pasos;
   corriendo: boolean;
   empezo: number | null;
   termino: number | null;
@@ -116,8 +124,13 @@ const POR_PAGINA = 30;
 // Lo que tiene ficha de TMDB y por eso merece enseñarla: en «Sin ficha» no hay.
 const CON_FICHA: ClaveMotivo[] = ['tipo_cruzado', 'dudosa', 'sin_caratula'];
 
+// Punto de miles también con cuatro cifras («5.307», no «5307»): el español no
+// lo pone por debajo de 10.000 y en un panel de cifras parecía un error.
+const MILES = { useGrouping: 'always' } as unknown as Intl.NumberFormatOptions;
+const num = (n: number) => n.toLocaleString('es-ES', MILES);
+
 const tipoTexto = (t: Tipo) => (t === 'series' ? 'Serie' : 'Película');
-const archivosTexto = (n: number) => `${n.toLocaleString()} ${n === 1 ? 'archivo' : 'archivos'}`;
+const archivosTexto = (n: number) => `${num(n)} ${n === 1 ? 'archivo' : 'archivos'}`;
 const conAño = (t: string, año: number | null) => (año ? `${t} (${año})` : t);
 
 /** La carátula llega entera de /peticiones/buscar y a veces como ruta de
@@ -286,7 +299,7 @@ function HistorialIAPanel() {
             {h.lotes.map(l => (
               <tr key={l.lote} className="border-t border-white/5 text-nf-dim">
                 <td className="py-1">{fecha(l.creado)}</td>
-                <td className="text-right text-white">{l.grupos.toLocaleString()}</td>
+                <td className="text-right text-white">{num(l.grupos)}</td>
                 {l.terminado ? (<>
                   <td className="text-right text-nf-ok">{l.aplicadas}</td>
                   <td className="text-right">{l.sugeridas}</td>
@@ -305,33 +318,80 @@ function HistorialIAPanel() {
   );
 }
 
-/**
- * La revisión con IA: lo que la revisión exacta no resuelve se le manda a
- * Claude en lotes (Batch API). La clave no está aquí sino en el .env del
- * servidor (TMD_ANTHROPIC_API_KEY); aquí solo el interruptor y el tope, que
- * corta el gasto del mes.
- */
-function BloqueIA({ ia, onCambio, onToast }: { ia: EstadoIA; onCambio: () => void; onToast: (m: string) => void }) {
-  const [abierto, setAbierto] = useState(false);
-  const [verHistorial, setVerHistorial] = useState(false);
-  const [tope, setTope] = useState(String(ia.tope));
-  const [guardando, setGuardando] = useState(false);
-  const [mandando, setMandando] = useState(false);
-  const [error, setError] = useState('');
+const haceSegundos = (t: number | null | undefined) => {
+  if (!t) return null;
+  const min = Math.round((Date.now() / 1000 - t) / 60);
+  return min < 1 ? 'ahora mismo' : min < 60 ? `hace ${min} min` : `hace ${Math.round(min / 60)} h`;
+};
 
-  const guardar = async (cambios: { activa?: boolean; tope?: number }) => {
-    setGuardando(true);
+/** Un paso del flujo: número, título y lo que ha hecho. */
+function Paso({ n, titulo, sub, apagado, children }: {
+  n: number; titulo: string; sub: React.ReactNode; apagado?: boolean; children: React.ReactNode;
+}) {
+  // Apagado se nota en el borde y el fondo, no en la opacidad: atenuado entero
+  // parecía que tampoco se podía pulsar el interruptor que lo enciende.
+  return (
+    <div className={`flex flex-col rounded-xl border px-4 py-4 ${apagado
+      ? 'border-dashed border-white/15 bg-transparent' : 'border-white/10 bg-black/20'}`}>
+      <div className="flex items-center gap-2">
+        <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-white/10 text-xs font-semibold text-white">{n}</span>
+        <p className="text-white text-sm font-semibold">{titulo}</p>
+      </div>
+      <p className="text-nf-faint text-[11px] mt-1 min-h-[2rem]">{sub}</p>
+      <div className="mt-3 flex flex-1 flex-col gap-2">{children}</div>
+    </div>
+  );
+}
+
+/** Una cifra grande con su explicación. */
+function Cifra({ valor, texto, tono }: { valor: number; texto: string; tono?: 'ok' }) {
+  return (
+    <p className="text-nf-dim text-xs">
+      <span className={`text-lg font-bold tabular-nums mr-1.5 ${tono === 'ok' ? 'text-nf-ok' : 'text-white'}`}>
+        {num(valor)}
+      </span>
+      {texto}
+    </p>
+  );
+}
+
+const Flecha = () => (
+  <div className="hidden md:grid place-items-center text-nf-faint text-xl" aria-hidden>→</div>
+);
+
+/**
+ * Cómo se revisa lo que entra, en tres pasos y en orden: (1) la coincidencia
+ * exacta con TMDB, siempre activa y gratis; (2) Claude, si está encendido y
+ * por debajo del tope del mes, con lo que el paso 1 no resolvió; (3) a mano, lo
+ * que queda. Cada paso enseña lo que ha hecho y sus controles a la vista: el
+ * interruptor de Claude y el tope no van escondidos tras un «Ajustes».
+ */
+function Flujo({ auto, pendientes, sugeridas, onCambio, onToast, onRevisar, revisando, onVerCorregidas, onVerSugeridas }: {
+  auto: EstadoAuto; pendientes: number; sugeridas: number;
+  onCambio: () => void; onToast: (m: string) => void;
+  onRevisar: () => void; revisando: boolean; onVerCorregidas: () => void; onVerSugeridas: () => void;
+}) {
+  const ia = auto.ia;
+  const pasos = auto.pasos;
+  const [tope, setTope] = useState(String(ia?.tope ?? 20));
+  const [guardando, setGuardando] = useState<'' | 'tope' | 'activa'>('');
+  const [mandando, setMandando] = useState(false);
+  const [verGasto, setVerGasto] = useState(false);
+  const [error, setError] = useState('');
+  useEffect(() => { if (ia) setTope(String(ia.tope)); }, [ia?.tope]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const guardar = async (que: 'tope' | 'activa', cambios: { activa?: boolean; tope?: number }) => {
+    setGuardando(que);
     setError('');
     try {
       const res = await apiFetch('/admin/revision/ia', { method: 'POST', body: JSON.stringify(cambios) });
-      if (!res.ok) { setError(await motivoDe(res)); return false; }
+      if (!res.ok) { setError(await motivoDe(res)); return; }
       onCambio();
-      return true;
+      if (que === 'tope') onToast('Tope guardado');
     } catch {
       setError('Error de conexión');
-      return false;
     } finally {
-      setGuardando(false);
+      setGuardando('');
     }
   };
 
@@ -339,8 +399,7 @@ function BloqueIA({ ia, onCambio, onToast }: { ia: EstadoIA; onCambio: () => voi
     setMandando(true);
     try {
       const res = await apiFetch('/admin/revision/ia/mandar', { method: 'POST' });
-      if (!res.ok) onToast(await motivoDe(res));
-      else onCambio();
+      if (!res.ok) onToast(await motivoDe(res)); else onCambio();
     } catch {
       onToast('Error de conexión');
     } finally {
@@ -348,78 +407,137 @@ function BloqueIA({ ia, onCambio, onToast }: { ia: EstadoIA; onCambio: () => voi
     }
   };
 
-  const u = ia.ultimo;
+  const encendida = !!ia?.activa && !!ia?.configurada;
+  // Lo que todavia esta en manos de los pasos 1 y 2: sale en la lista, pero no
+  // es trabajo para nadie aun.
+  const esperanPaso1 = auto.corriendo ? Math.max(0, auto.por_mirar - auto.mirados) : 0;
+  const esperanClaude = encendida && !(ia!.gasto_mes >= ia!.tope) ? ia!.pendientes : 0;
+  const topeCambiado = ia && Number(tope) !== ia.tope;
+  const alTope = !!ia && ia.gasto_mes >= ia.tope;
+
   return (
-    <div className="mt-4 border-t border-white/10 pt-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="min-w-0">
-          <p className="text-white text-sm font-medium">
-            Revisión con IA <span className="text-nf-dim font-normal">· Claude Sonnet 5.5</span>
-            <span className={`ml-2 rounded px-1.5 py-0.5 text-[10px] align-middle ${ia.activa && ia.configurada ? 'bg-nf-ok/15 text-nf-ok' : 'bg-white/10 text-nf-dim'}`}>
-              {!ia.configurada ? 'sin clave' : ia.activa ? 'encendida' : 'apagada'}
-            </span>
+    <div className={CARD}>
+      <h2 className="text-white text-base font-semibold">Cómo se revisa lo que entra</h2>
+      <p className="text-nf-dim text-sm mt-0.5">
+        Lo que el indexador no empareja con TMDB pasa por estos tres pasos, en orden. Va según entra: mira lo nuevo
+        cada 15 minutos. Todo lo que se pone solo (pasos 1 y 2) se puede deshacer.
+      </p>
+
+      <div className="mt-4 grid gap-3 md:grid-cols-[1fr_auto_1fr_auto_1fr]">
+        <Paso n={1} titulo="Coincidencia exacta" sub="Siempre activa y gratis. Si TMDB tiene algo que se llama exactamente igual y el año o los capítulos cuadran, se pone solo.">
+          <Cifra valor={pasos?.exacta.grupos ?? auto.cuentas?.aplicada?.grupos ?? 0} texto="grupos corregidos solos" tono="ok" />
+          <p className="text-nf-faint text-[11px]">
+            {auto.corriendo
+              ? `Revisando… ${num(auto.mirados)} de ${num(auto.por_mirar)} grupos`
+              : auto.termino ? `Último repaso ${haceSegundos(auto.termino)}` : 'Aún no ha hecho ningún repaso desde el arranque'}
           </p>
-          <p className="text-nf-dim text-xs mt-0.5">
-            {dolares(ia.gasto_mes)} de {dolares(ia.tope)} este mes · {ia.pendientes.toLocaleString()} grupos por mirar
-            {ia.lote && ' · lote en marcha (suele tardar menos de una hora)'}
-          </p>
-          {!ia.configurada && (
-            <p className="text-nf-warn text-[11px] mt-1">
-              Falta la clave: pon <code className="font-mono">TMD_ANTHROPIC_API_KEY</code> en el .env del servidor
-              (en Coolify, en sus variables de entorno) y redespliega.
-            </p>
-          )}
-          {ia.error && <p className="text-red-400 text-[11px] mt-1">{ia.error}</p>}
-          {ia.configurada && <BarraGasto gasto={ia.gasto_mes} tope={ia.tope} />}
-          {ia.configurada && ia.gasto_mes >= ia.tope && (
-            <p className="text-nf-red text-[11px] mt-1">Tope del mes alcanzado: no se manda nada hasta el mes que viene (o súbelo en Ajustes).</p>
-          )}
-          {u && (
-            <p className="text-nf-faint text-[11px] mt-0.5">
-              Último lote: {u.aplicadas} corregidos solos, {u.sugeridas} sugerencias, {u.ninguna} sin ficha que encaje
-              {u.fallos ? `, ${u.fallos} fallos` : ''} · {dolares(u.dolares)}
-            </p>
-          )}
-        </div>
-        <div className="flex gap-2">
-          <button onClick={() => setVerHistorial(v => !v)} className={BOTON}>{verHistorial ? 'Ocultar gasto' : 'Gasto e historial'}</button>
-          <button onClick={() => setAbierto(a => !a)} className={BOTON}>{abierto ? 'Cerrar' : 'Ajustes'}</button>
-          {ia.configurada && ia.activa && (
-            <button onClick={mandar} disabled={mandando || !!ia.lote} className={BOTON}>
-              {ia.lote ? 'Lote en marcha' : mandando ? 'Mandando…' : 'Mandar ahora'}
+          <div className="mt-auto pt-1">
+            <button onClick={onRevisar} disabled={revisando || auto.corriendo} className={BOTON}>
+              {auto.corriendo ? 'Revisando…' : revisando ? 'Lanzando…' : 'Revisar ahora'}
             </button>
-          )}
-        </div>
-      </div>
-      {verHistorial && <HistorialIAPanel />}
-      {abierto && (
-        <div className="mt-3 flex flex-wrap gap-3 items-end">
-          <label className="block">
-            <span className="text-nf-faint text-[11px]">Tope al mes ($)</span>
-            <input type="number" min="0" step="1" value={tope} onChange={e => setTope(e.target.value)}
-              className={`${CAMPO} mt-1 w-28`} />
-          </label>
-          <div className="flex gap-2">
-            <button disabled={guardando} className={ROJO}
-              onClick={async () => { if (await guardar({ tope: Number(tope) || 0 })) onToast('Tope guardado'); }}>
-              {guardando ? 'Guardando…' : 'Guardar tope'}
-            </button>
-            {ia.configurada && (
-              <button disabled={guardando} className={BOTON} onClick={() => guardar({ activa: !ia.activa })}>
-                {ia.activa ? 'Apagar' : 'Encender'}
-              </button>
-            )}
           </div>
-          {error && <p className="text-red-400 text-xs w-full">{error}</p>}
-          <p className="text-nf-faint text-[11px] w-full">
-            Lo que la revisión exacta no resuelve se le manda a Claude en lotes (la mitad de precio). Elige entre las
-            candidatas de TMDB o dice que ninguna: lo que da con seguridad alta se aplica solo y se puede deshacer; lo
-            demás queda como sugerencia. Probado sobre 35 grupos reales: ningún error con seguridad alta. Con el tope
-            alcanzado no se manda nada hasta el mes siguiente. La clave va en el .env del servidor
-            (TMD_ANTHROPIC_API_KEY), no aquí; al encenderla se comprueba con Anthropic.
-          </p>
-        </div>
-      )}
+        </Paso>
+
+        <Flecha />
+
+        <Paso n={2} titulo="Claude (IA)" apagado={!encendida}
+          sub={ia?.configurada
+            ? 'Lo que el paso 1 no resuelve, en lotes. Con seguridad alta se pone solo; lo dudoso te llega como sugerencia.'
+            : <>Falta la clave: <code className="font-mono">TMD_ANTHROPIC_API_KEY</code> en el .env del servidor.</>}>
+          <div className="flex items-center gap-3">
+            <button role="switch" aria-checked={encendida} disabled={!ia?.configurada || guardando === 'activa'}
+              onClick={() => guardar('activa', { activa: !encendida })}
+              className={`relative h-6 w-11 shrink-0 rounded-full transition-colors disabled:opacity-40 ${encendida ? 'bg-nf-ok' : 'bg-white/20'}`}>
+              <span className={`absolute left-0 top-0.5 h-5 w-5 rounded-full bg-white transition-transform ${encendida ? 'translate-x-[22px]' : 'translate-x-0.5'}`} />
+            </button>
+            <span className="text-sm text-white">
+              {guardando === 'activa' ? 'Comprobando la clave…' : encendida ? 'Encendida' : 'Apagada'}
+            </span>
+            <span className="text-nf-faint text-[11px]">Sonnet 5.5</span>
+          </div>
+          {ia && ia.configurada && !encendida && (
+            <p className="text-nf-dim text-xs">
+              Apagada: lo que el paso 1 no resuelve pasa directamente al paso 3.{' '}
+              {ia.pendientes > 0 && <>Al encenderla, Claude mirará los <span className="text-white">{num(ia.pendientes)}</span> grupos
+              pendientes (unos {dolares(ia.pendientes * 0.0033)}).</>}
+            </p>
+          )}
+          {ia && ia.configurada && (<>
+            <div className={`flex flex-wrap gap-x-4 gap-y-1 ${encendida ? '' : 'hidden'}`}>
+              <Cifra valor={pasos?.ia.aplicadas ?? 0} texto="corregidos solos" tono="ok" />
+              <Cifra valor={pasos?.ia.sugeridas ?? 0} texto="sugerencias" />
+              <Cifra valor={pasos?.ia.ninguna ?? 0} texto="sin ficha" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2 text-xs text-nf-dim">
+                <span className="tabular-nums text-white">{dolares(ia.gasto_mes)}</span>
+                <span>de</span>
+                <input type="number" min="0" step="1" value={tope} aria-label="Tope de gasto al mes en dólares"
+                  onChange={e => setTope(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter' && topeCambiado) guardar('tope', { tope: Number(tope) || 0 }); }}
+                  className="w-16 rounded-md border border-white/10 bg-black/30 px-2 py-0.5 text-right text-white tabular-nums outline-none focus:border-white/30" />
+                <span>$ este mes</span>
+                {topeCambiado && (
+                  <button onClick={() => guardar('tope', { tope: Number(tope) || 0 })} disabled={guardando === 'tope'}
+                    className="rounded-md bg-white px-2 py-0.5 text-[11px] font-semibold text-black disabled:opacity-40">
+                    {guardando === 'tope' ? '…' : 'Guardar'}
+                  </button>
+                )}
+              </div>
+              <BarraGasto gasto={ia.gasto_mes} tope={ia.tope} />
+              {alTope && <p className="text-nf-red text-[11px] mt-1">Tope del mes alcanzado: no se manda nada hasta el mes que viene (o súbelo).</p>}
+            </div>
+            {encendida && (
+              <p className="text-nf-faint text-[11px]">
+                {ia.lote ? 'Lote en marcha en Claude (suele tardar menos de una hora)'
+                  : `${num(ia.pendientes)} grupos esperando a Claude`}
+              </p>
+            )}
+            {ia.error && <p className="text-red-400 text-[11px]">{ia.error}</p>}
+            {error && <p className="text-red-400 text-[11px]">{error}</p>}
+            <div className="mt-auto flex flex-wrap gap-2 pt-1">
+              {encendida && (
+                <button onClick={mandar} disabled={mandando || !!ia.lote || alTope} className={BOTON}>
+                  {ia.lote ? 'Lote en marcha' : mandando ? 'Mandando…' : 'Mandar ahora'}
+                </button>
+              )}
+              <button onClick={() => setVerGasto(v => !v)} className={BOTON}>
+                {verGasto ? 'Ocultar gasto' : 'Gasto e historial'}
+              </button>
+            </div>
+          </>)}
+        </Paso>
+
+        <Flecha />
+
+        <Paso n={3} titulo="A mano" sub="Lo que queda. Las sugerencias se aceptan de un toque; lo demás se corrige o se ignora en la lista de abajo.">
+          <Cifra valor={sugeridas} texto="con sugerencia (un toque)" />
+          <Cifra valor={pendientes} texto="grupos en la lista" />
+          {(esperanPaso1 > 0 || esperanClaude > 0) && (
+            <p className="text-nf-faint text-[11px]">
+              De ellos,{' '}
+              {esperanPaso1 > 0 && <>{num(esperanPaso1)} aún no los ha mirado el paso 1</>}
+              {esperanPaso1 > 0 && esperanClaude > 0 && ' y '}
+              {esperanClaude > 0 && <>{num(esperanClaude)} esperan a Claude</>}
+              : no hace falta tocarlos todavía.
+            </p>
+          )}
+          {(pasos?.mano.grupos ?? 0) > 0 && (
+            <p className="text-nf-faint text-[11px]">{num(pasos!.mano.grupos)} sugerencias aceptadas por ti</p>
+          )}
+          <div className="mt-auto flex flex-wrap gap-2 pt-1">
+            {sugeridas > 0 && <button onClick={onVerSugeridas} className={BOTON}>Ver las sugerencias</button>}
+          </div>
+        </Paso>
+      </div>
+
+      {verGasto && <HistorialIAPanel />}
+
+      <div className="mt-4 border-t border-white/10 pt-3">
+        <button onClick={onVerCorregidas} className="text-sm text-nf-dim hover:text-white transition-colors">
+          Ver todo lo que se ha puesto solo (con deshacer) →
+        </button>
+      </div>
     </div>
   );
 }
@@ -482,7 +600,7 @@ function Corregidas({ onToast, onCambio }: { onToast: (m: string) => void; onCam
   return (
     <div className={CARD}>
       <h2 className="text-white text-lg font-semibold mb-1">
-        {cargando && !items.length ? 'Cargando…' : `${total.toLocaleString()} corregidos solos`}
+        {cargando && !items.length ? 'Cargando…' : `${num(total)} corregidos solos`}
       </h2>
       <p className="text-nf-dim text-sm mb-4">
         Lo que la revisión automática puso sin preguntar, porque el título era exactamente el de TMDB y el año o los
@@ -522,7 +640,7 @@ function Corregidas({ onToast, onCambio }: { onToast: (m: string) => void; onCam
       {!cargando && items.length < total && (
         <div className="mt-4 flex justify-center">
           <button onClick={() => cargar(items.length)} className={BOTON}>
-            Cargar más ({(total - items.length).toLocaleString()} más)
+            Cargar más ({num(total - items.length)} más)
           </button>
         </div>
       )}
@@ -705,6 +823,8 @@ export default function AdminRevision({ onToast }: { onToast: (m: string) => voi
   // Cada lista pedida lleva su número: una respuesta atrasada (de otro motivo
   // u otra búsqueda) no pisa a la que se está esperando.
   const peticion = useRef(0);
+  // La lista, para bajar hasta ella desde «Ver las sugerencias».
+  const listaRef = useRef<HTMLDivElement>(null);
 
   const cargarResumen = useCallback(async () => {
     try {
@@ -828,37 +948,33 @@ export default function AdminRevision({ onToast }: { onToast: (m: string) => voi
   const conFicha = CON_FICHA.includes(motivo);
 
   const auto = resumen.auto;
-  const aplicadas = auto?.cuentas?.aplicada;
-  const sugeridas = auto?.cuentas?.sugerida;
+  const pendientes = resumen.motivos.reduce((n, m) => n + m.grupos, 0);
+  const conSugerencia = resumen.motivos.reduce((n, m) => n + (m.sugeridas ?? 0), 0);
 
   return (
     <div className="space-y-6">
-      <div className={CARD}>
-        <div className="flex flex-wrap items-center justify-between gap-4">
-          <div className="min-w-0">
-            <h2 className="text-white text-base font-semibold">Revisión automática</h2>
-            <p className="text-nf-dim text-sm mt-0.5">
-              {auto?.corriendo
-                ? `Revisando… ${auto.mirados.toLocaleString()} de ${auto.por_mirar.toLocaleString()} grupos`
-                : `${(aplicadas?.grupos ?? 0).toLocaleString()} grupos corregidos solos (${archivosTexto(aplicadas?.archivos ?? 0)})`
-                  + ` · ${(sugeridas?.grupos ?? 0).toLocaleString()} con sugerencia`}
-            </p>
-            <p className="text-nf-faint text-[11px] mt-1">
-              Lo que coincide exactamente con TMDB (título, y año o capítulos) se pone solo; lo dudoso queda
-              aquí con su sugerencia. Va según entra: mira lo nuevo cada 15 minutos.
-            </p>
-          </div>
-          <div className="flex gap-2">
-            <button onClick={() => setVerCorregidas(v => !v)} className={BOTON}>
-              {verCorregidas ? 'Volver a la revisión' : 'Ver lo corregido solo'}
-            </button>
-            <button onClick={revisarAhora} disabled={lanzando || !!auto?.corriendo} className={ROJO}>
-              {auto?.corriendo ? 'Revisando…' : lanzando ? 'Lanzando…' : 'Revisar ahora'}
+      {auto && (
+        verCorregidas ? (
+          <div className={CARD}>
+            <button onClick={() => setVerCorregidas(false)} className="text-sm text-nf-dim hover:text-white transition-colors">
+              ← Volver a la revisión
             </button>
           </div>
-        </div>
-        {auto?.ia && <BloqueIA ia={auto.ia} onCambio={cargarResumen} onToast={onToast} />}
-      </div>
+        ) : (
+          <Flujo auto={auto} pendientes={pendientes} sugeridas={conSugerencia}
+            onCambio={cargarResumen} onToast={onToast} onRevisar={revisarAhora} revisando={lanzando}
+            onVerCorregidas={() => setVerCorregidas(true)}
+            onVerSugeridas={() => {
+              // Al motivo con más sugerencias (casi todas están en «Ficha dudosa»
+              // o «Sin carátula», no en el que esté elegido) y a la lista.
+              const mas = [...resumen.motivos].sort((a, b) => (b.sugeridas ?? 0) - (a.sugeridas ?? 0))[0];
+              if (mas) setMotivo(mas.clave);
+              setSoloSugeridas(true);
+              setVerCorregidas(false);
+              setTimeout(() => listaRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
+            }} />
+        )
+      )}
 
       {verCorregidas ? (
         <Corregidas onToast={onToast} onCambio={() => { cargarResumen(); cargar(0); }} />
@@ -873,12 +989,12 @@ export default function AdminRevision({ onToast }: { onToast: (m: string) => voi
                   ? 'border-nf-red/50 bg-nf-red/10'
                   : 'border-white/10 bg-black/20 hover:bg-white/5'}`}>
                 <p className={`text-sm font-medium ${activo ? 'text-white' : 'text-nf-dim'}`}>{m.titulo}</p>
-                <p className="text-white text-xl font-bold mt-1 tabular-nums">{m.grupos.toLocaleString()}</p>
+                <p className="text-white text-xl font-bold mt-1 tabular-nums">{num(m.grupos)}</p>
                 <p className="text-nf-faint text-[11px]">
                   {m.grupos === 1 ? 'grupo' : 'grupos'} · {archivosTexto(m.archivos)}
                 </p>
                 {m.sugeridas > 0 && (
-                  <p className="text-nf-ok/80 text-[11px]">{m.sugeridas.toLocaleString()} con sugerencia</p>
+                  <p className="text-nf-ok/80 text-[11px]">{num(m.sugeridas)} con sugerencia</p>
                 )}
               </button>
             );
@@ -903,10 +1019,10 @@ export default function AdminRevision({ onToast }: { onToast: (m: string) => voi
         </div>
       </div>
 
-      <div className={CARD}>
+      <div ref={listaRef} className={`${CARD} scroll-mt-24`}>
         <div className="flex items-center justify-between gap-4 mb-4">
           <h2 className="text-white text-lg font-semibold">
-            {cargando ? 'Cargando…' : `${total.toLocaleString()} ${total === 1 ? 'grupo' : 'grupos'}`}
+            {cargando ? 'Cargando…' : `${num(total)} ${total === 1 ? 'grupo' : 'grupos'}`}
           </h2>
           <button onClick={() => { cargarResumen(); cargar(0); }} disabled={cargando}
             className="text-nf-dim hover:text-nf-text text-sm transition-colors disabled:opacity-40">
@@ -996,7 +1112,7 @@ export default function AdminRevision({ onToast }: { onToast: (m: string) => voi
         {!cargando && grupos.length < total && (
           <div className="mt-4 flex justify-center">
             <button onClick={() => cargar(grupos.length)} disabled={cargandoMas} className={BOTON}>
-              {cargandoMas ? 'Cargando…' : `Cargar más (${(total - grupos.length).toLocaleString()} más)`}
+              {cargandoMas ? 'Cargando…' : `Cargar más (${num(total - grupos.length)} más)`}
             </button>
           </div>
         )}
