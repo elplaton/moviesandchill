@@ -43,6 +43,8 @@ interface EstadoIA {
   pendientes: number;
   /** Mientras se prepara un lote (buscar candidatas en TMDB tarda minutos). */
   preparando?: { hechos: number; total: number } | null;
+  /** Mientras Claude busca en TMDB lo que no tiene carátula. */
+  buscando?: { hechos: number; total: number } | null;
 }
 
 /** Lo hecho por cada paso: coincidencia exacta, Claude y lo aceptado a mano. */
@@ -472,6 +474,9 @@ function TiraEstado({ auto, sugeridas, enLista, onCambio, onToast, onRevisar, la
                 </button>
               ))}
           </div>
+          {ia.buscando && (
+            <p className="text-xs text-nf-faint">Buscando carátulas en TMDB, {num(ia.buscando.hechos)} de {num(ia.buscando.total)}</p>
+          )}
           {alTope && <p className="text-xs text-nf-red">Tope del mes alcanzado: Claude no recibe nada hasta el mes que viene.</p>}
           {!encendida && ia.pendientes > 0 && (
             <p className="text-xs text-nf-faint">Apagado: {num(ia.pendientes)} grupos que podría mirar pasan directamente a ti.</p>
@@ -879,7 +884,10 @@ function GastoClaude({ ia }: { ia: EstadoIA | null }) {
             <tbody>
               {h.lotes.map(l => (
                 <tr key={l.lote} className="border-t border-nf-line text-right text-nf-dim">
-                  <td className="py-2 text-left">{fecha(l.creado)}</td>
+                  <td className="py-2 text-left">
+                    {fecha(l.creado)}
+                    {l.lote.startsWith('busqueda-') && <span className="ml-2 text-xs text-nf-faint">búsqueda de carátulas</span>}
+                  </td>
                   <td className="text-white">{num(l.grupos)}</td>
                   {l.terminado ? (<>
                     <td className="text-nf-ok">{num(l.aplicadas ?? 0)}</td>
@@ -929,7 +937,7 @@ export default function AdminRevision({ onToast }: { onToast: (m: string) => voi
   // pocos segundos; con un lote en Claude, cada medio minuto (tarda hasta una
   // hora). Al acabar la pasada, también la lista.
   const corriendo = !!resumen?.auto?.corriendo;
-  const preparando = !!resumen?.auto?.ia?.preparando;
+  const preparando = !!resumen?.auto?.ia?.preparando || !!resumen?.auto?.ia?.buscando;
   const enClaude = !!resumen?.auto?.ia?.lote;
   useEffect(() => {
     const cada = corriendo || preparando ? 4000 : enClaude ? 30000 : 0;

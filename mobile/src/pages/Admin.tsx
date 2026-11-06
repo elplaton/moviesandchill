@@ -426,6 +426,7 @@ interface MotivoRevision { clave: string; titulo: string; descripcion: string; g
 // (TMD_ANTHROPIC_API_KEY): aquí solo llega si está puesta.
 interface EstadoIA {
   preparando?: { hechos: number; total: number } | null;
+  buscando?: { hechos: number; total: number } | null;
   activa: boolean; configurada: boolean; error: string | null; tope: number; gasto_mes: number;
   lote: string | null; pendientes: number;
   ultimo: { aplicadas: number; sugeridas: number; ninguna: number; fallos: number; dolares: number } | null;
@@ -669,7 +670,7 @@ function HistorialIAMovil() {
       {h.lotes.map(l => (
         <div key={l.lote} className="py-1.5 border-b border-white/5">
           <div className="flex justify-between text-[13px]">
-            <span className="text-nf-text2">{fechaIA(l.creado)} · {num(l.grupos)} grupos</span>
+            <span className="text-nf-text2">{fechaIA(l.creado)} · {num(l.grupos)} grupos{l.lote.startsWith('busqueda-') ? ' · carátulas' : ''}</span>
             <span className="tabular-nums">{l.dolares != null ? dolar(l.dolares) : 'en marcha…'}</span>
           </div>
           {l.terminado && (
@@ -845,6 +846,7 @@ function TiraMovil({ auto, sugeridas, enLista, onCambio, onRevisar, lanzando, on
           <div className="mt-2 h-1 w-full overflow-hidden rounded-full bg-white/10">
             <div className={`h-full ${pct >= 1 ? 'bg-nf-red' : pct >= 0.8 ? 'bg-nf-warn' : 'bg-white/60'}`} style={{ width: `${pct * 100}%` }} />
           </div>
+          {ia.buscando && <p className="mt-1.5 text-[11px] text-nf-text3">Buscando carátulas en TMDB, {num(ia.buscando.hechos)} de {num(ia.buscando.total)}</p>}
           {alTope && <p className="mt-1.5 text-[11px] text-nf-red">Tope del mes alcanzado: Claude no recibe nada hasta el mes que viene.</p>}
           {!encendida && ia.pendientes > 0 && <p className="mt-1.5 text-[11px] text-nf-text3">Apagado: {num(ia.pendientes)} grupos que podría mirar pasan directamente a ti.</p>}
           {encendida && (ia.preparando
@@ -979,7 +981,7 @@ function Revision() {
   useEffect(() => { cargarResumen(); }, []);
 
   const corriendo = !!resumen?.auto?.corriendo;
-  const preparando = !!resumen?.auto?.ia?.preparando;
+  const preparando = !!resumen?.auto?.ia?.preparando || !!resumen?.auto?.ia?.buscando;
   const enClaude = !!resumen?.auto?.ia?.lote;
   useEffect(() => {
     const cada = corriendo || preparando ? 4000 : enClaude ? 30000 : 0;

@@ -177,7 +177,11 @@ async def revision_ia_mandar(user: Annotated[str, Depends(get_current_admin)]):
     if not api_key:
         raise HTTPException(status_code=409, detail="TMDB está desactivado")
     if not revision_ia._cerrojo_mandar.locked():
-        spawn(revision_ia.mandar(api_key), "revision_ia_mandar")
+        async def todo():
+            await revision_ia.mandar(api_key)
+            # Y lo de «Sin carátula», que Claude busca en TMDB el mismo.
+            await revision_ia.investigar_pendientes(api_key)
+        spawn(todo(), "revision_ia_mandar")
     return {"ok": True}
 
 

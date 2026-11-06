@@ -402,6 +402,8 @@ async def de_fondo(api_key: str) -> None:
         try:
             if await revision_ia.recoger():
                 await revision_ia.mandar(api_key)
+            # Lo de «Sin carátula» lo busca Claude en TMDB (no va en lote).
+            await revision_ia.investigar_pendientes(api_key)
         except Exception as e:
             logger.error("Revision con IA: no se ha podido recoger el lote: %s", e)
         ahora = time.time()

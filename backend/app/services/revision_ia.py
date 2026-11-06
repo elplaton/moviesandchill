@@ -140,6 +140,7 @@ async def estado() -> dict:
                                                  WHERE estado IN ('sugerida', 'sin_candidato') AND ia IS NULL""")
     return {"modelo": MODELO, "activa": a["activa"], "configurada": bool(a["clave"]), "error": a["error"],
             "preparando": dict(_preparando) if _preparando["activo"] else None,
+            "buscando": dict(_investigando) if _investigando["activo"] else None,
             "tope": a["tope"],
             "gasto_mes": round(a["gasto_mes"], 4), "lote": a["lote"] or None, "pendientes": pendientes,
             "ultimo": a["ultimo"]}
@@ -324,8 +325,11 @@ async def _mandar(api_key_tmdb: str) -> dict:
 
     import anthropic
     # Ya no estan en la lista, o no dicen de que serie son: fuera.
+    # Lo de «Sin carátula» no va al lote: lo busca Claude en TMDB el mismo
+    # (`investigar_pendientes`), porque las candidatas fijas no la encuentran.
     elegibles = [(f, grupos[f["clave"]]) for f in filas
-                 if f["clave"] in grupos and not grupos[f["clave"]].get("sin_nombre")][:cuantos]
+                 if f["clave"] in grupos and not grupos[f["clave"]].get("sin_nombre")
+                 and grupos[f["clave"]]["motivo"] != "sin_caratula"][:cuantos]
     sem = asyncio.Semaphore(5)
     _preparando.update(activo=True, hechos=0, total=len(elegibles))
 
@@ -455,16 +459,28 @@ async def recoger() -> dict | None:
 
 
 async def _aplicar(id_: int, respuesta: dict) -> str:
-    """Hace lo que toque con la respuesta de un grupo."""
+    """Hace lo que toque con la respuesta de un grupo del lote."""
+    from app.database.connection import get_pool
+
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        f = await conn.fetchrow("SELECT clave, candidatas FROM revision_auto WHERE id = $1", id_)
+    cands = json.loads(f["candidatas"]) if isinstance(f["candidatas"], str) else (f["candidatas"] or [])
+    return await aplicar_eleccion(id_, f["clave"], respuesta, cands, MODELO)
+
+
+async def aplicar_eleccion(id_: int, clave: str, respuesta: dict, cands: list[dict], marca: str) -> str:
+    """La respuesta de Claude, aplicada: solo vale una ficha que este entre
+    `cands` (las que se le dieron o las que salieron en sus busquedas). Alta,
+    con caratula y, en una serie, con todos los capitulos -> se aplica; si no,
+    sugerencia; «ninguna» -> se queda a mano. `marca` va en `ia`."""
     from app.database.connection import get_pool
     from app.routers.peticiones_router import _api_key
     from app.services import revision
     from app.services.revision_auto import _ficha, tipo_y_episodios, titulo_buscable
 
     pool = get_pool()
-    async with pool.acquire() as conn:
-        f = await conn.fetchrow("SELECT clave, candidatas FROM revision_auto WHERE id = $1", id_)
-    cands = json.loads(f["candidatas"]) if isinstance(f["candidatas"], str) else (f["candidatas"] or [])
+    f = {"clave": clave}
     eleccion, conf, motivo = respuesta["eleccion"], respuesta["confianza"], respuesta["motivo"][:300]
     elegida = next((c for c in cands if clave_de(c) == eleccion), None)
 
@@ -475,12 +491,17 @@ async def _aplicar(id_: int, respuesta: dict) -> str:
                                          ia = $6, ia_lote = NULL, creado = NOW()
                                    WHERE id = $1""",
                                id_, estado, porque, json.dumps(sugerencia) if sugerencia else None,
-                               json.dumps(antes) if antes else None, MODELO)
+                               json.dumps(antes) if antes else None, marca)
 
+    g = await revision.grupo(f["clave"])
+    actual = (g or {}).get("actual")
+    if (elegida is not None and actual and clave_de(actual) == eleccion and not elegida.get("poster")):
+        # Se queda con la misma ficha sin caratula que ya tenia (no ha
+        # encontrado otra): sugerirla no cambia nada. Queda a mano.
+        elegida = None
     if elegida is None:
         await marcar("sin_candidato", f"Claude: ninguna encaja — {motivo}", None)
         return "ninguna"
-    g = await revision.grupo(f["clave"])
     if g is None:
         await marcar("sin_candidato", "el grupo ya no está en la lista", None)
         return "fallos"
@@ -526,3 +547,221 @@ async def historial(limite: int = 30) -> dict:
                    "dolares": float(f["dolares"])} for f in meses],
         "total": float(total or 0),
     }
+
+
+
+# --- Buscar en TMDB con Claude (lo que no tiene caratula) ---------------------
+#
+# En «Sin carátula» la ficha que hay no tiene imagen en TMDB, y casi siempre es
+# que se emparejo con otra entrada (un especial, una «Collection», la de otro
+# pais) o con el titulo mal escrito. Elegir entre unas candidatas fijas no
+# basta: Claude recibe una herramienta para buscar en TMDB el mismo, con las
+# consultas que se le ocurran (el original, sin subtitulo, como serie...), hasta
+# BUSQUEDAS_MAX por grupo. Solo puede quedarse con una ficha que haya salido en
+# sus busquedas (lo comprueba el servidor, `aplicar_eleccion`), y se aplica sola
+# solo con seguridad alta y caratula. No va en lote: buscar varias veces es una
+# conversacion de ida y vuelta, y la Batch API es de una respuesta. Cuenta para
+# el mismo tope del mes y sale en el historial como «Búsqueda».
+
+BUSQUEDAS_MAX = 6
+# Medido sobre 4 grupos reales (Gomorrah, FoQ, The Punisher, Batallas Navales):
+# entre 0,45 y 1,1 centimos por grupo. Con el doble de margen.
+COSTE_BUSQUEDA_ESTIMADO = 0.02
+MARCA_BUSQUEDA = MODELO + "+tmdb"
+_investigando: dict = {"activo": False, "hechos": 0, "total": 0}
+_cerrojo_investigar = asyncio.Lock()
+
+SISTEMA_BUSCAR = """Eres el revisor del catálogo de una app de películas y series. Este grupo de archivos tiene puesta una ficha de TMDB que no tiene carátula, y casi siempre es porque se emparejó con la entrada equivocada: un especial, una «Collection», la versión de otro país, o el título mal escrito. Tu trabajo es encontrar en TMDB la ficha correcta de ese título, que normalmente sí tiene carátula.
+
+Tienes la herramienta buscar_tmdb. Úsala con las consultas que creas útiles: el título que dice el canal, el original, sin subtítulos o sin «Temporada N», con otro año, como serie o como película. Haz como mucho 6 búsquedas; para cuando la encuentres.
+
+Reglas:
+1. Tiene que ser exactamente ese título, no uno parecido: una secuela, un spin-off, un especial o un documental NO valen.
+2. El tipo importa: si los archivos son capítulos (S01E02, 1x03, numerados) es una serie.
+3. El año desempata remakes y homónimos (en series vale una que empezó ese año o antes).
+4. Solo puedes elegir una ficha que haya salido en tus búsquedas, por su clave ("movie:123" o "tv:456"). Si ninguna es el título, contesta "ninguna".
+5. Seguridad "alta" solo si apostarías a que es esa sin mirar nada más; se aplicará sin que nadie lo revise. "media" o "baja" si hay dudas.
+6. motivo: una frase corta en español con la razón.
+
+Cuando termines, contesta solo con el JSON: {"eleccion": clave o "ninguna", "confianza": "alta"|"media"|"baja", "motivo": "..."}."""
+
+HERRAMIENTA_TMDB = {
+    "name": "buscar_tmdb",
+    "description": ("Busca en TMDB (en español de España) y devuelve hasta 8 resultados con su clave, título, título "
+                    "original, año, tipo, votos, si tiene carátula y el principio de la sinopsis."),
+    "strict": True,
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "consulta": {"type": "string", "description": "Lo que se busca: un título."},
+            "tipo": {"type": "string", "enum": ["movie", "tv", "cualquiera"],
+                     "description": "movie para películas, tv para series, cualquiera para las dos."},
+            # Sin «ñ»: los nombres de los campos de una herramienta solo admiten
+            # letras ASCII, cifras, «_», «.» y «-» (400 si no).
+            "anio": {"type": ["integer", "null"], "description": "Año de estreno, o null para no filtrar."},
+        },
+        "required": ["consulta", "tipo", "anio"],
+        "additionalProperties": False,
+    },
+}
+
+ESQUEMA_FINAL = {
+    "type": "object",
+    "properties": {
+        "eleccion": {"type": "string"},
+        "confianza": {"type": "string", "enum": ["alta", "media", "baja"]},
+        "motivo": {"type": "string"},
+    },
+    "required": ["eleccion", "confianza", "motivo"],
+    "additionalProperties": False,
+}
+
+
+async def buscar_tmdb(api_key_tmdb: str, consulta: str, tipo: str, año: int | None) -> list[dict]:
+    """Lo que hace la herramienta: TMDB tal cual, hasta 8 resultados."""
+    from app.services.tmdb import _get, _to_result
+
+    tipos = ["movie", "tv"] if tipo == "cualquiera" else [tipo]
+    out: list[dict] = []
+    for t in tipos:
+        extra = {("year" if t == "movie" else "first_air_date_year"): año} if año else {}
+        d = await _get(f"/search/{t}", {"api_key": api_key_tmdb, "query": consulta[:200], "language": "es-ES",
+                                         "page": 1, **extra})
+        for r in ((d or {}).get("results") or [])[:8]:
+            x = _to_result(r, t)
+            if x:
+                out.append(x)
+    out.sort(key=lambda x: -(x.get("vote_count") or 0))
+    return out[:8]
+
+
+def _para_claude(resultados: list[dict]) -> str:
+    return json.dumps([{"clave": clave_de(c), "titulo": c["title"], "original": c.get("original_title"),
+                        "año": c.get("year"), "tipo": "serie" if c["media_type"] == "tv" else "película",
+                        "votos": c.get("vote_count"), "caratula": bool(c.get("poster")),
+                        "sinopsis": (c.get("overview") or "")[:160]} for c in resultados], ensure_ascii=False)
+
+
+async def investigar(g: dict, api_key_tmdb: str, clave_api: str) -> tuple[dict | None, list[dict], float]:
+    """(respuesta de Claude o None, fichas vistas en sus busquedas, coste).
+    El bucle de herramientas a mano: hace falta el tope de busquedas, saber que
+    fichas han salido y el coste de cada vuelta."""
+    cliente = _cliente(clave_api)
+    actual = g.get("actual")
+    visible = json.loads(mensaje(g, []))
+    visible.pop("candidatas", None)
+    visible["ficha_actual_sin_caratula"] = (
+        {"clave": clave_de(actual), "titulo": actual.get("title"), "año": actual.get("year"),
+         "tipo": "serie" if actual.get("media_type") in ("tv", "series") else "película"} if actual else None)
+    mensajes = [{"role": "user", "content": json.dumps(visible, ensure_ascii=False, indent=1)}]
+    vistas: dict[str, dict] = {}
+    coste, busquedas = 0.0, 0
+    for _ in range(BUSQUEDAS_MAX + 2):
+        r = await cliente.messages.create(
+            model=MODELO, max_tokens=4000,
+            system=[{"type": "text", "text": SISTEMA_BUSCAR, "cache_control": {"type": "ephemeral"}}],
+            tools=[HERRAMIENTA_TMDB],
+            output_config={"effort": "low", "format": {"type": "json_schema", "schema": ESQUEMA_FINAL}},
+            messages=mensajes,
+        )
+        coste += _coste(r.usage) / DESCUENTO_LOTE    # a precio normal: no va en lote
+        if r.stop_reason != "tool_use":
+            if r.stop_reason != "end_turn":
+                return None, list(vistas.values()), coste
+            texto = next((b.text for b in r.content if b.type == "text"), "")
+            try:
+                return json.loads(texto), list(vistas.values()), coste
+            except ValueError:
+                return None, list(vistas.values()), coste
+        mensajes.append({"role": "assistant", "content": r.content})
+        resultados = []
+        for b in r.content:
+            if b.type != "tool_use":
+                continue
+            busquedas += 1
+            if busquedas > BUSQUEDAS_MAX:
+                resultados.append({"type": "tool_result", "tool_use_id": b.id, "is_error": True,
+                                   "content": "Límite de búsquedas alcanzado: contesta ya con lo que has visto."})
+                continue
+            try:
+                encontrados = await buscar_tmdb(api_key_tmdb, b.input["consulta"], b.input["tipo"], b.input.get("anio"))
+            except Exception as e:
+                resultados.append({"type": "tool_result", "tool_use_id": b.id, "is_error": True,
+                                   "content": f"TMDB no ha contestado: {e}"})
+                continue
+            for c in encontrados:
+                vistas[clave_de(c)] = c
+            resultados.append({"type": "tool_result", "tool_use_id": b.id, "content": _para_claude(encontrados)})
+        mensajes.append({"role": "user", "content": resultados})
+    return None, list(vistas.values()), coste
+
+
+async def investigar_pendientes(api_key_tmdb: str) -> dict | None:
+    """Los grupos de «Sin carátula» que nadie ha buscado aun, de tres en tres y
+    sin pasarse del tope. Uno a la vez (cerrojo)."""
+    if _cerrojo_investigar.locked():
+        return None
+    async with _cerrojo_investigar:
+        try:
+            return await _investigar_pendientes(api_key_tmdb)
+        finally:
+            _investigando.update(activo=False, hechos=0, total=0)
+
+
+async def _investigar_pendientes(api_key_tmdb: str) -> dict | None:
+    from app.database.connection import get_pool
+    from app.services import revision
+
+    a = await _ajustes()
+    if not a["activa"] or not a["clave"] or not api_key_tmdb:
+        return None
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        filas = await conn.fetch("""SELECT id, clave FROM revision_auto
+                                     WHERE motivo = 'sin_caratula' AND estado <> 'aplicada'
+                                       AND estado NOT IN ('deshecha', 'descartada')
+                                       AND (ia IS NULL OR ia = $1) AND ia_lote IS NULL
+                                     ORDER BY archivos DESC""", MODELO)
+    grupos = {g["clave"]: g for gs in (await revision.grupos()).values() for g in gs}
+    margen = a["tope"] - a["gasto_mes"]
+    elegibles = [(f["id"], grupos[f["clave"]]) for f in filas if f["clave"] in grupos][:max(0, int(margen / COSTE_BUSQUEDA_ESTIMADO))]
+    if not elegibles:
+        return None
+    _investigando.update(activo=True, hechos=0, total=len(elegibles))
+    nombre = f"busqueda-{int(time.time())}"
+    async with pool.acquire() as conn:
+        await conn.execute("INSERT INTO revision_ia_lotes (lote, modelo, grupos) VALUES ($1, $2, $3)",
+                           nombre, MARCA_BUSQUEDA, len(elegibles))
+    resumen = {"aplicadas": 0, "sugeridas": 0, "ninguna": 0, "fallos": 0}
+    gasto = 0.0
+    sem = asyncio.Semaphore(3)
+
+    async def uno(id_, g):
+        nonlocal gasto
+        async with sem:
+            try:
+                respuesta, vistas, coste = await investigar(g, api_key_tmdb, a["clave"])
+                gasto += coste
+                if respuesta is None:
+                    resumen["fallos"] += 1
+                else:
+                    resumen[await aplicar_eleccion(id_, g["clave"], respuesta, vistas, MARCA_BUSQUEDA)] += 1
+            except Exception as e:
+                logger.warning("Revision con IA: la busqueda de «%s» fallo: %s", g["titulo"], e)
+                resumen["fallos"] += 1
+            _investigando["hechos"] += 1
+
+    await asyncio.gather(*(uno(i, g) for i, g in elegibles))
+    await _sumar_gasto(gasto)
+    async with pool.acquire() as conn:
+        await conn.execute("""UPDATE revision_ia_lotes SET terminado = NOW(), aplicadas = $2, sugeridas = $3,
+                                     ninguna = $4, fallos = $5, dolares = $6 WHERE lote = $1""",
+                           nombre, resumen["aplicadas"], resumen["sugeridas"], resumen["ninguna"],
+                           resumen["fallos"], round(gasto, 4))
+    revision.olvidar()
+    try:
+        await avisar_gasto()
+    except Exception:
+        pass
+    logger.info("Revision con IA: busqueda de caratulas: %s, %.2f $", resumen, gasto)
+    return resumen
