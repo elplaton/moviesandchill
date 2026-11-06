@@ -191,3 +191,21 @@ async def revision_ia_historial(user: Annotated[str, Depends(get_current_admin)]
     from app.services import revision_ia
 
     return await revision_ia.historial()
+
+
+class Lote(BaseModel):
+    lote: str
+
+
+@router.post("/admin/revision/ia/adoptar")
+async def revision_ia_adoptar(req: Lote, user: Annotated[str, Depends(get_current_admin)]):
+    """Recoge un lote que llego a Anthropic sin apuntarse aqui (ver
+    revision_ia.adoptar). Lo aplica en el momento."""
+    from app.services import revision_ia
+
+    try:
+        r = await revision_ia.adoptar(req.lote.strip())
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    resumen = await revision_ia.recoger()
+    return {"ok": True, **r, "resumen": resumen}

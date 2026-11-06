@@ -402,8 +402,14 @@ async def recoger() -> dict | None:
     pool = get_pool()
     resumen = {"aplicadas": 0, "sugeridas": 0, "ninguna": 0, "fallos": 0, "dolares": 0.0}
     gasto, entrada, salida = 0.0, 0, 0
+    # Solo los grupos apuntados a este lote: uno adoptado puede traer alguno
+    # que ya no esperaba a Claude, y ese no se toca.
+    async with pool.acquire() as conn:
+        mios = {f["id"] for f in await conn.fetch("SELECT id FROM revision_auto WHERE ia_lote = $1", lote.id)}
     async for r in await cliente.messages.batches.results(lote.id):
         id_ = int(r.custom_id[1:])
+        if id_ not in mios:
+            continue
         if r.result.type != "succeeded":
             resumen["fallos"] += 1
             logger.warning("Revision con IA: el grupo %d no ha salido (%s): %s", id_, r.result.type,
@@ -466,7 +472,54 @@ async def _aplicar(id_: int, respuesta: dict) -> str:
     async with pool.acquire() as conn:
         f = await conn.fetchrow("SELECT clave, candidatas FROM revision_auto WHERE id = $1", id_)
     cands = json.loads(f["candidatas"]) if isinstance(f["candidatas"], str) else (f["candidatas"] or [])
+    if not cands and respuesta.get("eleccion", "ninguna") != "ninguna":
+        # Un lote adoptado (`adoptar`) no tiene las candidatas apuntadas: la
+        # elegida se pide a TMDB, con su caratula. Las mismas comprobaciones.
+        from app.routers.peticiones_router import _api_key
+        from app.services.tmdb import get_details
+
+        tipo, _, tid = respuesta["eleccion"].partition(":")
+        if tid.isdigit():
+            det = await get_details(_api_key(), int(tid), "tv" if tipo == "tv" else "movie")
+            cands = [det] if det else []
     return await aplicar_eleccion(id_, f["clave"], respuesta, cands, MODELO)
+
+
+async def adoptar(lote_id: str) -> dict:
+    """Hace suyo un lote que llego a Anthropic sin apuntarse aqui (pasaba
+    cuando «Mandar» esperaba la respuesta y el navegador cortaba la peticion:
+    el lote se creaba y se cobraba, pero nadie lo recogia). Solo uno ya
+    terminado y cuyos grupos (r<id>) sean casi todos grupos que siguen
+    esperando a Claude: si no, no es de aqui y se rechaza. Lo recoge `recoger()`."""
+    from app.database.connection import get_pool, set_app_settings
+
+    a = await _ajustes()
+    if not a["clave"]:
+        raise ValueError("Falta TMD_ANTHROPIC_API_KEY en el servidor")
+    if a["lote"]:
+        raise ValueError("Ya hay un lote en marcha: espera a que se recoja")
+    cliente = _cliente(a["clave"])
+    lote = await cliente.messages.batches.retrieve(lote_id)
+    if lote.processing_status != "ended":
+        raise ValueError("Ese lote aún no ha terminado")
+    ids = []
+    async for r in await cliente.messages.batches.results(lote_id):
+        if r.custom_id.startswith("r") and r.custom_id[1:].isdigit():
+            ids.append(int(r.custom_id[1:]))
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        validos = [f["id"] for f in await conn.fetch("""
+            SELECT id FROM revision_auto
+             WHERE id = ANY($1::int[]) AND estado IN ('sugerida', 'sin_candidato') AND ia IS NULL AND ia_lote IS NULL
+        """, ids)]
+        if not ids or len(validos) < 0.9 * len(ids):
+            raise ValueError(f"Ese lote no parece de aquí: {len(validos)} de {len(ids)} grupos esperan a Claude")
+        await conn.execute("UPDATE revision_auto SET ia_lote = $2 WHERE id = ANY($1::int[])", validos, lote_id)
+        await conn.execute("INSERT INTO revision_ia_lotes (lote, modelo, grupos) VALUES ($1, $2, $3) "
+                           "ON CONFLICT (lote) DO NOTHING", lote_id, MODELO, len(validos))
+    await set_app_settings({"revision_ia_lote": lote_id})
+    logger.info("Revision con IA: lote %s adoptado (%d de %d grupos)", lote_id, len(validos), len(ids))
+    return {"grupos": len(validos), "en_lote": len(ids)}
 
 
 async def aplicar_eleccion(id_: int, clave: str, respuesta: dict, cands: list[dict], marca: str) -> str:
