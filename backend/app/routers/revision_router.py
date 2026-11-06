@@ -165,14 +165,20 @@ async def revision_ia_guardar(req: AjustesIA, user: Annotated[str, Depends(get_c
 
 @router.post("/admin/revision/ia/mandar")
 async def revision_ia_mandar(user: Annotated[str, Depends(get_current_admin)]):
-    """Manda ya un lote con lo pendiente (si no hay otro en marcha)."""
+    """Prepara y manda un lote con lo pendiente (si no hay otro en marcha ni
+    preparandose). Contesta al momento: preparar el lote tarda minutos, y
+    esperandolo el navegador cortaba la peticion y el lote se quedaba sin
+    apuntar. El progreso sale en el estado (`preparando`)."""
     from app.routers.peticiones_router import _api_key
     from app.services import revision_ia
+    from app.tasks import spawn
 
     api_key = _api_key()
     if not api_key:
         raise HTTPException(status_code=409, detail="TMDB está desactivado")
-    return await revision_ia.mandar(api_key)
+    if not revision_ia._cerrojo_mandar.locked():
+        spawn(revision_ia.mandar(api_key), "revision_ia_mandar")
+    return {"ok": True}
 
 
 @router.get("/admin/revision/ia/historial")

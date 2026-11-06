@@ -145,6 +145,25 @@ comprueba("el mensaje lleva cuantos archivos son y como mucho 5 nombres", (135, 
           (m["n_archivos"], 0 < len(m["archivos"]) <= 5))
 comprueba("y la clave de cada candidata", ["tv:73223", "movie:1"], [c["clave"] for c in m["candidatas"]])
 
+print("\nUn solo lote a la vez")
+import asyncio as _asyncio
+_llamadas = []
+async def _falso_mandar(_k):
+    _llamadas.append(1)
+    await _asyncio.sleep(0.1)
+    return {}
+async def _falso_estado():
+    return {}
+_orig = (revision_ia._mandar, revision_ia.estado)
+revision_ia._mandar, revision_ia.estado = _falso_mandar, _falso_estado
+async def _doble():
+    await _asyncio.gather(revision_ia.mandar("k"), revision_ia.mandar("k"), revision_ia.mandar("k"))
+_asyncio.run(_doble())
+comprueba("tres «Mandar» a la vez preparan un solo lote", 1, len(_llamadas))
+_asyncio.run(revision_ia.mandar("k"))
+comprueba("y acabado ese, el siguiente si se prepara", 2, len(_llamadas))
+revision_ia._mandar, revision_ia.estado = _orig
+
 print()
 print(f"{len(fallos)} fallidas" if fallos else "todas correctas")
 sys.exit(1 if fallos else 0)

@@ -41,6 +41,8 @@ interface EstadoIA {
   gasto_mes: number;
   lote: string | null;
   pendientes: number;
+  /** Mientras se prepara un lote (buscar candidatas en TMDB tarda minutos). */
+  preparando?: { hechos: number; total: number } | null;
 }
 
 /** Lo hecho por cada paso: coincidencia exacta, Claude y lo aceptado a mano. */
@@ -388,7 +390,7 @@ function TiraEstado({ auto, sugeridas, enLista, onCambio, onToast, onRevisar, la
       if (!res.ok) { setError(await motivoDe(res)); return; }
       onCambio();
       if (que === 'tope') onToast('Tope guardado');
-      if (que === 'mandar') onToast('Lote mandado a Claude');
+      if (que === 'mandar') onToast('Preparando el lote para Claude');
     } catch {
       setError('Error de conexión');
     } finally {
@@ -459,8 +461,10 @@ function TiraEstado({ auto, sugeridas, enLista, onCambio, onToast, onRevisar, la
             <span className="h-1 w-24 overflow-hidden rounded-pill bg-white/10" title={`${Math.round(pct * 100)} % del tope`}>
               <span className={`block h-full ${pct >= 1 ? 'bg-nf-red' : pct >= 0.8 ? 'bg-nf-warn' : 'bg-white/60'}`} style={{ width: `${pct * 100}%` }} />
             </span>
-            {encendida && (ia.lote
-              ? <span>Lote en marcha</span>
+            {encendida && (ia.preparando
+              ? <span>Preparando el lote, {num(ia.preparando.hechos)} de {num(ia.preparando.total)}</span>
+              : ia.lote
+              ? <span>Lote en Claude, suele tardar menos de una hora</span>
               : !alTope && ia.pendientes > 0 && (
                 <button onClick={() => pedir('mandar', '/admin/revision/ia/mandar')} disabled={!!guardando}
                   className="text-nf-dim hover:text-white">
@@ -921,14 +925,18 @@ export default function AdminRevision({ onToast }: { onToast: (m: string) => voi
   }, []);
   useEffect(() => { cargarResumen(); }, [cargarResumen]);
 
-  // Con una pasada en marcha se vuelve a mirar el estado cada pocos segundos y,
-  // al acabar, la lista.
+  // Con una pasada o un lote preparándose se vuelve a mirar el estado cada
+  // pocos segundos; con un lote en Claude, cada medio minuto (tarda hasta una
+  // hora). Al acabar la pasada, también la lista.
   const corriendo = !!resumen?.auto?.corriendo;
+  const preparando = !!resumen?.auto?.ia?.preparando;
+  const enClaude = !!resumen?.auto?.ia?.lote;
   useEffect(() => {
-    if (!corriendo) return;
-    const t = setInterval(cargarResumen, 4000);
+    const cada = corriendo || preparando ? 4000 : enClaude ? 30000 : 0;
+    if (!cada) return;
+    const t = setInterval(cargarResumen, cada);
     return () => clearInterval(t);
-  }, [corriendo, cargarResumen]);
+  }, [corriendo, preparando, enClaude, cargarResumen]);
   const estaba = useRef(false);
   useEffect(() => {
     if (estaba.current && !corriendo) setRecarga(n => n + 1);

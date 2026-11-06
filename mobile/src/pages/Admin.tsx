@@ -425,6 +425,7 @@ interface MotivoRevision { clave: string; titulo: string; descripcion: string; g
 // La revisión con IA (services/revision_ia.py). La clave va en el .env del servidor
 // (TMD_ANTHROPIC_API_KEY): aquí solo llega si está puesta.
 interface EstadoIA {
+  preparando?: { hechos: number; total: number } | null;
   activa: boolean; configurada: boolean; error: string | null; tope: number; gasto_mes: number;
   lote: string | null; pendientes: number;
   ultimo: { aplicadas: number; sugeridas: number; ninguna: number; fallos: number; dolares: number } | null;
@@ -846,10 +847,12 @@ function TiraMovil({ auto, sugeridas, enLista, onCambio, onRevisar, lanzando, on
           </div>
           {alTope && <p className="mt-1.5 text-[11px] text-nf-red">Tope del mes alcanzado: Claude no recibe nada hasta el mes que viene.</p>}
           {!encendida && ia.pendientes > 0 && <p className="mt-1.5 text-[11px] text-nf-text3">Apagado: {num(ia.pendientes)} grupos que podría mirar pasan directamente a ti.</p>}
-          {encendida && (ia.lote
-            ? <p className="mt-1.5 text-[11px] text-nf-text3">Lote en marcha</p>
+          {encendida && (ia.preparando
+            ? <p className="mt-1.5 text-[11px] text-nf-text3">Preparando el lote, {num(ia.preparando.hechos)} de {num(ia.preparando.total)}</p>
+            : ia.lote
+            ? <p className="mt-1.5 text-[11px] text-nf-text3">Lote en Claude, suele tardar menos de una hora</p>
             : !alTope && ia.pendientes > 0 && (
-              <button onClick={() => pedir('mandar', '/admin/revision/ia/mandar', undefined, 'Lote mandado a Claude')} disabled={!!haciendo}
+              <button onClick={() => pedir('mandar', '/admin/revision/ia/mandar', undefined, 'Preparando el lote para Claude')} disabled={!!haciendo}
                 className="mt-1.5 text-[12px] text-nf-text2">{haciendo === 'mandar' ? 'Mandando…' : `Mandar los ${num(ia.pendientes)} pendientes`}</button>
             ))}
           {ia.error && <p className="mt-1.5 text-[11px] text-nf-red">{ia.error}</p>}
@@ -976,11 +979,14 @@ function Revision() {
   useEffect(() => { cargarResumen(); }, []);
 
   const corriendo = !!resumen?.auto?.corriendo;
+  const preparando = !!resumen?.auto?.ia?.preparando;
+  const enClaude = !!resumen?.auto?.ia?.lote;
   useEffect(() => {
-    if (!corriendo) return;
-    const t = setInterval(cargarResumen, 4000);
+    const cada = corriendo || preparando ? 4000 : enClaude ? 30000 : 0;
+    if (!cada) return;
+    const t = setInterval(cargarResumen, cada);
     return () => clearInterval(t);
-  }, [corriendo]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [corriendo, preparando, enClaude]); // eslint-disable-line react-hooks/exhaustive-deps
   const estaba = useRef(false);
   useEffect(() => {
     if (estaba.current && !corriendo) setRecarga(n => n + 1);

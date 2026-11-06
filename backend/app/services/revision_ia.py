@@ -33,6 +33,7 @@ Anthropic va en el `.env` (`TMD_ANTHROPIC_API_KEY`), no en el panel: es un
 secreto y no tiene que poder leerse ni cambiarse desde la web. En el panel
 solo estan el interruptor y el tope.
 """
+import asyncio
 import json
 import logging
 import time
@@ -88,6 +89,13 @@ Ejemplos:
 """
 
 
+# Preparar un lote (buscar las candidatas de cada grupo en TMDB) tarda minutos.
+# Un solo lote a la vez: dos preparandose a la vez mandarian los mismos grupos
+# dos veces, y el segundo taparia al primero, cuyos resultados se perderian.
+_preparando: dict = {"activo": False, "hechos": 0, "total": 0}
+_cerrojo_mandar = asyncio.Lock()
+
+
 # --- Ajustes -------------------------------------------------------------------
 
 def _clave_env() -> str:
@@ -131,6 +139,7 @@ async def estado() -> dict:
             pendientes = await conn.fetchval("""SELECT COUNT(*) FROM revision_auto
                                                  WHERE estado IN ('sugerida', 'sin_candidato') AND ia IS NULL""")
     return {"modelo": MODELO, "activa": a["activa"], "configurada": bool(a["clave"]), "error": a["error"],
+            "preparando": dict(_preparando) if _preparando["activo"] else None,
             "tope": a["tope"],
             "gasto_mes": round(a["gasto_mes"], 4), "lote": a["lote"] or None, "pendientes": pendientes,
             "ultimo": a["ultimo"]}
@@ -277,7 +286,19 @@ async def avisar_gasto() -> None:
 
 async def mandar(api_key_tmdb: str) -> dict:
     """Monta y manda un lote con lo pendiente, sin pasarse del tope del mes.
-    No hace nada si esta apagada, sin clave o con un lote ya en marcha."""
+    No hace nada si esta apagada, sin clave, con un lote ya en marcha o con
+    otro preparandose. Tarda minutos (las candidatas de cada grupo se buscan
+    en TMDB): el panel lo lanza en segundo plano y no lo espera."""
+    if _cerrojo_mandar.locked():
+        return await estado()
+    async with _cerrojo_mandar:
+        try:
+            return await _mandar(api_key_tmdb)
+        finally:
+            _preparando.update(activo=False, hechos=0, total=0)
+
+
+async def _mandar(api_key_tmdb: str) -> dict:
     from app.database.connection import get_pool, set_app_settings
     from app.services import revision
 
@@ -301,17 +322,18 @@ async def mandar(api_key_tmdb: str) -> dict:
         for g in lista:
             grupos[g["clave"]] = g
 
-    import asyncio
-
     import anthropic
     # Ya no estan en la lista, o no dicen de que serie son: fuera.
     elegibles = [(f, grupos[f["clave"]]) for f in filas
                  if f["clave"] in grupos and not grupos[f["clave"]].get("sin_nombre")][:cuantos]
     sem = asyncio.Semaphore(5)
+    _preparando.update(activo=True, hechos=0, total=len(elegibles))
 
     async def buscar(g):
         async with sem:
-            return await candidatas_de(g, api_key_tmdb)
+            r = await candidatas_de(g, api_key_tmdb)
+            _preparando["hechos"] += 1
+            return r
 
     todas = await asyncio.gather(*(buscar(g) for _, g in elegibles))
     peticiones, apuntes = [], []
@@ -346,13 +368,18 @@ async def mandar(api_key_tmdb: str) -> dict:
                   if isinstance(e, anthropic.AuthenticationError) else f"No se ha podido mandar el lote: {e}")
         await set_app_settings({"revision_ia_error": motivo[:300]})
         return await estado()
-    async with pool.acquire() as conn:
-        await conn.executemany("UPDATE revision_auto SET candidatas = $2::jsonb, ia_lote = $3 WHERE id = $1",
-                               [(id_, json.dumps(cands), lote.id) for id_, cands, marca in apuntes if not marca])
-    await set_app_settings({"revision_ia_lote": lote.id, "revision_ia_error": ""})
-    async with pool.acquire() as conn:
-        await conn.execute("INSERT INTO revision_ia_lotes (lote, modelo, grupos) VALUES ($1, $2, $3) "
-                           "ON CONFLICT (lote) DO NOTHING", lote.id, MODELO, len(peticiones))
+    # Con el lote ya creado en Anthropic, apuntarlo no puede quedarse a medias:
+    # si algo cancelara esta tarea aqui, el lote se cobraria y sus respuestas
+    # no se recogerian nunca. Primero el id (es lo que permite recogerlo) y
+    # protegido de cancelaciones.
+    async def apuntar():
+        await set_app_settings({"revision_ia_lote": lote.id, "revision_ia_error": ""})
+        async with pool.acquire() as conn:
+            await conn.execute("INSERT INTO revision_ia_lotes (lote, modelo, grupos) VALUES ($1, $2, $3) "
+                               "ON CONFLICT (lote) DO NOTHING", lote.id, MODELO, len(peticiones))
+            await conn.executemany("UPDATE revision_auto SET candidatas = $2::jsonb, ia_lote = $3 WHERE id = $1",
+                                   [(id_, json.dumps(cands), lote.id) for id_, cands, marca in apuntes if not marca])
+    await asyncio.shield(apuntar())
     logger.info("Revision con IA: lote %s con %d grupos", lote.id, len(peticiones))
     return await estado()
 
