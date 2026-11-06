@@ -428,6 +428,7 @@ interface EstadoIA {
   preparando?: { hechos: number; total: number } | null;
   buscando?: { hechos: number; total: number } | null;
   lote_progreso?: { hechos: number; total: number } | null;
+  cola?: { haiku: number; busqueda: number; sonnet: number };
   activa: boolean; configurada: boolean; error: string | null; tope: number; gasto_mes: number;
   lote: string | null; pendientes: number;
   ultimo: { aplicadas: number; sugeridas: number; ninguna: number; fallos: number; dolares: number } | null;
@@ -870,6 +871,13 @@ function TiraMovil({ auto, sugeridas, enLista, onCambio, onRevisar, lanzando, on
           <div className="mt-2 h-1 w-full overflow-hidden rounded-full bg-white/10">
             <div className={`h-full ${pct >= 1 ? 'bg-nf-red' : pct >= 0.8 ? 'bg-nf-warn' : 'bg-white/60'}`} style={{ width: `${pct * 100}%` }} />
           </div>
+          {ia.cola && ia.cola.haiku + ia.cola.busqueda + ia.cola.sonnet > 0 && (
+            <p className="mt-1.5 text-[11px] text-nf-text3">En cola: {[
+              ia.cola.haiku > 0 && `${num(ia.cola.haiku)} para Haiku`,
+              ia.cola.busqueda > 0 && `${num(ia.cola.busqueda)} para buscar`,
+              ia.cola.sonnet > 0 && `${num(ia.cola.sonnet)} para Sonnet`,
+            ].filter(Boolean).join(', ')}</p>
+          )}
           {ia.preparando && <ProgresoMovil texto="Preparando el lote" hechos={ia.preparando.hechos} total={ia.preparando.total} />}
           {ia.lote && !ia.preparando && <ProgresoMovil texto="Lote en Claude (menos de una hora)" hechos={ia.lote_progreso?.hechos} total={ia.lote_progreso?.total} />}
           {ia.buscando && <ProgresoMovil texto="Claude buscando en TMDB" hechos={ia.buscando.hechos} total={ia.buscando.total} />}

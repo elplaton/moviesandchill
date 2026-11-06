@@ -347,11 +347,85 @@ async def _por_mirar() -> list[dict]:
     pendientes = []
     for g in todos:
         h = hechas.get(g["clave"])
-        if h is None or (h["estado"] == "sin_candidato" and h["hace"] > REINTENTO_DIAS * 86400):
+        # «aplicada» y aun en la lista: ha llegado algo nuevo de un grupo ya
+        # arreglado (otra parte, otro capitulo), y se le pone la misma ficha.
+        if (h is None or h["estado"] == "aplicada"
+                or (h["estado"] == "sin_candidato" and h["hace"] > REINTENTO_DIAS * 86400)):
             pendientes.append(g)
     # Los grandes primero: si se para a medias, lo arreglado es lo que mas pesa.
     pendientes.sort(key=lambda g: -len(g["miembros"]))
     return pendientes
+
+
+async def _reaplicar(g: dict, api_key: str) -> str | None:
+    """Algo nuevo de un grupo ya arreglado (su fila dice «aplicada» y vuelve
+    a estar en la lista: otra parte de la pelicula, otro capitulo): se le pone
+    la misma ficha, que ya se verifico, sin gastar nada. En una serie, solo si
+    cada archivo nuevo dice su capitulo; si no, queda como sugerencia con esa
+    ficha. Lo nuevo se suma al `antes` del grupo, asi que su Deshacer lo
+    devuelve todo. None si el grupo no estaba arreglado."""
+    from app.database.connection import get_pool
+    from app.services import revision
+
+    async with get_pool().acquire() as conn:
+        f = await conn.fetchrow("SELECT id, sugerencia, antes FROM revision_auto WHERE clave = $1 AND estado = 'aplicada'",
+                                g["clave"])
+    if not f:
+        return None
+    s = json.loads(f["sugerencia"]) if isinstance(f["sugerencia"], str) else f["sugerencia"]
+    if not s or not s.get("tmdb_id"):
+        return None
+    titulo = titulo_buscable(g["titulo"]) or g["titulo"]
+    serie = s.get("media_type") in ("series", "tv")
+    if serie:
+        titulo = sin_capitulo(titulo) or titulo
+        _, episodios = tipo_y_episodios(g["miembros"], "series", g.get("ficha"), titulo)
+        if episodios is None:
+            async with get_pool().acquire() as conn:
+                await conn.execute("""UPDATE revision_auto SET estado = 'sugerida', creado = NOW(),
+                                             porque = 'llegaron archivos nuevos que no dicen su capítulo' WHERE id = $1""",
+                                   f["id"])
+            return "sugerida"
+    antes = await revision.poner_ficha(g["miembros"], s["tmdb_id"], s["media_type"], api_key, titulo=titulo)
+    viejo = json.loads(f["antes"]) if isinstance(f["antes"], str) else (f["antes"] or [])
+    async with get_pool().acquire() as conn:
+        await conn.execute("UPDATE revision_auto SET antes = $2::jsonb, archivos = archivos + $3 WHERE id = $1",
+                           f["id"], json.dumps(viejo + antes), len(g["miembros"]))
+    revision.quitar(g["clave"])
+    logger.info("Revision automatica: «%s», %d archivos nuevos con la misma ficha (%s/%s)", g["titulo"],
+                len(g["miembros"]), s["media_type"], s["tmdb_id"])
+    return "aplicada"
+
+
+def _ident(clave: str) -> str:
+    """Lo que no cambia de un grupo aunque cambie su clave: tipo y titulo (la
+    clave lleva ademas el motivo y la ficha que tiene, que cambian)."""
+    return "|".join(clave.split("|")[1:3])
+
+
+async def _heredar(g: dict) -> bool:
+    """Si este grupo ya se miro con otra clave (cambio su motivo o su ficha),
+    se queda con lo que se hizo entonces en vez de volver a hacerlo: busquedas,
+    lo que dijo Claude, la sugerencia. Lo aplicado no: si el grupo ha vuelto a
+    salir, es que hay algo nuevo que mirar."""
+    from app.database.connection import get_pool
+
+    async with get_pool().acquire() as conn:
+        f = await conn.fetchrow("""
+            SELECT estado, porque, sugerencia, ia, candidatas, propuesta FROM revision_auto
+             WHERE split_part(clave, '|', 2) || '|' || split_part(clave, '|', 3) = $1 AND clave <> $2
+               AND estado IN ('sugerida', 'sin_candidato') AND ia_lote IS NULL
+             ORDER BY creado DESC LIMIT 1
+        """, _ident(g["clave"]), g["clave"])
+        if not f:
+            return False
+        await conn.execute("""
+            INSERT INTO revision_auto (clave, titulo, motivo, estado, porque, sugerencia, archivos, ia, candidatas, propuesta)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            ON CONFLICT (clave) DO NOTHING
+        """, g["clave"], g["titulo"][:200], g["motivo"], f["estado"], f["porque"], f["sugerencia"],
+            len(g["miembros"]), f["ia"], f["candidatas"], f["propuesta"])
+    return True
 
 
 async def pasada(api_key: str) -> dict:
@@ -369,7 +443,8 @@ async def pasada(api_key: str) -> dict:
         async def uno(g):
             async with sem:
                 try:
-                    r = await mirar_grupo(g, api_key)
+                    r = (await _reaplicar(g, api_key)) or ("heredada" if await _heredar(g)
+                                                           else await mirar_grupo(g, api_key))
                 except Exception as e:
                     logger.warning("Revision automatica: «%s» fallo: %s", g["titulo"], e)
                     r = None
@@ -383,7 +458,6 @@ async def pasada(api_key: str) -> dict:
             await asyncio.gather(*(uno(g) for g in pendientes))
         finally:
             _estado.update(corriendo=False, termino=time.time())
-            revision.olvidar()
             # Para que el panel sepa cuando fue el ultimo repaso tambien tras un
             # reinicio: en memoria se perdia con cada despliegue y decia
             # «esperando al primer repaso» con todo ya revisado.
@@ -413,9 +487,11 @@ async def _huella() -> tuple | None:
     if not pool:
         return None
     async with pool.acquire() as conn:
+        # Sin lo corregido a mano: eso lo cambia la propia revision (Claude,
+        # la coincidencia exacta, el panel), que ya quita el grupo de la lista;
+        # contarlo hacia recalcular la lista entera cada vez que Claude aplicaba.
         f = await conn.fetchrow("""SELECT COALESCE(MAX(id), 0) AS ultimo,
-                                          COUNT(*) FILTER (WHERE tmdb_searched) AS buscados,
-                                          COUNT(*) FILTER (WHERE tmdb_manual) AS manuales
+                                          COUNT(*) FILTER (WHERE tmdb_searched) AS buscados
                                      FROM media_items""")
     return tuple(f)
 
@@ -434,8 +510,10 @@ async def de_fondo(api_key: str) -> None:
     huella_vista, ultima_completa, ultimo_cambio = None, 0.0, 0.0
     while True:
         try:
-            if await revision_ia.recoger():
-                await revision_ia.mandar(api_key)
+            await revision_ia.recoger()
+            # Cada vuelta: si no hay lote en marcha y algo espera (a Haiku, o a
+            # que Sonnet verifique lo que propuso Haiku), sale el siguiente.
+            await revision_ia.mandar(api_key)
             # Lo cobrado por lotes que aqui no constaban (ver `conciliar`).
             await revision_ia.conciliar()
             # Lo que no se resuelve con candidatas lo busca Claude en TMDB el
@@ -586,6 +664,7 @@ async def aceptar(clave: str, api_key: str) -> int:
     antes = await revision.poner_ficha(g["miembros"], s["tmdb_id"], s["media_type"], api_key,
                                        titulo=titulo_buscable(g["titulo"]) or g["titulo"])
     await _guardar(clave, g["titulo"], g["motivo"], "aplicada", "aceptada a mano", s, len(g["miembros"]), antes)
+    revision.quitar(clave)
     logger.info("Revision: sugerencia aceptada «%s» -> %s/%d (%d archivos)", g["titulo"], s["media_type"],
                 s["tmdb_id"], len(g["miembros"]))
     return len(g["miembros"])

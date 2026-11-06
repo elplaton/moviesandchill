@@ -224,24 +224,32 @@ async def estado() -> dict:
     from app.database.connection import get_pool
 
     a = await _ajustes()
-    pendientes = 0
+    pendientes, cola = 0, {"haiku": 0, "busqueda": 0, "sonnet": 0}
     pool = get_pool()
     if pool:
         async with pool.acquire() as conn:
             # Lo que aun le toca a Claude: lo que no ha visto, lo que se quedo
             # sin candidatas y lo que dijo «ninguna» en un lote (eso lo busca
             # el mismo en TMDB, `investigar_pendientes`).
-            pendientes = await conn.fetchval("""
-                SELECT COUNT(*) FROM revision_auto
-                 WHERE estado IN ('sugerida', 'sin_candidato')
-                   AND (ia IS NULL OR ia IN ('sin_candidatas', $2)
-                        OR (ia = ANY($1::text[]) AND estado = 'sin_candidato'))
+            # En que paso esta lo que espera, en el orden en que va: Haiku
+            # (elegir entre candidatas, en lote), la busqueda en TMDB (lo que
+            # no tenia candidatas o Haiku no encontro), y Sonnet (verificar lo
+            # que propuso Haiku, en lote).
+            c = await conn.fetchrow("""
+                SELECT COUNT(*) FILTER (WHERE ia IS NULL AND motivo <> 'sin_caratula') AS haiku,
+                       COUNT(*) FILTER (WHERE ia = 'sin_candidatas'
+                                           OR (ia IS NULL AND motivo = 'sin_caratula')
+                                           OR (ia = ANY($1::text[]) AND estado = 'sin_candidato')) AS busqueda,
+                       COUNT(*) FILTER (WHERE ia = $2) AS sonnet
+                  FROM revision_auto WHERE estado IN ('sugerida', 'sin_candidato')
             """, [MODELO, MODELO_ANTES, MARCA_VERIFICADA], POR_VERIFICAR)
+            cola = dict(c)
+            pendientes = sum(cola.values())
     return {"modelo": MODELO, "verificador": VERIFICADOR, "activa": a["activa"], "configurada": bool(a["clave"]), "error": a["error"],
             "preparando": dict(_preparando) if _preparando["activo"] else None,
             "buscando": dict(_investigando) if _investigando["activo"] else None,
             "tope": a["tope"],
-            "gasto_mes": round(a["gasto_mes"], 4), "lote": a["lote"] or None, "pendientes": pendientes,
+            "gasto_mes": round(a["gasto_mes"], 4), "lote": a["lote"] or None, "pendientes": pendientes, "cola": cola,
             "lote_progreso": await _progreso(a["lote"], a["clave"]) if a["lote"] and a["clave"] else None,
             "ultimo": a["ultimo"]}
 
@@ -356,11 +364,19 @@ def _coste(u, modelo: str = MODELO, lote: bool = True) -> float:
             + (getattr(u, "cache_creation_input_tokens", 0) or 0) * esc) / 1e6 * (DESCUENTO_LOTE if lote else 1)
 
 
+_cerrojo_gasto = asyncio.Lock()
+
+
 async def _sumar_gasto(dolares: float) -> None:
+    """Suma al gasto del mes. Con cerrojo: la busqueda suma grupo a grupo, de
+    tres en tres, y leer-sumar-escribir a la vez perderia sumas."""
     from app.database.connection import set_app_settings
 
-    a = await _ajustes()
-    await set_app_settings({"revision_ia_gasto": json.dumps({"mes": a["mes"], "dolares": a["gasto_mes"] + dolares})})
+    if not dolares:
+        return
+    async with _cerrojo_gasto:
+        a = await _ajustes()
+        await set_app_settings({"revision_ia_gasto": json.dumps({"mes": a["mes"], "dolares": a["gasto_mes"] + dolares})})
 
 
 async def apuntar_prueba(dolares: float, nombre: str) -> None:
@@ -468,7 +484,7 @@ async def _mandar(api_key_tmdb: str) -> dict:
         await set_app_settings({"revision_ia_candidatas": CANDIDATAS_VERSION})
         logger.info("Revision con IA: busqueda de candidatas nueva, se vuelve a intentar lo que no tenia (%s)", n)
     async with pool.acquire() as conn:
-        filas = await conn.fetch("""SELECT id, clave FROM revision_auto
+        filas = await conn.fetch("""SELECT id, clave, candidatas FROM revision_auto
                                      WHERE estado IN ('sugerida', 'sin_candidato') AND ia IS NULL
                                      ORDER BY archivos DESC""")
     # Ya no estan en la lista, o no dicen de que serie son: fuera.
@@ -480,13 +496,18 @@ async def _mandar(api_key_tmdb: str) -> dict:
     sem = asyncio.Semaphore(5)
     _preparando.update(activo=True, hechos=0, total=len(elegibles))
 
-    async def buscar(g):
+    async def buscar(f, g):
+        # Las candidatas ya buscadas se guardan con el grupo y no se repiten.
+        guardadas = json.loads(f["candidatas"]) if isinstance(f["candidatas"], str) else f["candidatas"]
+        if guardadas:
+            _preparando["hechos"] += 1
+            return guardadas
         async with sem:
             r = await candidatas_de(g, api_key_tmdb)
             _preparando["hechos"] += 1
             return r
 
-    todas = await asyncio.gather(*(buscar(g) for _, g in elegibles))
+    todas = await asyncio.gather(*(buscar(f, g) for f, g in elegibles))
     peticiones, apuntes = [], []
     for (f, g), cands in zip(elegibles, todas):
         if not cands:
@@ -634,8 +655,7 @@ async def recoger() -> dict | None:
             entrada, salida, round(gasto, 4), resumen["propuestas"])
     await set_app_settings({"revision_ia_lote": "",
                             "revision_ia_ultimo": json.dumps({**resumen, "terminado": time.time()})})
-    from app.services import revision
-    revision.olvidar()
+    # Sin recalcular la lista: cada grupo aplicado ya ha salido de ella (`quitar`).
     logger.info("Revision con IA: lote %s recogido: %d aplicadas, %d sugeridas, %d ninguna, %d propuestas a Sonnet, "
                 "%d fallos, %.2f $", lote.id, resumen["aplicadas"], resumen["sugeridas"], resumen["ninguna"],
                 resumen["propuestas"], resumen["fallos"], gasto)
@@ -734,7 +754,8 @@ async def _marcar(id_: int, estado: str, porque: str, marca: str) -> None:
                                WHERE id = $1""", id_, estado, porque[:300], marca)
 
 
-async def proponer(id_: int, clave: str, respuesta: dict, cands: list[dict]) -> str:
+async def proponer(id_: int, clave: str, respuesta: dict, cands: list[dict], origen: str = "lote",
+                   marca_ninguna: str = MODELO) -> str:
     """Lo que ha elegido Haiku. Una ficha de las candidatas queda como
     propuesta (`ia` = POR_VERIFICAR) para el siguiente lote, que es de Sonnet
     y solo verifica; «ninguna» se queda como esta, para la busqueda en TMDB o
@@ -747,14 +768,19 @@ async def proponer(id_: int, clave: str, respuesta: dict, cands: list[dict]) -> 
     if elegida is not None and _misma_sin_caratula(g, elegida):
         elegida = None
     if elegida is None:
-        return await aplicar_eleccion(id_, clave, {**respuesta, "eleccion": "ninguna"}, [], MODELO)
+        return await aplicar_eleccion(id_, clave, {**respuesta, "eleccion": "ninguna"}, [], marca_ninguna)
     if g is None:
-        await _marcar(id_, "sin_candidato", "el grupo ya no está en la lista", MODELO)
+        await _marcar(id_, "sin_candidato", "el grupo ya no está en la lista", marca_ninguna)
         return "fallos"
-    prop = {"ficha": elegida, "confianza": respuesta.get("confianza"), "motivo": (respuesta.get("motivo") or "")[:300]}
+    # `origen`: de donde salio (el lote o la busqueda en TMDB), para que un no
+    # de Sonnet a lo buscado no lo mande a buscar otra vez.
+    prop = {"ficha": elegida, "confianza": respuesta.get("confianza"), "motivo": (respuesta.get("motivo") or "")[:300],
+            "origen": origen}
     async with get_pool().acquire() as conn:
-        await conn.execute("UPDATE revision_auto SET ia = $2, ia_lote = NULL, propuesta = $3::jsonb WHERE id = $1",
-                           id_, POR_VERIFICAR, json.dumps(prop, default=str))
+        await conn.execute("""UPDATE revision_auto SET ia = $2, ia_lote = NULL, propuesta = $3::jsonb,
+                                     candidatas = COALESCE($4::jsonb, candidatas) WHERE id = $1""",
+                           id_, POR_VERIFICAR, json.dumps(prop, default=str),
+                           json.dumps(cands, default=str) if cands else None)
     return "propuestas"
 
 
@@ -767,7 +793,11 @@ async def _verificado(id_: int, verif: dict) -> str:
     prop = json.loads(f["propuesta"]) if isinstance(f["propuesta"], str) else f["propuesta"]
     if not prop:
         return "fallos"
-    return await resolver_verificacion(id_, f["clave"], prop, verif, MARCA_VERIFICADA)
+    from app.services import revision
+    g = await revision.grupo(f["clave"])
+    marca = MARCA_BUSQUEDA if prop.get("origen") == "busqueda" else MARCA_VERIFICADA
+    return await resolver_verificacion(id_, f["clave"], prop, verif, marca,
+                                       solo_sugerir=bool(g and g.get("sin_nombre")))
 
 
 async def resolver_verificacion(id_: int, clave: str, prop: dict, verif: dict, marca: str,
@@ -784,19 +814,6 @@ async def resolver_verificacion(id_: int, clave: str, prop: dict, verif: dict, m
     await _marcar(id_, "sin_candidato",
                   f"Haiku propuso «{ficha.get('title')}{año}» y Sonnet dice que no: {verif.get('motivo', '')}", marca)
     return "ninguna"
-
-
-async def verificar_ahora(g: dict, ficha: dict, clave_api: str) -> tuple[dict | None, float]:
-    """La verificacion de Sonnet en el momento (sin lote): para la busqueda en
-    TMDB, que no va en lote. (respuesta o None, coste)."""
-    r = await _cliente(clave_api).messages.create(**params_verificar(g, ficha))
-    coste = _coste(r.usage, VERIFICADOR, lote=False)
-    if r.stop_reason != "end_turn":
-        return None, coste
-    try:
-        return json.loads(next(b.text for b in r.content if b.type == "text")), coste
-    except (StopIteration, ValueError):
-        return None, coste
 
 
 async def adoptar(lote_id: str) -> dict:
@@ -956,9 +973,9 @@ async def historial(limite: int = 30) -> dict:
 
 BUSQUEDAS_MAX = 6
 # Con Sonnet buscando costaba entre 0,45 y 1,1 centimos por grupo (medido sobre
-# 23 grupos reales, ~0,9). Ahora busca Haiku (20 veces menos) y Sonnet solo
-# verifica lo que encuentra, una llamada corta; con margen.
-COSTE_BUSQUEDA_ESTIMADO = 0.01
+# 23 grupos reales, ~0,9). Ahora busca Haiku (20 veces menos) y lo que encuentra
+# lo verifica Sonnet en el lote siguiente (que cuenta aparte); con margen.
+COSTE_BUSQUEDA_ESTIMADO = 0.003
 MARCA_BUSQUEDA = MODELO + "+tmdb"
 _investigando: dict = {"activo": False, "hechos": 0, "total": 0}
 _cerrojo_investigar = asyncio.Lock()
@@ -1175,7 +1192,7 @@ async def _investigar_pendientes(api_key_tmdb: str) -> dict | None:
     async with pool.acquire() as conn:
         await conn.execute("INSERT INTO revision_ia_lotes (lote, modelo, grupos) VALUES ($1, $2, $3)",
                            nombre, MARCA_BUSQUEDA, len(elegibles))
-    resumen = {"aplicadas": 0, "sugeridas": 0, "ninguna": 0, "fallos": 0}
+    resumen = {"aplicadas": 0, "sugeridas": 0, "ninguna": 0, "fallos": 0, "propuestas": 0}
     gasto = 0.0
     sem = asyncio.Semaphore(3)
 
@@ -1187,6 +1204,9 @@ async def _investigar_pendientes(api_key_tmdb: str) -> dict | None:
             try:
                 respuesta, vistas, coste = await investigar(g, api_key_tmdb, a["clave"], sit)
                 gasto += coste
+                # Al momento, grupo a grupo: si la tanda se corta (un
+                # despliegue), lo gastado hasta ahi ya esta apuntado.
+                await _sumar_gasto(coste)
                 if respuesta is None:
                     # Sin respuesta valida (rechazo, se paso de largo): no se
                     # repite en cada tanda, se queda a mano.
@@ -1195,24 +1215,10 @@ async def _investigar_pendientes(api_key_tmdb: str) -> dict | None:
                                            id_, MARCA_BUSQUEDA + ":sin_respuesta")
                     resumen["fallos"] += 1
                 else:
-                    elegida = next((c for c in vistas if clave_de(c) == respuesta.get("eleccion")), None)
-                    if elegida is not None and not _misma_sin_caratula(g, elegida):
-                        # Lo que encuentra Haiku lo verifica Sonnet antes de aplicarse.
-                        verif, c2 = await verificar_ahora(g, elegida, a["clave"])
-                        gasto += c2
-                        if verif is None:
-                            async with pool.acquire() as conn:
-                                await conn.execute("UPDATE revision_auto SET ia = $2 WHERE id = $1",
-                                                   id_, MARCA_BUSQUEDA + ":sin_respuesta")
-                            resumen["fallos"] += 1
-                        else:
-                            prop = {"ficha": elegida, "confianza": respuesta.get("confianza"),
-                                    "motivo": respuesta.get("motivo", "")}
-                            resumen[await resolver_verificacion(id_, g["clave"], prop, verif, MARCA_BUSQUEDA,
-                                                                solo_sugerir=sit == "sin_nombre")] += 1
-                    else:
-                        resumen[await aplicar_eleccion(id_, g["clave"], {**respuesta, "eleccion": "ninguna"}, [],
-                                                       MARCA_BUSQUEDA)] += 1
+                    # Lo que encuentra Haiku se guarda (la propuesta y todo lo
+                    # que vio) y lo verifica Sonnet en el siguiente lote.
+                    resumen[await proponer(id_, g["clave"], respuesta, vistas, origen="busqueda",
+                                           marca_ninguna=MARCA_BUSQUEDA)] += 1
             except Exception as e:
                 # Lo pasajero (TMDB, la API) no se marca: vuelve en la siguiente tanda.
                 logger.warning("Revision con IA: la busqueda de «%s» fallo: %s", g["titulo"], e)
@@ -1220,12 +1226,11 @@ async def _investigar_pendientes(api_key_tmdb: str) -> dict | None:
             _investigando["hechos"] += 1
 
     await asyncio.gather(*(uno(*e) for e in elegibles))
-    await _sumar_gasto(gasto)
     async with pool.acquire() as conn:
         await conn.execute("""UPDATE revision_ia_lotes SET terminado = NOW(), aplicadas = $2, sugeridas = $3,
-                                     ninguna = $4, fallos = $5, dolares = $6 WHERE lote = $1""",
+                                     ninguna = $4, fallos = $5, dolares = $6, propuestas = $7 WHERE lote = $1""",
                            nombre, resumen["aplicadas"], resumen["sugeridas"], resumen["ninguna"],
-                           resumen["fallos"], round(gasto, 4))
+                           resumen["fallos"], round(gasto, 4), resumen["propuestas"])
     try:
         await avisar_gasto()
     except Exception:

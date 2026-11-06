@@ -47,6 +47,8 @@ interface EstadoIA {
   buscando?: { hechos: number; total: number } | null;
   /** Cuánto lleva Anthropic del lote en marcha (se le pregunta cada minuto). */
   lote_progreso?: { hechos: number; total: number } | null;
+  /** Lo que espera, por paso: Haiku (en lote), la búsqueda en TMDB y la verificación de Sonnet (en lote). */
+  cola?: { haiku: number; busqueda: number; sonnet: number };
 }
 
 /** Lo hecho por cada paso: coincidencia exacta, Claude y lo aceptado a mano. */
@@ -507,6 +509,15 @@ function TiraEstado({ auto, sugeridas, enLista, onCambio, onToast, onRevisar, la
                 </button>
               )}
           </div>
+          {ia.cola && ia.cola.haiku + ia.cola.busqueda + ia.cola.sonnet > 0 && (
+            <p className="text-xs text-nf-faint">
+              En cola: {[
+                ia.cola.haiku > 0 && `${num(ia.cola.haiku)} para Haiku`,
+                ia.cola.busqueda > 0 && `${num(ia.cola.busqueda)} para buscar en TMDB`,
+                ia.cola.sonnet > 0 && `${num(ia.cola.sonnet)} para que Sonnet verifique`,
+              ].filter(Boolean).join(', ')}
+            </p>
+          )}
           {ia.preparando && (
             <Progreso texto="Preparando el lote: buscando candidatas en TMDB" hechos={ia.preparando.hechos} total={ia.preparando.total} />
           )}

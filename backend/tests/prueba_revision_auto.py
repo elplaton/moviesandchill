@@ -216,6 +216,12 @@ _asyncio.run(revision_ia.resolver_verificacion(1, "c", _prop, {"correcta": False
 comprueba("Sonnet dice que no: se queda para ti", ("marcar", "sin_candidato", "Haiku propuso «Black", "m"), _hechos[-1])
 revision_ia.aplicar_eleccion, revision_ia._marcar = _orig2
 
+print("\nUn grupo que cambia de clave conserva lo hecho")
+from app.services.revision_auto import _ident
+comprueba("mismo tipo y titulo con otro motivo y otra ficha", _ident("sin_ficha|series|shllw|"),
+          _ident("tipo_cruzado|series|shllw|601080"))
+comprueba("otro tipo no es el mismo", False, _ident("sin_ficha|movie|shllw|") == _ident("sin_ficha|series|shllw|"))
+
 print("\nLo aplicado sale de la lista en el momento")
 from app.services import revision as _rev
 _rev._cache["grupos"] = {"sin_ficha": [{"clave": "sin_ficha|movie|a|"}, {"clave": "sin_ficha|movie|b|"}]}

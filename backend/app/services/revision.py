@@ -28,7 +28,7 @@ import unicodedata
 
 logger = logging.getLogger("tmd")
 
-CADUCA_S = 300
+CADUCA_S = 6 * 3600
 
 MOTIVOS = [
     {"clave": "sin_ficha", "titulo": "Sin ficha",
@@ -46,6 +46,10 @@ _cache: dict = {"t": 0.0, "grupos": None}
 
 
 def olvidar() -> None:
+    """La lista se vuelve a calcular en la siguiente pregunta (~6 s). Solo
+    cuando entra algo nuevo en el catalogo o se deshace una correccion: lo que
+    se arregla desde aqui (a mano, la coincidencia exacta, Claude) sale de la
+    lista con `quitar`, sin recalcularla."""
     _cache["t"] = 0.0
     _cache["grupos"] = None
 
@@ -208,6 +212,9 @@ async def _calcular() -> dict:
 
 
 async def grupos() -> dict:
+    # Sin caducidad corta: la lista cambia cuando entra algo en el catalogo (el
+    # bucle de revision_auto lo mira y llama a `olvidar`) o cuando se arregla
+    # algo desde aqui (`quitar`). CADUCA_S es solo una red de seguridad.
     if _cache["grupos"] is None or time.time() - _cache["t"] > CADUCA_S:
         _cache["grupos"] = await _calcular()
         _cache["t"] = time.time()
@@ -358,7 +365,7 @@ _MULTIPARTE_RE = re.compile(r"\.(?:part\d+\.rar|r\d{2}|(?:7z|zip|rar|mkv|mp4|avi
 
 
 async def poner_ficha(miembros: list[tuple], tmdb_id: int, media_type: str, api_key: str,
-                      detalles: dict | None = None, titulo: str | None = None, recalcular: bool = True) -> list[list]:
+                      detalles: dict | None = None, titulo: str | None = None, recalcular: bool = False) -> list[list]:
     """Le pone a esos archivos la ficha dada y los marca para que nada
     automatico la cambie (`tmdb_manual`). Devuelve como estaba cada uno, para
     poder deshacerlo. En una serie, cada archivo lleva su capitulo: si se
@@ -430,6 +437,7 @@ async def asignar(clave: str, tmdb_id: int, media_type: str, api_key: str) -> in
         return 0
     g = await grupo(clave)
     await poner_ficha(miembros, tmdb_id, media_type, api_key, titulo=g["titulo"] if g else None)
+    quitar(clave)
     logger.info("Revision: %d archivos de «%s» con la ficha %s/%d", len(miembros), clave.split("|")[2],
                 media_type, tmdb_id)
     return len(miembros)
@@ -446,6 +454,6 @@ async def ignorar(clave: str) -> int:
     async with pool.acquire() as conn:
         await conn.execute("UPDATE media_items SET tmdb_manual = TRUE WHERE id = ANY($1::int[])",
                            [m[0] for m in miembros])
-    olvidar()
+    quitar(clave)
     logger.info("Revision: %d archivos de «%s» ignorados", len(miembros), clave.split("|")[2])
     return len(miembros)
