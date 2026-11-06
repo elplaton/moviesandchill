@@ -511,6 +511,8 @@ async def de_fondo(api_key: str) -> None:
 
     from app.tasks import spawn
 
+    # La lista de Revision, calculada ya: que nadie espere ~5 s la primera vez.
+    spawn(revision.refrescar(), "revision_lista")
     await asyncio.sleep(ESPERA_ARRANQUE_S)
     huella_vista, ultima_completa, ultimo_cambio, ultimo_envio = None, 0.0, 0.0, 0.0
 
@@ -547,7 +549,8 @@ async def de_fondo(api_key: str) -> None:
                 huella = await _huella()
                 if huella != huella_vista or ahora - ultima_completa >= CADA_S:
                     if huella_vista is not None and huella != huella_vista:
-                        revision.olvidar()   # que los grupos se calculen con lo nuevo
+                        # Con lo nuevo, por detras: el panel sigue con la de antes mientras.
+                        await revision.refrescar()
                     huella_vista, ultima_completa = huella, ahora
                     if not _cerrojo.locked():
                         spawn(repaso(), "revision_repaso")

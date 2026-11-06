@@ -994,10 +994,16 @@ function ColaMovil({ bandeja, canales, onCambio, recarga }: {
  * bandejas (sugerencias, los cuatro motivos, lo aplicado solo y el gasto de
  * Claude) y la cola de la bandeja elegida.
  */
+// Lo último que se leyó de Revisión, para pintarlo al momento al volver (y
+// pedirlo de nuevo por detrás). En memoria del módulo: se va al recargar.
+let resumenRevisionVisto: ResumenRevision | null = null;
+let bandejaVista: string | null = null;
+
 function Revision() {
-  const [resumen, setResumen] = useState<ResumenRevision | null>(null);
+  const [resumen, setResumen] = useState<ResumenRevision | null>(resumenRevisionVisto);
   const [errorResumen, setErrorResumen] = useState('');
-  const [bandeja, setBandeja] = useState<string | null>(null);
+  const [bandeja, setBandeja] = useState<string | null>(bandejaVista);
+  useEffect(() => { bandejaVista = bandeja; }, [bandeja]);
   const [lanzando, setLanzando] = useState(false);
   const [recarga, setRecarga] = useState(0);
 
@@ -1006,6 +1012,7 @@ function Revision() {
       const r = await apiFetch('/admin/revision/resumen');
       const d = await leer(r);
       if (!r.ok) throw new Error(d.detail || 'No se ha podido leer el resumen');
+      resumenRevisionVisto = d;
       setResumen(d); setErrorResumen('');
       setBandeja(b => b ?? ((d.motivos || []).some((m: MotivoRevision) => m.sugeridas > 0) ? 'con_sugerencia' : 'sin_ficha'));
     } catch (e) { setErrorResumen(e instanceof Error ? e.message : 'No se ha podido leer el resumen'); }

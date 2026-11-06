@@ -972,10 +972,16 @@ function GastoClaude({ ia }: { ia: EstadoIA | null }) {
 
 /* --- La vista --------------------------------------------------------------- */
 
+// Lo último que se leyó, para pintarlo al momento al volver a la pestaña (y
+// pedirlo de nuevo por detrás). En memoria del módulo: se va al recargar.
+let resumenVisto: Resumen | null = null;
+let pestañaVista: Pestaña | null = null;
+
 export default function AdminRevision({ onToast }: { onToast: (m: string) => void }) {
-  const [resumen, setResumen] = useState<Resumen | null>(null);
+  const [resumen, setResumen] = useState<Resumen | null>(resumenVisto);
   const [errorResumen, setErrorResumen] = useState('');
-  const [pestaña, setPestaña] = useState<Pestaña | null>(null);
+  const [pestaña, setPestaña] = useState<Pestaña | null>(pestañaVista);
+  useEffect(() => { pestañaVista = pestaña; }, [pestaña]);
   const [lanzando, setLanzando] = useState(false);
   // Sube cuando algo cambia la lista desde fuera (acabó una pasada, se deshizo algo).
   const [recarga, setRecarga] = useState(0);
@@ -985,6 +991,7 @@ export default function AdminRevision({ onToast }: { onToast: (m: string) => voi
       const res = await apiFetch('/admin/revision/resumen');
       if (!res.ok) { setErrorResumen(await motivoDe(res)); return; }
       const r: Resumen = await res.json();
+      resumenVisto = r;
       setResumen(r);
       setErrorResumen('');
       // La bandeja de entrada: las sugerencias si hay, y si no, lo que más pesa.

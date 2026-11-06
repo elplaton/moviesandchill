@@ -21,6 +21,7 @@ Calcularlo cuesta unos segundos (son decenas de miles de filas y cada una se
 interpreta con su contexto), asi que se guarda en memoria cinco minutos y se
 olvida al corregir algo.
 """
+import asyncio
 import logging
 import re
 import time
@@ -42,7 +43,10 @@ MOTIVOS = [
 ]
 _MOTIVOS = {m["clave"] for m in MOTIVOS}
 
-_cache: dict = {"t": 0.0, "grupos": None}
+_cache: dict = {"t": 0.0, "grupos": None, "quitados": set()}
+# Un solo calculo a la vez: dos peticiones con la lista sin calcular esperan
+# al mismo, en vez de hacerlo dos veces.
+_calculando = asyncio.Lock()
 
 
 def olvidar() -> None:
@@ -59,6 +63,8 @@ def quitar(clave: str) -> None:
     exacta o Claude), sin recalcularla: recalcular cuesta ~7 s y una pasada o
     un lote arreglan cientos seguidos. Asi desaparece del panel en cuanto se
     aplica, y no al acabar el lote."""
+    # Si se esta recalculando, que lo arreglado ahora no vuelva con la nueva.
+    _cache["quitados"].add(clave)
     gs = _cache["grupos"]
     if not gs:
         return
@@ -216,9 +222,28 @@ async def grupos() -> dict:
     # bucle de revision_auto lo mira y llama a `olvidar`) o cuando se arregla
     # algo desde aqui (`quitar`). CADUCA_S es solo una red de seguridad.
     if _cache["grupos"] is None or time.time() - _cache["t"] > CADUCA_S:
-        _cache["grupos"] = await _calcular()
-        _cache["t"] = time.time()
+        async with _calculando:
+            if _cache["grupos"] is None or time.time() - _cache["t"] > CADUCA_S:
+                await _recalcular()
     return _cache["grupos"]
+
+
+async def _recalcular() -> None:
+    _cache["quitados"] = set()
+    nuevos = await _calcular()
+    if _cache["quitados"]:
+        for m, lista in nuevos.items():
+            nuevos[m] = [g for g in lista if g["clave"] not in _cache["quitados"]]
+    _cache.update(grupos=nuevos, t=time.time())
+
+
+async def refrescar() -> None:
+    """Recalcula la lista por detras y la cambia de golpe al acabar: quien
+    pregunte mientras tanto recibe la de antes, en vez de esperar ~5 s. Al
+    arrancar (para que nadie espere la primera vez) y cuando entra algo nuevo
+    en el catalogo."""
+    async with _calculando:
+        await _recalcular()
 
 
 def _salida(g: dict, channel_id: int | None, sugerencias: dict | None = None) -> dict:

@@ -242,6 +242,33 @@ _rev.quitar("sin_ficha|movie|a|")
 comprueba("queda el otro", ["sin_ficha|movie|b|"], [g["clave"] for g in _rev._cache["grupos"]["sin_ficha"]])
 _rev.olvidar()
 
+print("\nLa lista se recalcula por detras")
+_calcs = []
+async def _falso_calcular():
+    _calcs.append(1)
+    await _asyncio.sleep(0.05)
+    return {"sin_ficha": [{"clave": "sin_ficha|movie|a|"}, {"clave": "sin_ficha|movie|b|"}]}
+_orig4 = _rev._calcular
+_rev._calcular = _falso_calcular
+_rev._cache.update(grupos={"sin_ficha": [{"clave": "viejo"}]}, t=__import__("time").time())
+async def _durante():
+    t = _asyncio.create_task(_rev.refrescar())
+    await _asyncio.sleep(0.01)
+    viejo = [g["clave"] for g in (await _rev.grupos())["sin_ficha"]]
+    _rev.quitar("sin_ficha|movie|a|")       # se arregla mientras se calcula
+    await t
+    return viejo
+comprueba("mientras se calcula, se sirve la de antes", ["viejo"], _asyncio.run(_durante()))
+comprueba("y lo arreglado mientras no reaparece", ["sin_ficha|movie|b|"],
+          [g["clave"] for g in _rev._cache["grupos"]["sin_ficha"]])
+_rev.olvidar(); _calcs.clear()
+async def _a_la_vez():
+    await _asyncio.gather(_rev.grupos(), _rev.grupos(), _rev.grupos())
+_asyncio.run(_a_la_vez())
+comprueba("tres peticiones a la vez, un solo calculo", 1, len(_calcs))
+_rev._calcular = _orig4
+_rev.olvidar()
+
 print()
 print(f"{len(fallos)} fallidas" if fallos else "todas correctas")
 sys.exit(1 if fallos else 0)
