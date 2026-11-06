@@ -239,10 +239,17 @@ async def listar(motivo: str, channel_id: int | None = None, q: str = "", offset
                  limit: int = 30, solo_sugeridas: bool = False) -> dict:
     from app.services import revision_auto
 
-    if motivo not in _MOTIVOS:
-        return {"total": 0, "grupos": []}
-    lista = (await grupos())[motivo]
+    todo = await grupos()
     sugeridas = await revision_auto.sugerencias()
+    if motivo == "con_sugerencia":
+        # La bandeja de sugerencias: las de todos los motivos juntas, las que
+        # mas archivos arreglan primero. Es donde un toque resuelve un grupo.
+        lista = sorted((g for gs in todo.values() for g in gs if g["clave"] in sugeridas),
+                       key=lambda g: -len(g["miembros"]))
+    elif motivo in _MOTIVOS:
+        lista = todo[motivo]
+    else:
+        return {"total": 0, "grupos": []}
     qn = _norm(q)
     elegidos = []
     for g in lista:

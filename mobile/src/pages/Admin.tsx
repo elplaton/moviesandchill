@@ -460,105 +460,86 @@ const conAño = (t: string, y: number | null | undefined) => y ? `${t} (${y})` :
 // se trata como un error sin detalle y sale el texto por defecto.
 const leer = async (r: Response) => { try { return await r.json(); } catch { return {}; } };
 
-/** Texto de Telegram (ficha o pie) recortado; tocarlo lo enseña entero. */
-function TextoCanal({ etiqueta, texto }: { etiqueta: string; texto: string }) {
-  const [entero, setEntero] = useState(false);
+/** Carátula pequeña; si TMDB no la sirve queda el hueco y no el icono de imagen rota. */
+function CaratulaMovil({ src, ring }: { src: string | null | undefined; ring?: boolean }) {
   return (
-    <button onClick={() => setEntero(e => !e)} className="block w-full text-left mt-2 rounded-xl bg-black/25 px-3 py-2">
-      <span className="block text-[10px] uppercase tracking-wide text-nf-text3 mb-0.5">{etiqueta}</span>
-      <span className={`block text-[12px] text-nf-text2 whitespace-pre-line break-words ${entero ? '' : 'line-clamp-3'}`}>{texto}</span>
-    </button>
-  );
-}
-
-/** La sugerencia de la revisión automática: «Sí, es esta» la pone (y se
- *  puede deshacer desde «Corregido solo»); «No es esta» no vuelve a salir. */
-function CajaSugerencia({ g, onAceptada, onDescartada }: { g: GrupoRevision & { sugerencia: Sugerencia }; onAceptada: (archivos: number) => void; onDescartada: () => void }) {
-  const [haciendo, setHaciendo] = useState('');
-  const s = g.sugerencia;
-  const mandar = async (que: 'aceptar' | 'descartar') => {
-    setHaciendo(que);
-    try {
-      const r = await apiFetch(`/admin/revision/sugerencia/${que}`, { method: 'POST', body: JSON.stringify({ clave: g.clave }) });
-      const d = await leer(r);
-      if (!r.ok || !d.ok) throw new Error(d.detail || 'No se ha podido');
-      if (que === 'aceptar') onAceptada(d.archivos ?? g.archivos); else onDescartada();
-    } catch (e) { toast(e instanceof Error ? e.message : 'No se ha podido', 'error', 6000); setHaciendo(''); }
-  };
-  return (
-    <div className="mt-3 rounded-xl border border-nf-ok/25 bg-nf-ok/[0.07] p-3">
-      <div className="flex items-center space-x-3">
-        {s.poster
-          ? <img src={s.poster} alt="" loading="lazy" className="w-9 h-[54px] rounded object-cover shrink-0 bg-white/10" />
-          : <div className="w-9 h-[54px] rounded shrink-0 bg-white/10" />}
-        <div className="min-w-0">
-          <p className="text-[10px] uppercase tracking-wide text-nf-text3">Sugerencia · {TIPO_PETICION[s.media_type] || s.media_type}</p>
-          <p className="text-[14px] font-medium truncate">{conAño(s.title, s.year)}</p>
-          {s.porque && <p className="text-[11px] text-nf-text3 line-clamp-2">{s.porque}</p>}
-        </div>
-      </div>
-      <div className="flex mt-3 space-x-2">
-        <button onClick={() => mandar('descartar')} disabled={!!haciendo} className="flex-1 h-11 rounded-xl bg-white/10 text-[15px] font-medium disabled:opacity-40">{haciendo === 'descartar' ? '…' : 'No es esta'}</button>
-        <button onClick={() => mandar('aceptar')} disabled={!!haciendo} className="flex-1 h-11 rounded-xl bg-nf-red text-[15px] font-semibold disabled:opacity-40">{haciendo === 'aceptar' ? 'Poniendo…' : 'Sí, es esta'}</button>
-      </div>
+    <div className={`w-10 h-[60px] shrink-0 overflow-hidden rounded-[3px] bg-white/10 ${ring ? 'ring-1 ring-white/40' : ''}`}>
+      {src && <img src={src} alt="" loading="lazy" className="w-full h-full object-cover" onError={e => { e.currentTarget.style.display = 'none'; }} />}
     </div>
   );
 }
 
-function TarjetaRevision({ g, onCorregir, onIgnorado, onAceptada, onDescartada }: {
-  g: GrupoRevision; onCorregir: () => void; onIgnorado: (archivos: number) => void;
-  onAceptada: (archivos: number) => void; onDescartada: () => void;
+const MOTIVO_CORTO: Record<string, string> = { sin_ficha: 'Sin ficha', tipo_cruzado: 'Tipo cruzado', dudosa: 'Ficha dudosa', sin_caratula: 'Sin carátula' };
+
+/**
+ * Un grupo de la cola, en el teléfono: lo mismo que la fila de la web (ficha
+ * actual frente a la propuesta, y las acciones) en una tarjeta. El detalle del
+ * canal se despliega tocando el título.
+ */
+function TarjetaGrupo({ g, verMotivo, onQuitar, onCorregir }: {
+  g: GrupoRevision; verMotivo: boolean; onQuitar: () => void; onCorregir: () => void;
 }) {
-  // Ignorar pide confirmación en la propia tarjeta: no toca nada del catálogo,
-  // pero el grupo desaparece de la lista y no hay dónde deshacerlo.
+  const [abierta, setAbierta] = useState(false);
+  const [haciendo, setHaciendo] = useState('');
   const [confirmar, setConfirmar] = useState(false);
-  const [ignorando, setIgnorando] = useState(false);
-  const ignorar = async () => {
-    setIgnorando(true);
+  const [sinSugerencia, setSinSugerencia] = useState(false);
+  const s = sinSugerencia ? null : g.sugerencia;
+  const accion = async (que: 'aceptar' | 'descartar' | 'ignorar') => {
+    setHaciendo(que);
     try {
-      const r = await apiFetch('/admin/revision/ignorar', { method: 'POST', body: JSON.stringify({ clave: g.clave }) });
+      const r = await apiFetch(que === 'ignorar' ? '/admin/revision/ignorar' : `/admin/revision/sugerencia/${que}`,
+        { method: 'POST', body: JSON.stringify({ clave: g.clave }) });
       const d = await leer(r);
-      if (!r.ok || !d.ok) throw new Error(d.detail || 'No se ha podido ignorar');
-      onIgnorado(d.archivos ?? g.archivos);
-    } catch (e) { toast(e instanceof Error ? e.message : 'No se ha podido ignorar', 'error', 6000); setIgnorando(false); }
+      if (!r.ok || !d.ok) throw new Error(d.detail || 'No se ha podido');
+      if (que === 'descartar') { setSinSugerencia(true); return; }
+      onQuitar();
+      toast(que === 'aceptar' ? `«${conAño(s!.title, s!.year)}» aplicada` : `«${g.titulo}» ignorado`, 'ok');
+    } catch (e) { toast(e instanceof Error ? e.message : 'No se ha podido', 'error', 6000); }
+    finally { setHaciendo(''); }
   };
+  const muestras = g.ejemplos?.length ? g.ejemplos : [g.ejemplo];
+  const tipo = (t: string) => (TIPO_PETICION[t as TipoPeticion] || t).toLowerCase();
   return (
-    <div className="rounded-2xl bg-white/5 p-4 mb-2">
-      <p className="text-[16px] font-semibold leading-tight break-words">{g.titulo || 'Sin título'}</p>
-      <p className="text-[12px] text-nf-text3 mt-1">
-        {TIPO_PETICION[g.tipo] || g.tipo}{g.año ? ` · ${g.año}` : ''} · {num(g.archivos)} {g.archivos === 1 ? 'archivo' : 'archivos'}{g.canales.length ? ` · ${g.canales.join(', ')}` : ''}
-      </p>
-      {(g.ejemplos?.length ? g.ejemplos : [g.ejemplo]).map((e, i) => (
-        <p key={i} className={`${i ? 'mt-0.5' : 'mt-2'} text-[11px] font-mono text-nf-text3 break-all line-clamp-2`}>{e}</p>
-      ))}
-      {g.ficha && <TextoCanal etiqueta="Ficha del canal" texto={g.ficha} />}
-      {g.pie && <TextoCanal etiqueta="Pie del archivo" texto={g.pie} />}
-      {g.actual && (
-        <div className="flex items-center mt-3 space-x-3">
-          {g.actual.poster
-            ? <img src={g.actual.poster} alt="" loading="lazy" className="w-9 h-[54px] rounded object-cover shrink-0 bg-white/10" />
-            : <div className="w-9 h-[54px] rounded shrink-0 bg-white/10" />}
-          <div className="min-w-0">
-            <p className="text-[10px] uppercase tracking-wide text-nf-text3">Ficha actual · {TIPO_PETICION[g.actual.media_type] || g.actual.media_type}</p>
-            <p className="text-[13px] truncate">{conAño(g.actual.title, g.actual.year)}</p>
+    <div className="border-b border-white/10 py-3 last:border-0">
+      <div className="flex space-x-3">
+        <div className="flex shrink-0 space-x-1">
+          <CaratulaMovil src={g.actual?.poster} />
+          {s && <CaratulaMovil src={s.poster} ring />}
+        </div>
+        <div className="min-w-0 flex-1">
+          <button onClick={() => setAbierta(a => !a)} aria-expanded={abierta} className="block w-full text-left">
+            <p className="text-[15px] font-semibold leading-tight break-words">{g.titulo}{g.año ? <span className="font-normal text-nf-text2"> {g.año}</span> : null}</p>
+          </button>
+          <p className="text-[11px] text-nf-text3 mt-0.5">
+            {TIPO_PETICION[g.tipo] || g.tipo}, {num(g.archivos)} {g.archivos === 1 ? 'archivo' : 'archivos'}{verMotivo ? `, ${MOTIVO_CORTO[g.motivo] || g.motivo}` : ''}
+          </p>
+          {g.actual && <p className="text-[12px] truncate mt-1"><span className="text-nf-text3">Ahora: </span><span className="text-nf-text2">{conAño(g.actual.title, g.actual.year)}</span><span className="text-nf-text3">, {tipo(g.actual.media_type)}</span></p>}
+          {s && <p className="text-[12px] truncate"><span className="text-nf-text3">Propuesta: </span>{conAño(s.title, s.year)}<span className="text-nf-text3">, {tipo(s.media_type)}</span></p>}
+          {s?.porque && <p className="text-[11px] text-nf-text3 line-clamp-2">{s.porque}</p>}
+        </div>
+      </div>
+      {abierta && (
+        <div className="mt-2 ml-[52px] space-y-2">
+          {g.ficha && <div><p className="text-[11px] text-nf-text3">Ficha del canal</p><p className="text-[12px] text-nf-text2 whitespace-pre-line break-words">{g.ficha}</p></div>}
+          {g.pie && <div><p className="text-[11px] text-nf-text3">Pie del archivo</p><p className="text-[12px] text-nf-text2 whitespace-pre-line break-words">{g.pie}</p></div>}
+          <div>
+            <p className="text-[11px] text-nf-text3">{muestras.length > 1 ? 'Archivos de muestra' : 'Archivo'}</p>
+            {muestras.map((m, i) => <p key={i} className="text-[11px] font-mono text-nf-text2 break-all">{m}</p>)}
           </div>
         </div>
-      )}
-      {g.sugerencia && !confirmar && (
-        <CajaSugerencia g={g as GrupoRevision & { sugerencia: Sugerencia }} onAceptada={onAceptada} onDescartada={onDescartada} />
       )}
       {confirmar ? (
-        <div className="mt-3 rounded-xl bg-white/10 p-3">
-          <p className="text-[13px]">Deja de salir en esta lista. No cambia la ficha ni quita nada del catálogo.</p>
-          <div className="flex mt-3 space-x-2">
-            <button onClick={() => setConfirmar(false)} disabled={ignorando} className="flex-1 h-11 rounded-xl bg-white/10 text-[15px] font-medium disabled:opacity-40">Cancelar</button>
-            <button onClick={ignorar} disabled={ignorando} className="flex-1 h-11 rounded-xl bg-white text-black text-[15px] font-semibold disabled:opacity-40">{ignorando ? 'Ignorando…' : 'Ignorar'}</button>
-          </div>
+        <div className="mt-3 flex items-center space-x-2">
+          <p className="flex-1 text-[12px] text-nf-text2">Deja de salir aquí y no se toca nada más.</p>
+          <button onClick={() => setConfirmar(false)} disabled={!!haciendo} className="h-9 px-3 rounded-lg bg-white/10 text-[13px]">Cancelar</button>
+          <button onClick={() => accion('ignorar')} disabled={!!haciendo} className="h-9 px-3 rounded-lg bg-nf-red text-[13px] font-semibold">{haciendo === 'ignorar' ? '…' : 'Ignorar'}</button>
         </div>
       ) : (
-        <div className="flex mt-3 space-x-2">
-          <button onClick={onCorregir} className="tap flex-1 h-11 rounded-xl bg-nf-red text-[15px] font-semibold">Corregir</button>
-          <button onClick={() => setConfirmar(true)} className="tap flex-1 h-11 rounded-xl bg-white/10 text-[15px] font-medium">Ignorar</button>
+        <div className="mt-3 flex items-center space-x-2">
+          {s && <button onClick={() => accion('aceptar')} disabled={!!haciendo} className="tap h-9 px-4 rounded-lg bg-nf-red text-[14px] font-semibold disabled:opacity-40">{haciendo === 'aceptar' ? 'Aplicando…' : 'Aplicar'}</button>}
+          {s && <button onClick={() => accion('descartar')} disabled={!!haciendo} className="tap h-9 px-3 rounded-lg bg-white/10 text-[14px] disabled:opacity-40">No es esta</button>}
+          <button onClick={onCorregir} disabled={!!haciendo} className={`tap h-9 rounded-lg text-[14px] disabled:opacity-40 ${s ? 'px-2 text-nf-text2' : 'px-4 bg-white/10'}`}>Corregir</button>
+          <button onClick={() => setConfirmar(true)} disabled={!!haciendo} className="tap h-9 px-2 rounded-lg text-[14px] text-nf-text2 disabled:opacity-40">Ignorar</button>
         </div>
       )}
     </div>
@@ -699,155 +680,6 @@ function HistorialIAMovil() {
   );
 }
 
-const haceMov = (t: number | null) => {
-  if (!t) return null;
-  const min = Math.round((Date.now() / 1000 - t) / 60);
-  return min < 1 ? 'ahora mismo' : min < 60 ? `hace ${min} min` : `hace ${Math.round(min / 60)} h`;
-};
-
-/** Un paso del flujo en el teléfono: número, título, qué hace y lo hecho. */
-function PasoMovil({ n, titulo, sub, apagado, children }: { n: number; titulo: string; sub: React.ReactNode; apagado?: boolean; children: React.ReactNode }) {
-  return (
-    <div className={`rounded-2xl p-4 ${apagado ? 'border border-dashed border-white/15' : 'bg-white/5'}`}>
-      <div className="flex items-center space-x-2">
-        <span className="w-6 h-6 shrink-0 rounded-full bg-white/10 text-[12px] font-semibold flex items-center justify-center">{n}</span>
-        <p className="text-[15px] font-semibold">{titulo}</p>
-      </div>
-      <p className="text-[12px] text-nf-text3 mt-1">{sub}</p>
-      <div className="mt-3 space-y-2">{children}</div>
-    </div>
-  );
-}
-
-const CifraMovil = ({ valor, texto, ok }: { valor: number; texto: string; ok?: boolean }) => (
-  <span className="text-[13px] text-nf-text2 mr-4 whitespace-nowrap">
-    <span className={`text-[18px] font-bold tabular-nums mr-1 ${ok ? 'text-nf-ok' : 'text-white'}`}>{num(valor)}</span>{texto}
-  </span>
-);
-
-const FlechaMovil = () => <p className="text-center text-nf-text3 text-[16px] leading-none my-1" aria-hidden>↓</p>;
-
-/**
- * Cómo se revisa lo que entra, en el teléfono: los mismos tres pasos que en la
- * web, uno debajo de otro. (1) coincidencia exacta, siempre y gratis; (2)
- * Claude, si está encendido y por debajo del tope, con lo que el paso 1 no
- * resolvió; (3) a mano, lo que queda. El interruptor y el tope, a la vista.
- */
-function FlujoMovil({ auto, pendientes, sugeridas, onCambio, onRevisar, revisando, onVerCorregidas, onVerSugeridas }: {
-  auto: EstadoAuto; pendientes: number; sugeridas: number; onCambio: () => void;
-  onRevisar: () => void; revisando: boolean; onVerCorregidas: () => void; onVerSugeridas: () => void;
-}) {
-  const ia = auto.ia;
-  const pasos = auto.pasos;
-  const [tope, setTope] = useState(String(ia?.tope ?? 20));
-  const [haciendo, setHaciendo] = useState('');
-  const [verGasto, setVerGasto] = useState(false);
-  useEffect(() => { if (ia) setTope(String(ia.tope)); }, [ia?.tope]); // eslint-disable-line react-hooks/exhaustive-deps
-  const pedir = async (que: string, ruta: string, cuerpo?: object, ok?: string) => {
-    setHaciendo(que);
-    try {
-      const r = await apiFetch(ruta, { method: 'POST', ...(cuerpo ? { body: JSON.stringify(cuerpo) } : {}) });
-      const d = await leer(r);
-      if (!r.ok) throw new Error(d.detail || 'No se ha podido');
-      if (ok) toast(ok, 'ok');
-      onCambio();
-    } catch (e) { toast(e instanceof Error ? e.message : 'No se ha podido', 'error', 6000); }
-    finally { setHaciendo(''); }
-  };
-  const encendida = !!ia?.activa && !!ia?.configurada;
-  const alTope = !!ia && ia.gasto_mes >= ia.tope;
-  const pct = ia && ia.tope > 0 ? Math.min(1, ia.gasto_mes / ia.tope) : 1;
-  const esperanPaso1 = auto.corriendo ? Math.max(0, auto.por_mirar - auto.mirados) : 0;
-  const esperanClaude = encendida && !alTope ? ia!.pendientes : 0;
-  const topeCambiado = ia && Number(tope) !== ia.tope;
-
-  return (
-    <div className="mb-4">
-      <p className="text-[15px] font-semibold">Cómo se revisa lo que entra</p>
-      <p className="text-[12px] text-nf-text3 mt-0.5 mb-3">Lo que no se empareja con TMDB pasa por estos tres pasos, en orden, según entra. Lo que se pone solo se puede deshacer.</p>
-
-      <PasoMovil n={1} titulo="Coincidencia exacta" sub="Siempre activa y gratis: si TMDB tiene algo que se llama exactamente igual y cuadra, se pone solo.">
-        <div><CifraMovil valor={pasos?.exacta.grupos ?? auto.cuentas?.aplicada?.grupos ?? 0} texto="corregidos solos" ok /></div>
-        <p className="text-[11px] text-nf-text3">
-          {auto.corriendo ? `Revisando… ${num(auto.mirados)} de ${num(auto.por_mirar)}` : auto.termino ? `Último repaso ${haceMov(auto.termino)}` : 'Aún sin repasar desde el arranque'}
-        </p>
-        <button onClick={onRevisar} disabled={revisando || auto.corriendo} className="tap w-full h-10 rounded-xl bg-white/10 text-[14px] font-medium disabled:opacity-40">
-          {auto.corriendo ? 'Revisando…' : revisando ? 'Lanzando…' : 'Revisar ahora'}
-        </button>
-      </PasoMovil>
-      <FlechaMovil />
-
-      <PasoMovil n={2} titulo="Claude (IA)" apagado={!encendida}
-        sub={ia?.configurada ? 'Lo que el paso 1 no resuelve, en lotes. Con seguridad alta se pone solo; lo dudoso te llega como sugerencia.'
-          : 'Falta la clave: TMD_ANTHROPIC_API_KEY en el .env del servidor.'}>
-        <div className="flex items-center space-x-3">
-          <button role="switch" aria-checked={encendida} disabled={!ia?.configurada || haciendo === 'activa'}
-            onClick={() => pedir('activa', '/admin/revision/ia', { activa: !encendida })}
-            className={`relative h-7 w-12 shrink-0 rounded-full transition-colors disabled:opacity-40 ${encendida ? 'bg-nf-ok' : 'bg-white/20'}`}>
-            <span className={`absolute left-0 top-0.5 h-6 w-6 rounded-full bg-white transition-transform ${encendida ? 'translate-x-[22px]' : 'translate-x-0.5'}`} />
-          </button>
-          <span className="text-[14px]">{haciendo === 'activa' ? 'Comprobando la clave…' : encendida ? 'Encendida' : 'Apagada'}</span>
-          <span className="text-[11px] text-nf-text3">Sonnet 5.5</span>
-        </div>
-        {ia?.configurada && !encendida && (
-          <p className="text-[12px] text-nf-text2">Apagada: lo que el paso 1 no resuelve pasa directo al paso 3.{ia.pendientes > 0 ? ` Al encenderla mirará ${num(ia.pendientes)} grupos (unos ${dolar(ia.pendientes * 0.0033)}).` : ''}</p>
-        )}
-        {ia?.configurada && (<>
-          {encendida && (
-            <div className="flex flex-wrap">
-              <CifraMovil valor={pasos?.ia.aplicadas ?? 0} texto="solos" ok />
-              <CifraMovil valor={pasos?.ia.sugeridas ?? 0} texto="sugerencias" />
-              <CifraMovil valor={pasos?.ia.ninguna ?? 0} texto="sin ficha" />
-            </div>
-          )}
-          <div className="flex items-center space-x-2 text-[13px] text-nf-text2">
-            <span className="text-white tabular-nums">{dolar(ia.gasto_mes)}</span><span>de</span>
-            <input className="w-16 h-8 rounded-lg bg-white/10 px-2 text-right text-white tabular-nums" type="number" min="0" inputMode="decimal"
-              aria-label="Tope de gasto al mes en dólares" value={tope} onChange={e => setTope(e.target.value)} />
-            <span>$ al mes</span>
-            {topeCambiado && (
-              <button onClick={() => pedir('tope', '/admin/revision/ia', { tope: Number(tope) || 0 }, 'Tope guardado')} disabled={haciendo === 'tope'}
-                className="h-8 px-3 rounded-lg bg-white text-black text-[13px] font-semibold disabled:opacity-40">Guardar</button>
-            )}
-          </div>
-          <div className="h-1.5 w-full overflow-hidden rounded-full bg-white/10">
-            <div className={`h-full ${pct >= 1 ? 'bg-nf-red' : pct >= 0.8 ? 'bg-nf-warn' : 'bg-nf-ok'}`} style={{ width: `${pct * 100}%` }} />
-          </div>
-          {alTope && <p className="text-[11px] text-nf-red">Tope del mes alcanzado: no se manda nada hasta el mes que viene (o súbelo).</p>}
-          {encendida && <p className="text-[11px] text-nf-text3">{ia.lote ? 'Lote en marcha en Claude' : `${num(ia.pendientes)} grupos esperando a Claude`}</p>}
-          {ia.error && <p className="text-[11px] text-nf-red">{ia.error}</p>}
-          <div className="flex space-x-2">
-            {encendida && (
-              <button onClick={() => pedir('mandar', '/admin/revision/ia/mandar')} disabled={!!haciendo || !!ia.lote || alTope}
-                className="tap flex-1 h-10 rounded-xl bg-white/10 text-[14px] font-medium disabled:opacity-40">{ia.lote ? 'Lote en marcha' : 'Mandar ahora'}</button>
-            )}
-            <button onClick={() => setVerGasto(v => !v)} className="tap flex-1 h-10 rounded-xl bg-white/10 text-[14px] font-medium">{verGasto ? 'Ocultar gasto' : 'Gasto'}</button>
-          </div>
-          {verGasto && <HistorialIAMovil />}
-        </>)}
-      </PasoMovil>
-      <FlechaMovil />
-
-      <PasoMovil n={3} titulo="A mano" sub="Lo que queda: las sugerencias se aceptan de un toque; lo demás se corrige o se ignora en la lista de abajo.">
-        <div className="flex flex-wrap">
-          <CifraMovil valor={sugeridas} texto="con sugerencia" />
-          <CifraMovil valor={pendientes} texto="en la lista" />
-        </div>
-        {(esperanPaso1 > 0 || esperanClaude > 0) && (
-          <p className="text-[11px] text-nf-text3">
-            De ellos, {esperanPaso1 > 0 ? `${num(esperanPaso1)} aún no los ha mirado el paso 1` : ''}{esperanPaso1 > 0 && esperanClaude > 0 ? ' y ' : ''}{esperanClaude > 0 ? `${num(esperanClaude)} esperan a Claude` : ''}: no hace falta tocarlos todavía.
-          </p>
-        )}
-        {sugeridas > 0 && (
-          <button onClick={onVerSugeridas} className="tap w-full h-10 rounded-xl bg-white/10 text-[14px] font-medium">Ver las sugerencias</button>
-        )}
-      </PasoMovil>
-
-      <button onClick={onVerCorregidas} className="tap mt-3 w-full text-left text-[13px] text-nf-text2">Ver todo lo que se ha puesto solo (con deshacer) →</button>
-    </div>
-  );
-}
-
 /** «Corregido solo»: lo que puso la revisión automática, con su deshacer. */
 function CorregidasMovil({ onCambio }: { onCambio: () => void }) {
   const [origen, setOrigen] = useState<'' | 'ia' | 'exacta'>('');
@@ -882,9 +714,6 @@ function CorregidasMovil({ onCambio }: { onCambio: () => void }) {
   };
   return (
     <div>
-      <p className="text-[12px] text-nf-text3 mb-3">
-        Lo que se puso sin preguntar porque coincidía exactamente con TMDB. «Deshacer» lo deja como estaba y no se vuelve a tocar.
-      </p>
       <div className="flex flex-wrap gap-2 mb-2">
         {([['', 'Todo'], ['ia', 'Claude'], ['exacta', 'Exacta']] as const).map(([v, t]) => (
           <button key={v} onClick={() => setOrigen(v)}
@@ -917,19 +746,138 @@ function CorregidasMovil({ onCambio }: { onCambio: () => void }) {
   );
 }
 
+
+const haceMov = (t: number | null) => {
+  if (!t) return null;
+  const min = Math.round((Date.now() / 1000 - t) / 60);
+  return min < 1 ? 'ahora mismo' : min < 60 ? `hace ${min} min` : `hace ${Math.round(min / 60)} h`;
+};
+
+/** El interruptor de Claude: monocromo, como el de la web (encendido, pista blanca y bola oscura). */
+function InterruptorMovil({ encendido, onCambiar, deshabilitado }: { encendido: boolean; onCambiar: () => void; deshabilitado?: boolean }) {
+  return (
+    <button type="button" role="switch" aria-checked={encendido} aria-label="Revisión con Claude" disabled={deshabilitado} onClick={onCambiar}
+      className={`inline-flex h-6 w-11 shrink-0 items-center rounded-full p-0.5 transition-colors disabled:opacity-40 ${encendido ? 'bg-white' : 'bg-white/20'}`}>
+      <span className={`h-5 w-5 rounded-full transition-transform duration-150 ${encendido ? 'translate-x-5 bg-nf-bg' : 'translate-x-0 bg-white'}`} />
+    </button>
+  );
+}
+
+const DatoMovil = ({ valor, texto, ok }: { valor: number; texto: string; ok?: boolean }) => (
+  <span className="text-[13px] text-nf-text2 mr-4 whitespace-nowrap">
+    <span className={`text-[16px] font-semibold tabular-nums mr-1 ${ok ? 'text-nf-ok' : 'text-white'}`}>{num(valor)}</span>{texto}
+  </span>
+);
+
 /**
- * Revisión: lo que se ha indexado mal, agrupado por título, para corregirlo a
- * mano (services/revision.py). Un grupo son todos los archivos que el
- * servidor cree del mismo título, así que corregir uno los corrige todos.
- *
- * Cambiar de motivo, canal o búsqueda empieza la lista de cero, y cada
- * petición lleva su número: con la búsqueda por tecla (con retardo, pero aun
- * así) una respuesta atrasada pisaría la lista de lo que se está escribiendo.
+ * Lo automático, como en la web pero apilado: coincidencia exacta, Claude (con
+ * su interruptor y su tope) y lo que te queda. Mismo orden y mismas cifras.
  */
-function Revision() {
-  const [resumen, setResumen] = useState<ResumenRevision | null>(null);
-  const [errorResumen, setErrorResumen] = useState('');
-  const [motivo, setMotivo] = useState('sin_ficha');
+function TiraMovil({ auto, sugeridas, enLista, onCambio, onRevisar, lanzando, onIr }: {
+  auto: EstadoAuto; sugeridas: number; enLista: number; onCambio: () => void; onRevisar: () => void; lanzando: boolean; onIr: (p: string) => void;
+}) {
+  const ia = auto.ia;
+  const pasos = auto.pasos;
+  const [tope, setTope] = useState(String(ia?.tope ?? 20));
+  const [haciendo, setHaciendo] = useState('');
+  useEffect(() => { if (ia) setTope(String(ia.tope)); }, [ia?.tope]); // eslint-disable-line react-hooks/exhaustive-deps
+  const pedir = async (que: string, ruta: string, cuerpo?: object, ok?: string) => {
+    setHaciendo(que);
+    try {
+      const r = await apiFetch(ruta, { method: 'POST', ...(cuerpo ? { body: JSON.stringify(cuerpo) } : {}) });
+      const d = await leer(r);
+      if (!r.ok) throw new Error(d.detail || 'No se ha podido');
+      if (ok) toast(ok, 'ok');
+      onCambio();
+    } catch (e) { toast(e instanceof Error ? e.message : 'No se ha podido', 'error', 6000); }
+    finally { setHaciendo(''); }
+  };
+  const encendida = !!ia?.activa && !!ia?.configurada;
+  const alTope = !!ia && ia.gasto_mes >= ia.tope;
+  const pct = ia && ia.tope > 0 ? Math.min(1, ia.gasto_mes / ia.tope) : 1;
+  const topeCambiado = !!ia && Number(tope) !== ia.tope;
+  const sinMirar = auto.corriendo ? Math.max(0, auto.por_mirar - auto.mirados) : 0;
+  const enCola = encendida && !alTope ? ia!.pendientes : 0;
+  const trabajado = !!pasos && pasos.ia.aplicadas + pasos.ia.sugeridas + pasos.ia.ninguna > 0;
+
+  return (
+    <div className="mb-4 rounded-2xl bg-white/5 divide-y divide-white/10">
+      <section className="p-4">
+        <div className="flex items-center justify-between">
+          <p className="text-[14px] font-semibold">Coincidencia exacta</p>
+          <button onClick={onRevisar} disabled={lanzando || auto.corriendo} className="text-[13px] text-nf-text2 disabled:opacity-40">
+            {auto.corriendo ? 'Revisando…' : lanzando ? 'Lanzando…' : 'Revisar ahora'}
+          </button>
+        </div>
+        <div className="mt-1.5"><DatoMovil valor={pasos?.exacta.grupos ?? auto.cuentas?.aplicada?.grupos ?? 0} texto="aplicadas solas" ok /></div>
+        <p className="mt-1 flex items-center text-[11px] text-nf-text3">
+          <span className={`mr-1.5 h-1.5 w-1.5 rounded-full ${auto.corriendo ? 'animate-pulse bg-nf-warn' : 'bg-nf-ok'}`} />
+          {auto.corriendo ? `Revisando ${num(auto.mirados)} de ${num(auto.por_mirar)}` : auto.termino ? `Al día, último repaso ${haceMov(auto.termino)}` : 'Esperando al primer repaso'}
+        </p>
+      </section>
+
+      <section className="p-4">
+        <div className="flex items-center justify-between">
+          <p className="text-[14px] font-semibold">Claude <span className="font-normal text-nf-text3">Sonnet 5.5</span></p>
+          {ia?.configurada ? (
+            <span className="flex items-center text-[12px] text-nf-text2">
+              <span className="mr-2">{haciendo === 'activa' ? 'Comprobando…' : encendida ? 'Encendido' : 'Apagado'}</span>
+              <InterruptorMovil encendido={encendida} deshabilitado={haciendo === 'activa'} onCambiar={() => pedir('activa', '/admin/revision/ia', { activa: !encendida })} />
+            </span>
+          ) : <span className="text-[12px] text-nf-text3">Sin clave en el servidor</span>}
+        </div>
+        {ia?.configurada ? (<>
+          {(encendida || trabajado) && (
+            <div className="mt-1.5 flex flex-wrap">
+              <DatoMovil valor={pasos?.ia.aplicadas ?? 0} texto="aplicadas" ok />
+              <DatoMovil valor={pasos?.ia.sugeridas ?? 0} texto="sugeridas" />
+              <DatoMovil valor={pasos?.ia.ninguna ?? 0} texto="sin ficha" />
+            </div>
+          )}
+          <div className="mt-2 flex items-center space-x-2 text-[12px] text-nf-text3">
+            <span className="tabular-nums text-white">{dolar(ia.gasto_mes)}</span><span>de</span>
+            <input className="h-7 w-14 rounded-md bg-black/40 px-2 text-right tabular-nums text-white" type="number" min="0" inputMode="decimal"
+              aria-label="Tope de gasto al mes, en dólares" value={tope} onChange={e => setTope(e.target.value)} />
+            <span>$ al mes</span>
+            {topeCambiado && <button onClick={() => pedir('tope', '/admin/revision/ia', { tope: Number(tope) || 0 }, 'Tope guardado')} disabled={haciendo === 'tope'} className="font-semibold text-white">Guardar</button>}
+          </div>
+          <div className="mt-2 h-1 w-full overflow-hidden rounded-full bg-white/10">
+            <div className={`h-full ${pct >= 1 ? 'bg-nf-red' : pct >= 0.8 ? 'bg-nf-warn' : 'bg-white/60'}`} style={{ width: `${pct * 100}%` }} />
+          </div>
+          {alTope && <p className="mt-1.5 text-[11px] text-nf-red">Tope del mes alcanzado: Claude no recibe nada hasta el mes que viene.</p>}
+          {!encendida && ia.pendientes > 0 && <p className="mt-1.5 text-[11px] text-nf-text3">Apagado: {num(ia.pendientes)} grupos que podría mirar pasan directamente a ti.</p>}
+          {encendida && (ia.lote
+            ? <p className="mt-1.5 text-[11px] text-nf-text3">Lote en marcha</p>
+            : !alTope && ia.pendientes > 0 && (
+              <button onClick={() => pedir('mandar', '/admin/revision/ia/mandar', undefined, 'Lote mandado a Claude')} disabled={!!haciendo}
+                className="mt-1.5 text-[12px] text-nf-text2">{haciendo === 'mandar' ? 'Mandando…' : `Mandar los ${num(ia.pendientes)} pendientes`}</button>
+            ))}
+          {ia.error && <p className="mt-1.5 text-[11px] text-nf-red">{ia.error}</p>}
+        </>) : (
+          <p className="mt-1.5 text-[12px] text-nf-text3">Para que Claude revise lo que la coincidencia exacta no resuelve, pon TMD_ANTHROPIC_API_KEY en el servidor.</p>
+        )}
+      </section>
+
+      <section className="p-4">
+        <p className="text-[14px] font-semibold">Para ti</p>
+        <div className="mt-1.5 flex flex-wrap">
+          <button onClick={() => onIr('con_sugerencia')} disabled={!sugeridas} className="text-left"><DatoMovil valor={sugeridas} texto="sugerencias" /></button>
+          <DatoMovil valor={enLista} texto="en la lista" />
+        </div>
+        {(sinMirar > 0 || enCola > 0) && (
+          <p className="mt-1 text-[11px] text-nf-text3">
+            {[sinMirar > 0 && `${num(sinMirar)} sin mirar todavía`, enCola > 0 && `${num(enCola)} esperando a Claude`].filter(Boolean).join(' y ')}
+          </p>
+        )}
+      </section>
+    </div>
+  );
+}
+
+/** La cola de una bandeja (las sugerencias o un motivo), con su búsqueda y su canal. */
+function ColaMovil({ bandeja, canales, onCambio, recarga }: {
+  bandeja: string; canales: ResumenRevision['canales']; onCambio: () => void; recarga: number;
+}) {
   const [canal, setCanal] = useState('');
   const [texto, setTexto] = useState('');
   const [q, setQ] = useState('');
@@ -938,34 +886,16 @@ function Revision() {
   const [cargando, setCargando] = useState(false);
   const [error, setError] = useState('');
   const [corrigiendo, setCorrigiendo] = useState<GrupoRevision | null>(null);
-  const [verCorregidas, setVerCorregidas] = useState(false);
-  const [soloSugeridas, setSoloSugeridas] = useState(false);
-  // Los motivos, para bajar hasta ellos desde «Ver las sugerencias».
-  const listaMovilRef = useRef<HTMLDivElement>(null);
-  const [lanzando, setLanzando] = useState(false);
   const peticion = useRef(0);
-
-  const cargarResumen = async () => {
-    try {
-      const r = await apiFetch('/admin/revision/resumen');
-      const d = await leer(r);
-      if (!r.ok) throw new Error(d.detail || 'No se ha podido leer el resumen');
-      setResumen(d); setErrorResumen('');
-    } catch (e) { setErrorResumen(e instanceof Error ? e.message : 'No se ha podido leer el resumen'); }
-  };
-  useEffect(() => { cargarResumen(); }, []);
-
   useEffect(() => { const t = setTimeout(() => setQ(texto.trim()), 300); return () => clearTimeout(t); }, [texto]);
-
   const cargar = async (offset: number) => {
     const n = ++peticion.current;
     setCargando(true);
     if (!offset) setError('');
     try {
-      const params = new URLSearchParams({ motivo, offset: String(offset), limit: String(POR_PAGINA) });
+      const params = new URLSearchParams({ motivo: bandeja, offset: String(offset), limit: String(POR_PAGINA) });
       if (canal) params.set('channel_id', canal);
       if (q) params.set('q', q);
-      if (soloSugeridas) params.set('sugeridas', 'true');
       const r = await apiFetch(`/admin/revision?${params}`);
       const d = await leer(r);
       if (n !== peticion.current) return;
@@ -978,21 +908,84 @@ function Revision() {
       if (n === peticion.current) setCargando(false);
     }
   };
-  useEffect(() => { setGrupos([]); setTotal(null); cargar(0); }, [motivo, canal, q, soloSugeridas]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { setGrupos([]); setTotal(null); cargar(0); }, [bandeja, canal, q, recarga]); // eslint-disable-line react-hooks/exhaustive-deps
+  const quitar = (clave: string) => {
+    setGrupos(gs => gs.filter(x => x.clave !== clave));
+    setTotal(t => t == null ? t : Math.max(t - 1, 0));
+    onCambio();
+  };
+  return (
+    <div>
+      <div className="space-y-2 my-3">
+        <input className={input} type="search" placeholder="Buscar por título o archivo" value={texto} onChange={e => setTexto(e.target.value)} />
+        <select className={input} value={canal} onChange={e => setCanal(e.target.value)}>
+          <option value="">Todos los canales</option>
+          {canales.map(c => <option key={c.channel_id} value={String(c.channel_id)}>{c.nombre}</option>)}
+        </select>
+      </div>
+      {total != null && <p className="text-[12px] text-nf-text3 mb-1">{num(total)} {total === 1 ? 'grupo' : 'grupos'}</p>}
+      {error && <p className="text-[13px] text-nf-red my-2">{error}</p>}
+      {cargando && !grupos.length && !error && <p className="text-[13px] text-nf-text3 py-4">Cargando…</p>}
+      {!cargando && !error && total === 0 && (
+        <p className="rounded-2xl bg-white/5 p-4 text-[13px] text-nf-text2">
+          {q || canal ? 'Nada con ese filtro.' : bandeja === 'con_sugerencia' ? 'No hay sugerencias pendientes.' : 'No queda nada aquí.'}
+        </p>
+      )}
+      {grupos.length > 0 && (
+        <div className="rounded-2xl bg-white/5 px-4">
+          {grupos.map(g => (
+            <TarjetaGrupo key={g.clave} g={g} verMotivo={bandeja === 'con_sugerencia'} onQuitar={() => quitar(g.clave)} onCorregir={() => setCorrigiendo(g)} />
+          ))}
+        </div>
+      )}
+      {total != null && grupos.length < total && !error && (
+        <button onClick={() => cargar(grupos.length)} disabled={cargando} className="mt-3 w-full h-11 rounded-xl bg-white/10 disabled:opacity-40 text-[15px] font-medium">
+          {cargando ? 'Cargando…' : `Cargar más (${num(total - grupos.length)})`}
+        </button>
+      )}
+      {corrigiendo && (
+        <HojaCorregir g={corrigiendo} onCerrar={() => setCorrigiendo(null)}
+          onHecho={(n, ficha) => { quitar(corrigiendo.clave); setCorrigiendo(null); toast(`«${ficha}» puesta a ${num(n)} ${n === 1 ? 'archivo' : 'archivos'}`, 'ok', 5000); }} />
+      )}
+    </div>
+  );
+}
 
-  // Con la revisión automática en marcha se vuelve a pedir el resumen (cuántos
-  // lleva) y, al acabar, la lista.
+/**
+ * Revisión en el teléfono: la misma vista que en la web y en el mismo orden.
+ * La tira de estado (coincidencia exacta, Claude y lo que te queda), las
+ * bandejas (sugerencias, los cuatro motivos, lo aplicado solo y el gasto de
+ * Claude) y la cola de la bandeja elegida.
+ */
+function Revision() {
+  const [resumen, setResumen] = useState<ResumenRevision | null>(null);
+  const [errorResumen, setErrorResumen] = useState('');
+  const [bandeja, setBandeja] = useState<string | null>(null);
+  const [lanzando, setLanzando] = useState(false);
+  const [recarga, setRecarga] = useState(0);
+
+  const cargarResumen = async () => {
+    try {
+      const r = await apiFetch('/admin/revision/resumen');
+      const d = await leer(r);
+      if (!r.ok) throw new Error(d.detail || 'No se ha podido leer el resumen');
+      setResumen(d); setErrorResumen('');
+      setBandeja(b => b ?? ((d.motivos || []).some((m: MotivoRevision) => m.sugeridas > 0) ? 'con_sugerencia' : 'sin_ficha'));
+    } catch (e) { setErrorResumen(e instanceof Error ? e.message : 'No se ha podido leer el resumen'); }
+  };
+  useEffect(() => { cargarResumen(); }, []);
+
   const corriendo = !!resumen?.auto?.corriendo;
   useEffect(() => {
     if (!corriendo) return;
     const t = setInterval(cargarResumen, 4000);
     return () => clearInterval(t);
   }, [corriendo]); // eslint-disable-line react-hooks/exhaustive-deps
-  const estabaCorriendo = useRef(false);
+  const estaba = useRef(false);
   useEffect(() => {
-    if (estabaCorriendo.current && !corriendo) { setGrupos([]); cargar(0); }
-    estabaCorriendo.current = corriendo;
-  }, [corriendo]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (estaba.current && !corriendo) setRecarga(n => n + 1);
+    estaba.current = corriendo;
+  }, [corriendo]);
 
   const revisarAhora = async () => {
     setLanzando(true);
@@ -1004,96 +997,66 @@ function Revision() {
     } catch (e) { toast(e instanceof Error ? e.message : 'No se ha podido lanzar', 'error', 6000); }
     finally { setLanzando(false); }
   };
-  const auto = resumen?.auto;
 
-  // Lo corregido o ignorado sale de la lista en el servidor, así que «Cargar
-  // más» sigue pidiendo desde grupos.length sin saltarse a nadie.
-  const quitar = (clave: string) => {
-    setGrupos(gs => gs.filter(x => x.clave !== clave));
-    setTotal(t => t == null ? t : Math.max(t - 1, 0));
-    cargarResumen();
-  };
+  if (!resumen || !bandeja) {
+    return errorResumen ? (
+      <div>
+        <p className="text-[13px] text-nf-red">{errorResumen}</p>
+        <button onClick={cargarResumen} className="tap mt-2 h-9 px-3 rounded-full bg-white/10 text-[13px]">Reintentar</button>
+      </div>
+    ) : <p className="text-[13px] text-nf-text3">Calculando lo que hay que revisar…</p>;
+  }
 
-  const elegido = resumen?.motivos.find(m => m.clave === motivo);
-  const quedan = total != null && grupos.length < total;
+  const sugeridas = resumen.motivos.reduce((n, m) => n + (m.sugeridas ?? 0), 0);
+  const enLista = resumen.motivos.reduce((n, m) => n + m.grupos, 0);
+  const bandejas: { id: string; texto: string; n?: number }[] = [
+    { id: 'con_sugerencia', texto: 'Sugerencias', n: sugeridas },
+    ...resumen.motivos.map(m => ({ id: m.clave, texto: MOTIVO_CORTO[m.clave] || m.titulo, n: m.grupos })),
+    { id: 'corregido', texto: 'Aplicado solo' },
+    { id: 'gasto', texto: 'Gasto de Claude' },
+  ];
+  const motivo = resumen.motivos.find(m => m.clave === bandeja);
 
   return (
     <div>
-      {auto && (verCorregidas ? (
-        <button onClick={() => setVerCorregidas(false)} className="tap mb-3 text-[14px] text-nf-text2">← Volver a la revisión</button>
+      {resumen.auto && (
+        <TiraMovil auto={resumen.auto} sugeridas={sugeridas} enLista={enLista} onCambio={cargarResumen}
+          onRevisar={revisarAhora} lanzando={lanzando} onIr={setBandeja} />
+      )}
+      {/* Las bandejas deslizan: en el teléfono no caben siete en fila. */}
+      <div className="-mx-4 flex overflow-x-auto border-b border-white/10 px-4" role="tablist" aria-label="Bandejas de revisión">
+        {bandejas.map(b => {
+          const activa = b.id === bandeja;
+          return (
+            <button key={b.id} role="tab" aria-selected={activa} onClick={() => setBandeja(b.id)}
+              className={`relative shrink-0 whitespace-nowrap px-3 pb-2.5 pt-1 text-[14px] ${activa ? 'font-semibold text-white' : 'text-nf-text2'}`}>
+              {b.texto}{b.n !== undefined && <span className="ml-1 tabular-nums text-nf-text3">{num(b.n)}</span>}
+              {activa && <span className="absolute inset-x-3 bottom-0 h-0.5 rounded-full bg-nf-red" />}
+            </button>
+          );
+        })}
+      </div>
+      {motivo && <p className="mt-2 text-[12px] text-nf-text3">{motivo.descripcion}</p>}
+      {bandeja === 'corregido' ? (
+        <div className="mt-3"><CorregidasMovil onCambio={() => { cargarResumen(); setRecarga(n => n + 1); }} /></div>
+      ) : bandeja === 'gasto' ? (
+        <div className="mt-3">
+          {resumen.auto?.ia && (
+            <div className="rounded-2xl bg-white/5 p-4">
+              <p className="text-[12px] text-nf-text2">Este mes</p>
+              <p className="text-[24px] font-semibold tabular-nums">{dolar(resumen.auto.ia.gasto_mes)}</p>
+              <p className="text-[11px] text-nf-text3">de un tope de {dolar(resumen.auto.ia.tope)}</p>
+            </div>
+          )}
+          <HistorialIAMovil />
+        </div>
       ) : (
-        <FlujoMovil auto={auto} onCambio={cargarResumen} onRevisar={revisarAhora} revisando={lanzando}
-          pendientes={(resumen?.motivos || []).reduce((n, m) => n + m.grupos, 0)}
-          sugeridas={(resumen?.motivos || []).reduce((n, m) => n + (m.sugeridas ?? 0), 0)}
-          onVerCorregidas={() => setVerCorregidas(true)}
-          onVerSugeridas={() => {
-            const mas = [...(resumen?.motivos || [])].sort((a, b) => (b.sugeridas ?? 0) - (a.sugeridas ?? 0))[0];
-            if (mas) setMotivo(mas.clave);
-            setSoloSugeridas(true);
-            setTimeout(() => listaMovilRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
-          }} />
-      ))}
-      {verCorregidas ? <CorregidasMovil onCambio={() => { cargarResumen(); setGrupos([]); cargar(0); }} /> : (<>
-      {/* En varias filas y no deslizando: deslizando, el ultimo motivo salia
-          cortado por la derecha y parecia que no habia mas. */}
-      <div ref={listaMovilRef} className="flex flex-wrap gap-2 mb-2 scroll-mt-20">
-        {(resumen?.motivos || []).map(m => (
-          <button key={m.clave} onClick={() => setMotivo(m.clave)}
-            className={`shrink-0 h-9 px-3.5 rounded-full text-[13px] font-semibold ${motivo === m.clave ? 'bg-white text-black' : 'bg-white/10 text-nf-text2'}`}>
-            {m.titulo} <span className={`tabular-nums ${motivo === m.clave ? 'text-black/60' : 'text-nf-text3'}`}>{num(m.grupos)}</span>
-          </button>
-        ))}
-      </div>
-      {!resumen && !errorResumen && <p className="text-[13px] text-nf-text3 mb-3">Repasando el catálogo… la primera vez tarda unos segundos.</p>}
-      {errorResumen && (
-        <div className="mb-3">
-          <p className="text-[13px] text-nf-red">{errorResumen}</p>
-          <button onClick={cargarResumen} className="tap mt-2 h-9 px-3 rounded-full bg-white/10 text-[13px]">Reintentar</button>
-        </div>
-      )}
-      {elegido && <p className="text-[12px] text-nf-text3 mb-3">{elegido.descripcion} {num(elegido.archivos)} archivos en total.</p>}
-      <div className="space-y-2 mb-3">
-        <select className={input} value={canal} onChange={e => setCanal(e.target.value)}>
-          <option value="">Todos los canales</option>
-          {(resumen?.canales || []).map(c => <option key={c.channel_id} value={String(c.channel_id)}>{c.nombre}</option>)}
-        </select>
-        <input className={input} type="search" placeholder="Filtrar por título o archivo" value={texto} onChange={e => setTexto(e.target.value)} />
-        <label className="flex items-center space-x-2 text-[13px] text-nf-text2 py-1">
-          <input type="checkbox" checked={soloSugeridas} onChange={e => setSoloSugeridas(e.target.checked)} className="w-4 h-4 accent-nf-red" />
-          <span>Solo con sugerencia{elegido?.sugeridas ? ` (${num(elegido.sugeridas)})` : ''}</span>
-        </label>
-      </div>
-      {total != null && <p className="text-[12px] text-nf-text3 mb-2">{num(total)} {total === 1 ? 'grupo' : 'grupos'}</p>}
-      {error && (
-        <div className="mb-3">
-          <p className="text-[13px] text-nf-red">{error}</p>
-          <button onClick={() => cargar(grupos.length)} className="tap mt-2 h-9 px-3 rounded-full bg-white/10 text-[13px]">Reintentar</button>
-        </div>
-      )}
-      {cargando && !grupos.length && !error && <p className="text-[13px] text-nf-text3 py-4">Cargando…</p>}
-      {!cargando && !error && total === 0 && <p className="rounded-2xl bg-white/5 p-4 text-[13px] text-nf-text2">No hay nada que revisar aquí.</p>}
-      {grupos.map(g => (
-        <TarjetaRevision key={g.clave} g={g} onCorregir={() => setCorrigiendo(g)}
-          onIgnorado={n => { quitar(g.clave); toast(`Ignorado: ${num(n)} ${n === 1 ? 'archivo' : 'archivos'} dejan de salir aquí`, 'ok'); }}
-          onAceptada={n => { quitar(g.clave); toast(`«${conAño(g.sugerencia!.title, g.sugerencia!.year)}» puesta a ${num(n)} ${n === 1 ? 'archivo' : 'archivos'}`, 'ok', 5000); }}
-          onDescartada={() => setGrupos(gs => gs.map(x => x.clave === g.clave ? { ...x, sugerencia: null } : x))} />
-      ))}
-      {quedan && !error && (
-        <button onClick={() => cargar(grupos.length)} disabled={cargando} className="mt-2 w-full h-11 rounded-xl bg-white/10 disabled:opacity-40 text-[15px] font-medium">
-          {cargando ? 'Cargando…' : `Cargar más (${num(total! - grupos.length)})`}
-        </button>
-      )}
-      </>)}
-      {corrigiendo && (
-        <HojaCorregir g={corrigiendo} onCerrar={() => setCorrigiendo(null)}
-          onHecho={(n, ficha) => {
-            quitar(corrigiendo.clave); setCorrigiendo(null);
-            toast(`«${ficha}» puesta a ${num(n)} ${n === 1 ? 'archivo' : 'archivos'}`, 'ok', 5000);
-          }} />
+        <ColaMovil key={bandeja} bandeja={bandeja} canales={resumen.canales} onCambio={cargarResumen} recarga={recarga} />
       )}
     </div>
   );
 }
+
 
 /**
  * Medidas de la pantalla, para cuando algo no cuadra con los bordes.
