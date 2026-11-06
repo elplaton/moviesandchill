@@ -670,7 +670,7 @@ function HistorialIAMovil() {
       {h.lotes.map(l => (
         <div key={l.lote} className="py-1.5 border-b border-white/5">
           <div className="flex justify-between text-[13px]">
-            <span className="text-nf-text2">{fechaIA(l.creado)} · {num(l.grupos)} grupos{l.lote.startsWith('busqueda-') ? ' · carátulas' : ''}</span>
+            <span className="text-nf-text2">{fechaIA(l.creado)} · {num(l.grupos)} grupos{l.lote.startsWith('busqueda-') ? ' · búsqueda en TMDB' : l.lote.startsWith('prueba-') ? ' · prueba' : ''}</span>
             <span className="tabular-nums">{l.dolares != null ? dolar(l.dolares) : 'en marcha…'}</span>
           </div>
           {l.terminado && (
@@ -846,7 +846,7 @@ function TiraMovil({ auto, sugeridas, enLista, onCambio, onRevisar, lanzando, on
           <div className="mt-2 h-1 w-full overflow-hidden rounded-full bg-white/10">
             <div className={`h-full ${pct >= 1 ? 'bg-nf-red' : pct >= 0.8 ? 'bg-nf-warn' : 'bg-white/60'}`} style={{ width: `${pct * 100}%` }} />
           </div>
-          {ia.buscando && <p className="mt-1.5 text-[11px] text-nf-text3">Buscando carátulas en TMDB, {num(ia.buscando.hechos)} de {num(ia.buscando.total)}</p>}
+          {ia.buscando && <p className="mt-1.5 text-[11px] text-nf-text3">Claude buscando en TMDB, {num(ia.buscando.hechos)} de {num(ia.buscando.total)}</p>}
           {alTope && <p className="mt-1.5 text-[11px] text-nf-red">Tope del mes alcanzado: Claude no recibe nada hasta el mes que viene.</p>}
           {!encendida && ia.pendientes > 0 && <p className="mt-1.5 text-[11px] text-nf-text3">Apagado: {num(ia.pendientes)} grupos que podría mirar pasan directamente a ti.</p>}
           {encendida && (ia.preparando
@@ -893,12 +893,12 @@ function ColaMovil({ bandeja, canales, onCambio, recarga }: {
   const [corrigiendo, setCorrigiendo] = useState<GrupoRevision | null>(null);
   const peticion = useRef(0);
   useEffect(() => { const t = setTimeout(() => setQ(texto.trim()), 300); return () => clearTimeout(t); }, [texto]);
-  const cargar = async (offset: number) => {
+  const cargar = async (offset: number, limit = POR_PAGINA) => {
     const n = ++peticion.current;
     setCargando(true);
     if (!offset) setError('');
     try {
-      const params = new URLSearchParams({ motivo: bandeja, offset: String(offset), limit: String(POR_PAGINA) });
+      const params = new URLSearchParams({ motivo: bandeja, offset: String(offset), limit: String(limit) });
       if (canal) params.set('channel_id', canal);
       if (q) params.set('q', q);
       const r = await apiFetch(`/admin/revision?${params}`);
@@ -913,7 +913,9 @@ function ColaMovil({ bandeja, canales, onCambio, recarga }: {
       if (n === peticion.current) setCargando(false);
     }
   };
-  useEffect(() => { setGrupos([]); setTotal(null); cargar(0); }, [bandeja, canal, q, recarga]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { setGrupos([]); setTotal(null); cargar(0); }, [bandeja, canal, q]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Lo que se arregla solo mientras se mira sale de la lista sin perder lo ya cargado.
+  useEffect(() => { if (recarga) cargar(0, Math.max(POR_PAGINA, grupos.length)); }, [recarga]); // eslint-disable-line react-hooks/exhaustive-deps
   const quitar = (clave: string) => {
     setGrupos(gs => gs.filter(x => x.clave !== clave));
     setTotal(t => t == null ? t : Math.max(t - 1, 0));
@@ -984,16 +986,17 @@ function Revision() {
   const preparando = !!resumen?.auto?.ia?.preparando || !!resumen?.auto?.ia?.buscando;
   const enClaude = !!resumen?.auto?.ia?.lote;
   useEffect(() => {
-    const cada = corriendo || preparando ? 4000 : enClaude ? 30000 : 0;
-    if (!cada) return;
+    const cada = corriendo || preparando ? 4000 : enClaude ? 30000 : 60000;
     const t = setInterval(cargarResumen, cada);
     return () => clearInterval(t);
   }, [corriendo, preparando, enClaude]); // eslint-disable-line react-hooks/exhaustive-deps
-  const estaba = useRef(false);
+  // Cuando cambia lo que queda (algo se ha aplicado solo), la lista se vuelve a pedir.
+  const huella = resumen ? (resumen.motivos || []).map((m: MotivoRevision) => `${m.grupos}/${m.sugeridas}`).join(',') : '';
+  const huellaVista = useRef('');
   useEffect(() => {
-    if (estaba.current && !corriendo) setRecarga(n => n + 1);
-    estaba.current = corriendo;
-  }, [corriendo]);
+    if (huellaVista.current && huella !== huellaVista.current) setRecarga(n => n + 1);
+    huellaVista.current = huella;
+  }, [huella]);
 
   const revisarAhora = async () => {
     setLanzando(true);
@@ -1054,6 +1057,7 @@ function Revision() {
               <p className="text-[12px] text-nf-text2">Este mes</p>
               <p className="text-[24px] font-semibold tabular-nums">{dolar(resumen.auto.ia.gasto_mes)}</p>
               <p className="text-[11px] text-nf-text3">de un tope de {dolar(resumen.auto.ia.tope)}</p>
+              <p className="mt-2 text-[11px] text-nf-text3">Lo que ha costado de verdad cada petición: el servidor y las pruebas.</p>
             </div>
           )}
           <HistorialIAMovil />

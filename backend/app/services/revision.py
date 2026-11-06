@@ -50,6 +50,19 @@ def olvidar() -> None:
     _cache["grupos"] = None
 
 
+def quitar(clave: str) -> None:
+    """Saca de la lista un grupo que se acaba de arreglar solo (coincidencia
+    exacta o Claude), sin recalcularla: recalcular cuesta ~7 s y una pasada o
+    un lote arreglan cientos seguidos. Asi desaparece del panel en cuanto se
+    aplica, y no al acabar el lote."""
+    gs = _cache["grupos"]
+    if not gs:
+        return
+    motivo = clave.split("|", 1)[0]
+    if motivo in gs:
+        gs[motivo] = [g for g in gs[motivo] if g["clave"] != clave]
+
+
 def _norm(texto: str) -> str:
     t = unicodedata.normalize("NFKD", texto or "").encode("ascii", "ignore").decode().lower()
     return re.sub(r"[^a-z0-9]+", " ", t).strip()

@@ -118,6 +118,39 @@ def titulo_buscable(titulo: str | None) -> str | None:
     return t
 
 
+# Idioma, calidad y formato que van pegados a un titulo con capitulo:
+# «DBZ Kai 36 Cast Cat Gal Eusk», «2025 Blood White Blue HDRip».
+_ETIQUETAS_SUELTAS_RE = re.compile(
+    r"(?<![a-z0-9])(?:cast|castellano|cat|catalan|gal|gallego|eusk|euskera|esp|spa|lat|latino|dual|vose|vos|"
+    r"subs?|subtitulad[oa]s?|hdrip|webrip|web-?dl|bdrip|brrip|dvdrip|hdtv|bluray|\d{3,4}p|[xh]\.?26[45]|"
+    r"hevc|xvid|divx|ac3|aac|mp3|mkv|mp4|avi)(?![a-z0-9])", re.IGNORECASE)
+
+
+def sin_capitulo(titulo: str | None) -> str | None:
+    """El titulo sin el numero de capitulo ni lo que va detras, para buscar en
+    TMDB lo que se tomo por pelicula de un solo archivo: «Black Clover 151» ->
+    «Black Clover», «Patlabor 07 El ilustre 97 renovado» -> «Patlabor»,
+    «135 - Black Clover» -> «Black Clover», «DBZ Kai 36 Cast Cat Gal Eusk» ->
+    «DBZ Kai». None si no cambia nada o no queda un titulo. Un año (1900-2035)
+    no se toma por capitulo. Es solo una busqueda mas, que va detras de la del
+    titulo entero: «Rocky 2» tambien da «Rocky», y quien elige es Claude, con
+    las dos a la vista."""
+    base = titulo_buscable(titulo)
+    if not base:
+        return None
+    t = _ETIQUETAS_SUELTAS_RE.sub(" ", base.replace("_", " "))
+    t = re.sub(r"^\s*\d{1,4}\s*[-.:]\s*", "", t)          # «135 - Black Clover»
+    for m in re.finditer(r"(?<![\w])(\d{1,4})(?![\w])", t):
+        n = m.group(1)
+        if len(n) == 4 and 1900 <= int(n) <= 2035:
+            continue
+        if re.search(r"[^\W\d_]{2,}", t[:m.start()]):
+            t = t[:m.start()]
+        break
+    t = titulo_buscable(re.sub(r"\s+", " ", t).strip(" -·.:|,"))
+    return t if t and _norm(t) != _norm(base) else None
+
+
 # --- El tipo, por los archivos -------------------------------------------------
 
 _FICHA_SERIE_RE = re.compile(r"\b(?:serie|temporadas?|cap[ií]tulos|episodios|miniserie|season)\b", re.IGNORECASE)
@@ -294,6 +327,7 @@ async def mirar_grupo(g: dict, api_key: str) -> str:
                                            titulo=titulos[0], recalcular=False)
         await _guardar(g["clave"], g["titulo"], g["motivo"], "aplicada", porque, _ficha(elegida),
                        len(g["miembros"]), antes)
+        revision.quitar(g["clave"])     # fuera de la lista ya, sin recalcularla
         logger.info("Revision automatica: «%s» -> %s/%d «%s» (%d archivos; %s)", g["titulo"],
                     elegida["media_type"], elegida["tmdb_id"], elegida["title"], len(g["miembros"]), porque)
         return "aplicada"
@@ -402,8 +436,12 @@ async def de_fondo(api_key: str) -> None:
         try:
             if await revision_ia.recoger():
                 await revision_ia.mandar(api_key)
-            # Lo de «Sin carátula» lo busca Claude en TMDB (no va en lote).
-            await revision_ia.investigar_pendientes(api_key)
+            # Lo que no se resuelve con candidatas lo busca Claude en TMDB el
+            # mismo (no va en lote). Por tandas y aparte, para no frenar este
+            # bucle; el cerrojo evita dos a la vez.
+            if not revision_ia._cerrojo_investigar.locked():
+                from app.tasks import spawn
+                spawn(revision_ia.investigar_pendientes(api_key), "revision_ia_investigar")
         except Exception as e:
             logger.error("Revision con IA: no se ha podido recoger el lote: %s", e)
         ahora = time.time()

@@ -475,7 +475,7 @@ function TiraEstado({ auto, sugeridas, enLista, onCambio, onToast, onRevisar, la
               ))}
           </div>
           {ia.buscando && (
-            <p className="text-xs text-nf-faint">Buscando carátulas en TMDB, {num(ia.buscando.hechos)} de {num(ia.buscando.total)}</p>
+            <p className="text-xs text-nf-faint">Claude buscando en TMDB, {num(ia.buscando.hechos)} de {num(ia.buscando.total)}</p>
           )}
           {alTope && <p className="text-xs text-nf-red">Tope del mes alcanzado: Claude no recibe nada hasta el mes que viene.</p>}
           {!encendida && ia.pendientes > 0 && (
@@ -659,11 +659,13 @@ function Cola({ bandeja, canales, onCambio, onToast, recarga }: {
 
   useEffect(() => { const t = setTimeout(() => setQ(texto.trim()), 300); return () => clearTimeout(t); }, [texto]);
 
-  const cargar = useCallback(async (offset: number) => {
+  const cargados = useRef(0);
+  cargados.current = grupos.length;
+  const cargar = useCallback(async (offset: number, limit = POR_PAGINA) => {
     const n = ++peticion.current;
     setCargando(true);
     setError('');
-    const params = new URLSearchParams({ motivo: bandeja, offset: String(offset), limit: String(POR_PAGINA) });
+    const params = new URLSearchParams({ motivo: bandeja, offset: String(offset), limit: String(limit) });
     if (canal) params.set('channel_id', canal);
     if (q) params.set('q', q);
     try {
@@ -680,7 +682,12 @@ function Cola({ bandeja, canales, onCambio, onToast, recarga }: {
       if (n === peticion.current) setCargando(false);
     }
   }, [bandeja, canal, q]);
-  useEffect(() => { cargar(0); }, [cargar, recarga]);
+  useEffect(() => { cargar(0); }, [cargar]);
+  // Lo que se arregla solo mientras se mira (la pasada exacta, Claude) sale
+  // de la lista sin perder lo ya cargado más abajo.
+  useEffect(() => {
+    if (recarga) cargar(0, Math.max(POR_PAGINA, cargados.current));
+  }, [recarga]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const quitar = (clave: string) => {
     setGrupos(prev => prev.filter(g => g.clave !== clave));
@@ -845,6 +852,7 @@ function GastoClaude({ ia }: { ia: EstadoIA | null }) {
           <p className="text-sm text-nf-dim">Este mes</p>
           <p className="mt-1 text-title font-semibold tabular-nums text-white">{dolares(ia?.gasto_mes ?? 0)}</p>
           <p className="text-xs text-nf-faint">de un tope de {dolares(ia?.tope ?? 0)}</p>
+          <p className="mt-3 text-xs leading-relaxed text-nf-faint">Lo que ha costado de verdad cada petición: el servidor y las pruebas.</p>
         </div>
         <table className="w-full text-sm">
           <caption className="pb-2 text-left text-xs text-nf-faint">Por mes</caption>
@@ -886,7 +894,8 @@ function GastoClaude({ ia }: { ia: EstadoIA | null }) {
                 <tr key={l.lote} className="border-t border-nf-line text-right text-nf-dim">
                   <td className="py-2 text-left">
                     {fecha(l.creado)}
-                    {l.lote.startsWith('busqueda-') && <span className="ml-2 text-xs text-nf-faint">búsqueda de carátulas</span>}
+                    {l.lote.startsWith('busqueda-') && <span className="ml-2 text-xs text-nf-faint">búsqueda en TMDB</span>}
+                    {l.lote.startsWith('prueba-') && <span className="ml-2 text-xs text-nf-faint">prueba</span>}
                   </td>
                   <td className="text-white">{num(l.grupos)}</td>
                   {l.terminado ? (<>
@@ -940,16 +949,19 @@ export default function AdminRevision({ onToast }: { onToast: (m: string) => voi
   const preparando = !!resumen?.auto?.ia?.preparando || !!resumen?.auto?.ia?.buscando;
   const enClaude = !!resumen?.auto?.ia?.lote;
   useEffect(() => {
-    const cada = corriendo || preparando ? 4000 : enClaude ? 30000 : 0;
-    if (!cada) return;
+    // Sin nada en marcha, cada minuto: el bucle de fondo va arreglando cosas solo.
+    const cada = corriendo || preparando ? 4000 : enClaude ? 30000 : 60000;
     const t = setInterval(cargarResumen, cada);
     return () => clearInterval(t);
   }, [corriendo, preparando, enClaude, cargarResumen]);
-  const estaba = useRef(false);
+  // Cuando cambia lo que queda (algo se ha aplicado solo, o ha llegado una
+  // sugerencia), la lista se vuelve a pedir.
+  const huella = resumen ? resumen.motivos.map(m => `${m.grupos}/${m.sugeridas}`).join(',') : '';
+  const huellaVista = useRef('');
   useEffect(() => {
-    if (estaba.current && !corriendo) setRecarga(n => n + 1);
-    estaba.current = corriendo;
-  }, [corriendo]);
+    if (huellaVista.current && huella !== huellaVista.current) setRecarga(n => n + 1);
+    huellaVista.current = huella;
+  }, [huella]);
 
   const revisarAhora = async () => {
     setLanzando(true);

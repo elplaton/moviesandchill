@@ -164,6 +164,38 @@ _asyncio.run(revision_ia.mandar("k"))
 comprueba("y acabado ese, el siguiente si se prepara", 2, len(_llamadas))
 revision_ia._mandar, revision_ia.estado = _orig
 
+print("\nSin el capitulo, para buscar candidatas")
+from app.services.revision_auto import sin_capitulo
+for t, quiero in [("black clover 151", "black clover"), ("dbz kai 36 cast cat gal eusk", "dbz kai"),
+                  ("patlabor 07 el ilustre 97 renovado", "patlabor"), ("135 - Black Clover", "Black Clover"),
+                  ("astro boy 01 24", "astro boy"), ("Minky Momo", None), ("el pato donald prohibido cazar", None),
+                  ("Dune 2021", None), ("capitulo 1777", None), ("3", None)]:
+    comprueba(f"«{t}»", quiero, sin_capitulo(t))
+
+print("\nQue le toca buscar a Claude el mismo")
+S = revision_ia.situacion_de
+M = revision_ia.MODELO
+fila = lambda motivo, estado, ia: {"motivo": motivo, "estado": estado, "ia": ia}
+T = {"titulo": "Black Clover 150"}
+comprueba("sin carátula sin mirar", "sin_caratula", S(fila("sin_caratula", "sin_candidato", None), T))
+comprueba("sin candidatas", "sin_candidatas", S(fila("sin_ficha", "sin_candidato", "sin_candidatas"), T))
+comprueba("sin candidatas y sin nada que buscar («Capítulo 1840»)", None,
+          S(fila("sin_ficha", "sin_candidato", "sin_candidatas"), {"titulo": "Capítulo 1840"}))
+comprueba("el lote dijo ninguna", "ninguna", S(fila("sin_ficha", "sin_candidato", M), T))
+comprueba("el lote sugirió: lo decides tú", None, S(fila("dudosa", "sugerida", M), T))
+comprueba("aún espera al lote", None, S(fila("sin_ficha", "sin_candidato", None), T))
+comprueba("capítulos sin nombre de serie", "sin_nombre", S(fila("sin_ficha", "sin_candidato", None), {"sin_nombre": True}))
+comprueba("ya buscado no se repite", None, S(fila("sin_ficha", "sin_candidato", revision_ia.MARCA_BUSQUEDA), T))
+comprueba("ni sin respuesta", None,
+          S(fila("sin_ficha", "sin_candidato", revision_ia.MARCA_BUSQUEDA + ":sin_respuesta"), {}))
+
+print("\nLo aplicado sale de la lista en el momento")
+from app.services import revision as _rev
+_rev._cache["grupos"] = {"sin_ficha": [{"clave": "sin_ficha|movie|a|"}, {"clave": "sin_ficha|movie|b|"}]}
+_rev.quitar("sin_ficha|movie|a|")
+comprueba("queda el otro", ["sin_ficha|movie|b|"], [g["clave"] for g in _rev._cache["grupos"]["sin_ficha"]])
+_rev.olvidar()
+
 print()
 print(f"{len(fallos)} fallidas" if fallos else "todas correctas")
 sys.exit(1 if fallos else 0)
