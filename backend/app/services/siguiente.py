@@ -142,6 +142,18 @@ def episodios_delante(rel: str, terminados: set[str],
     return fuera
 
 
+def hay_posterior(claves, actual: tuple[int, int]) -> bool:
+    """Si existe **algun** episodio despues de este, se pueda ver o no.
+
+    Es lo que decide si este es el ultimo capitulo de la serie, y solo
+    entonces se ofrecen titulos relacionados al acabar. Da igual que el
+    siguiente este ya visto, comprimido o sin descargar: si existe, esto no
+    es el final de la serie y la pantalla de «Más títulos como este» no toca
+    (salia en mitad de las temporadas de «Tulsa King»).
+    """
+    return any(c > actual for c in claves)
+
+
 def terminados_de(filas: list[dict]) -> set[str]:
     """Las rutas que esta cuenta ya ha visto enteras.
 
@@ -182,8 +194,9 @@ async def que_viene(path: str, user_id: int, tmdb_id: int | None = None) -> dict
     Devuelve siempre un diccionario con la misma forma: `kind` dice si esto es
     una serie (si no, no hay nada que ofrecer), `siguiente` el episodio que se
     puede ver ya, `pendientes` cuantos quedan descargados por delante y
-    `descargables` los que se pueden bajar. La decision de que tarjeta se
-    dibuja la toma el cliente con esos cuatro datos.
+    `descargables` los que se pueden bajar y `ultimo` si no existe ningun
+    episodio despues de este (solo entonces se ofrecen relacionados). La
+    decision de que tarjeta se dibuja la toma el cliente con esos datos.
     """
     from app.services import interior, reproduccion
     if reproduccion.es_ruta(path):
@@ -225,8 +238,9 @@ async def que_viene(path: str, user_id: int, tmdb_id: int | None = None) -> dict
         }
 
     descargables: list[dict] = []
-    cuantos = cuantos_bajar(len(delante))
-    if cuantos and tmdb_id:
+    en_disco = {(ts, es) for ts, es, _ in episodios_en_disco(grupo_de(rel))}
+    filas: list[dict] = []
+    if tmdb_id:
         from app.database.media import get_media_by_tmdb
 
         try:
@@ -234,9 +248,15 @@ async def que_viene(path: str, user_id: int, tmdb_id: int | None = None) -> dict
         except Exception as e:
             logger.warning("No se pudo mirar que episodios se pueden bajar: %s", e)
             filas = []
-        en_disco = {(ts, es) for ts, es, _ in episodios_en_disco(grupo_de(rel))}
+    cuantos = cuantos_bajar(len(delante))
+    if cuantos and filas:
         descargables = pendientes_de_bajar(filas, (temporada, episodio), en_disco,
                                            _ocupados_ahora(), cuantos)
+    # El ultimo capitulo solo si no hay nada despues ni en disco ni en el
+    # catalogo. Sin ficha (y sin catalogo que mirar) no se puede saber, y
+    # ante la duda no es el ultimo.
+    claves = en_disco | {_clave(f) for f in filas if f.get("episode") is not None}
+    ultimo = bool(tmdb_id) and bool(filas) and not hay_posterior(claves, (temporada, episodio))
 
     return {
         "kind": "series",
@@ -247,6 +267,7 @@ async def que_viene(path: str, user_id: int, tmdb_id: int | None = None) -> dict
         "siguiente": siguiente,
         "pendientes": len(delante),
         "descargables": descargables,
+        "ultimo": ultimo,
         "title": (ficha or {}).get("title") or grupo_de(rel),
         "poster": (ficha or {}).get("poster"),
         "backdrop": (ficha or {}).get("backdrop"),
@@ -300,6 +321,8 @@ async def _que_viene_streaming(path: str, user_id: int) -> dict:
     enlaces = await enlaces_de_titulo(tid, "tv")
     # Un rar que guarda el episodio tal cual tambien se puede ver ya.
     ver = await interior.ver_de(enlaces)
+    claves = {(e.get("season") or 0, e["episode"]) for e in enlaces if e.get("episode") is not None}
+    ultimo = not hay_posterior(claves, (temporada, episodio))
     for e in enlaces:
         if e.get("episode") is None:
             continue
@@ -329,6 +352,7 @@ async def _que_viene_streaming(path: str, user_id: int) -> dict:
         # Todo lo de delante se puede ver ya: no hay nada que ofrecer bajar.
         "pendientes": len(delante),
         "descargables": [],
+        "ultimo": ultimo,
         "title": actual["title"],
         "poster": actual["poster"],
         "backdrop": actual["backdrop"],

@@ -1,4 +1,4 @@
-import { IClose, IPlay } from './Icons';
+import { IClose } from './Icons';
 import type { EstadoSiguiente } from '../hooks/useSiguiente';
 import type { Relacionado } from '../services/siguiente';
 
@@ -17,8 +17,9 @@ interface Props {
  *
  * En vertical el vídeo va arriba y no a un lado como en la web: con tres
  * carátulas por fila se ven seis sin desplazar, que es lo que cabe en una
- * mano. «Ver créditos» devuelve el vídeo a pantalla completa; al terminar,
- * esta pantalla vuelve.
+ * mano. Sin botón de «Ver créditos» (esto existe para saltarlos); tocar el
+ * vídeo encogido lo devuelve a pantalla completa por si alguien quiere
+ * quedarse.
  */
 export default function FinTitulo({ sig, titulo, subtitulo, onSalir, onElegir }: Props) {
   if (sig.decision.tipo !== 'final') return null;
@@ -28,15 +29,9 @@ export default function FinTitulo({ sig, titulo, subtitulo, onSalir, onElegir }:
       <p className="mt-1 text-[22px] font-bold leading-tight">{titulo}</p>
       {subtitulo && <p className="text-[14px] text-nf-text2">{subtitulo}</p>}
       <div className="mt-4 flex gap-2">
-        <button onClick={sig.verCreditos}
-          className="flex h-[48px] flex-1 items-center justify-center gap-2 rounded-xl bg-white text-[15px] font-semibold
-                     text-black active:bg-white/85">
-          <span className="w-5 h-5"><IPlay /></span>
-          Ver créditos
-        </button>
         <button onClick={onSalir}
-          className="flex h-[48px] flex-1 items-center justify-center gap-2 rounded-xl bg-white/15 text-[15px]
-                     font-semibold active:bg-white/25">
+          className="flex h-[48px] flex-1 items-center justify-center gap-2 rounded-xl bg-white text-[15px]
+                     font-semibold text-black active:bg-white/85">
           <span className="w-4 h-4"><IClose /></span>
           Salir
         </button>

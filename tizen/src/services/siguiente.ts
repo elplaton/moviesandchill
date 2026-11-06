@@ -60,6 +60,9 @@ export interface QueViene {
   /** Cuantos episodios quedan descargados por delante y sin ver. */
   pendientes?: number;
   descargables?: Descargable[];
+  /** No existe ningun episodio despues de este (ni visto, ni sin descargar,
+   *  ni comprimido): es el final de la serie. */
+  ultimo?: boolean;
   title?: string;
   poster?: string | null;
   backdrop?: string | null;
@@ -67,9 +70,10 @@ export interface QueViene {
 
 /**
  * Que toca al final: nada, la tarjeta de ver el siguiente, la de descargar,
- * o el **final**: no hay mas que ver de esto (una pelicula, o el ultimo
- * episodio que hay), y el reproductor se encoge para ofrecer titulos
- * relacionados, como Netflix.
+ * o el **final**: una pelicula, o el **ultimo capitulo de la serie** (no hay
+ * ninguno despues, lo dice el servidor con `ultimo`), y el reproductor se
+ * encoge para ofrecer titulos relacionados, como Netflix. En una serie que
+ * sigue no sale nunca, aunque el siguiente no se pueda poner ahora.
  */
 export type Decision =
   | { tipo: 'nada' }
@@ -85,16 +89,22 @@ export type Decision =
  * viaja dentro de esa misma tarjeta como segundo boton. Solo cuando no hay
  * nada que ver se dedica la tarjeta a preguntar por la descarga.
  */
-export function decidir(q: QueViene | null | undefined, hayFicha = false): Decision {
+export function decidir(q: QueViene | null | undefined, hayFicha = false,
+                        mediaType?: string | null): Decision {
   if (!q) return { tipo: 'nada' };
+  const conFicha = hayFicha || !!q.tmdb_id;
   if (q.kind === 'series') {
     const bajar = q.descargables || [];
     if (q.siguiente) return { tipo: 'ver', siguiente: q.siguiente, bajar };
     if (bajar.length) return { tipo: 'bajar', bajar };
+    // Relacionados en una serie, solo en su ultimo capitulo.
+    return q.ultimo && conFicha ? { tipo: 'final' } : { tipo: 'nada' };
   }
-  // Sin nada mas que ver de esto: la pantalla de relacionados, que necesita
-  // saber de que titulo se trata para buscar los suyos.
-  return hayFicha || q.tmdb_id ? { tipo: 'final' } : { tipo: 'nada' };
+  // Una pelicula: la pantalla de relacionados, que necesita saber de que
+  // titulo se trata para buscar los suyos. Si el servidor no sabe que es
+  // ('desconocido'), solo si el reproductor dice que es una pelicula.
+  if (q.kind === 'movie' || mediaType === 'movie') return conFicha ? { tipo: 'final' } : { tipo: 'nada' };
+  return { tipo: 'nada' };
 }
 
 /** Donde empiezan los creditos de este archivo (ver /api/creditos). */

@@ -119,7 +119,8 @@ export interface EstadoSiguiente {
   relacionados: Relacionado[];
   /** Segundo en que empiezan los créditos, si se sabe. */
   inicioCreditos: number | null;
-  /** «Ver créditos»: quita la pantalla del final hasta que acabe el vídeo. */
+  /** Volver a pantalla completa desde la pantalla del final (pulsando el vídeo
+   *  encogido); no vuelve a salir hasta que acabe el vídeo. */
   verCreditos: () => void;
   mirar: (tiempo: number, duracion: number) => void;
   alTerminar: () => boolean;
@@ -189,7 +190,7 @@ export function useSiguiente({ path, tmdbId, mediaType, onVer, onCerrar, pausar 
   const creditosUltima = useRef(0);
   const creditosRef = useRef<{ inicio: number | null; origen: string | null }>({ inicio: null, origen: null });
   const preguntaFinal = useRef(false);
-  // «Ver créditos» en la pantalla del final: no vuelve a salir hasta que acaba.
+  // Se volvió a pantalla completa desde la del final: no sale hasta que acaba.
   const finalVisto = useRef(false);
   // De qué archivo se ha avisado ya de que empezaron los créditos.
   const creditosAvisados = useRef<string | null>(null);
@@ -297,7 +298,7 @@ export function useSiguiente({ path, tmdbId, mediaType, onVer, onCerrar, pausar 
       });
       return;
     }
-    const d = decidir(datosRef.current, !!tmdbId);
+    const d = decidir(datosRef.current, !!tmdbId, mediaType);
     if (d.tipo === 'nada') return;
     // Lo que se puede ver (y la pantalla del final) se ofrece al empezar los
     // créditos; lo que hay que descargar, en cuanto se sabe, porque bajar un
@@ -425,9 +426,10 @@ export function useSiguiente({ path, tmdbId, mediaType, onVer, onCerrar, pausar 
     // Preguntando «¿Sigues ahí?» el reproductor se queda abierto esperando.
     if (preguntaRef.current) return true;
     // Si el vídeo acaba antes de haber preguntado (uno muy corto, o se saltó
-    // al final), con la ficha basta para la pantalla del final.
-    const d = datosRef.current ? decidir(datosRef.current, !!tmdbId)
-                               : (tmdbId ? { tipo: 'final' } as Decision : SIN_NADA);
+    // al final), con la ficha de una película basta para la pantalla del
+    // final. De una serie no: sin preguntar no se sabe si es el último.
+    const d = datosRef.current ? decidir(datosRef.current, !!tmdbId, mediaType)
+                               : (tmdbId && mediaType === 'movie' ? { tipo: 'final' } as Decision : SIN_NADA);
     if (d.tipo === 'final') {
       terminado.current = true;
       ultimas.current.pausar?.();
@@ -441,7 +443,7 @@ export function useSiguiente({ path, tmdbId, mediaType, onVer, onCerrar, pausar 
     ultimas.current.pausar?.();
     setTarjeta((actual) => (actual.tipo === 'nada' ? d : actual));
     return true;
-  }, [tmdbId]);
+  }, [tmdbId, mediaType]);
 
   return {
     decision: tarjeta,

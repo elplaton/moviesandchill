@@ -15,7 +15,7 @@ export interface OpcionSig {
 /**
  * Los botones de la tarjeta, en el orden en que los recorre el mando.
  *
- * Son dos: **la acción** y cerrar. Ver el siguiente y dejar bajando el de
+ * Son dos: **la acción** y cerrar (al ofrecer el siguiente, solo la acción). Ver el siguiente y dejar bajando el de
  * después eran dos botones y ahora son uno solo, porque en ese momento nadie
  * está eligiendo entre dos cosas: está diciendo «sigue».
  *
@@ -29,9 +29,9 @@ export function opcionesSiguiente(sig: EstadoSiguiente): OpcionSig[] {
   if (d.tipo === 'nada' || d.tipo === 'final' || (d.tipo === 'bajar' && !d.bajar.length)) return [];
   if (d.tipo === 'ver') {
     return [
+      // Sin «Ver créditos»: todo esto existe para saltarlos. Atrás la cierra.
       { clave: 'hacer', principal: true, onSelect: sig.confirmar,
         texto: d.bajar.length ? sig.texto : `Siguiente episodio · ${d.siguiente.label}` },
-      { clave: 'cerrar', texto: 'Ver créditos', onSelect: sig.descartar },
     ];
   }
   return [
@@ -143,7 +143,7 @@ export default function SiguienteEp({ sig, cursor, enfocada, opciones }: Props) 
         </div>
         <p className="mt-6 text-caption text-tv-text3">
           {PUNTERO ? 'Pulsa una opción'
-            : enfocada ? '◀ ▶ eligen · OK confirma · Atrás cierra'
+            : enfocada ? (opciones.length > 1 ? '◀ ▶ eligen · OK confirma · Atrás cierra' : 'OK confirma · Atrás cierra')
             : '▼ para elegir'}
         </p>
       </div>

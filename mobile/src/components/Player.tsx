@@ -447,7 +447,7 @@ export default function Player(props: Props) {
         crossOrigin="use-credentials" x-webkit-airplay="allow"
         onClick={final ? sig.verCreditos : undefined}
         // En la pantalla del final el video se encoge arriba y sigue con los
-        // creditos; tocarlo es «Ver créditos».
+        // creditos; tocarlo lo devuelve a pantalla completa.
         className={`bg-black object-contain transition-all duration-500 ease-out ${final
           ? 'absolute inset-x-0 top-0 h-[38%] w-full pt-[env(safe-area-inset-top)]'
           : 'w-full h-full'}`}>

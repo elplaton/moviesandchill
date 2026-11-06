@@ -30,8 +30,9 @@ export default function NextUp({ sig }: { sig: EstadoSiguiente }) {
   if (d.tipo === 'final') return null;
   if (d.tipo === 'nada' && !sig.mensaje) return null;
 
-  // Ver el siguiente: como Netflix, dos botones sobre los créditos, y el de
-  // seguir es la cuenta atrás (se va llenando y, al llenarse, se pulsa solo).
+  // Ver el siguiente: un solo botón sobre los créditos, que es la cuenta
+  // atrás (se va llenando y, al llenarse, se pulsa solo). Sin «Ver
+  // créditos»: todo esto existe para saltarlos.
   if (d.tipo === 'ver') {
     const lleno = sig.corriendo ? sig.progreso : 1;
     return (
@@ -41,11 +42,6 @@ export default function NextUp({ sig }: { sig: EstadoSiguiente }) {
           <p className="rounded bg-black/70 px-3 py-1.5 text-sm text-nf-ok">{sig.mensaje}</p>
         )}
         <div className="flex items-center gap-3">
-          <button onClick={sig.descartar}
-            className="rounded bg-black/60 px-5 py-3 text-base font-semibold text-white ring-1 ring-white/40
-                       transition-colors hover:bg-white/20">
-            Ver créditos
-          </button>
           <button onClick={sig.confirmar} aria-label={sig.texto}
             className="relative overflow-hidden rounded bg-white/35 px-6 py-3 text-base font-semibold text-black
                        shadow-panel">

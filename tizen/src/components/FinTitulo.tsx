@@ -16,7 +16,6 @@ interface Props {
   /** Dónde está el mando: fila 0 los botones, fila 1 las carátulas. */
   fila: number;
   columna: number;
-  onVerCreditos: () => void;
   onSalir: () => void;
   onElegir: (i: number) => void;
 }
@@ -31,10 +30,10 @@ interface Props {
  * ◀▶ se mueven y OK elige. El foco es una clase, como en el resto de la app,
  * y lo único que se anima es el `transform` de la carátula enfocada.
  */
-export default function FinTitulo({ sig, titulo, subtitulo, fila, columna, onVerCreditos, onSalir, onElegir }: Props) {
+export default function FinTitulo({ sig, titulo, subtitulo, fila, columna, onSalir, onElegir }: Props) {
   if (sig.decision.tipo !== 'final') return null;
+  // Sin «Ver créditos»: todo esto existe para saltarlos.
   const botones = [
-    { texto: 'Ver créditos', icono: true, accion: onVerCreditos },
     { texto: 'Salir', icono: false, accion: onSalir },
   ];
   const lista = sig.relacionados.slice(0, MAX_RELACIONADOS);

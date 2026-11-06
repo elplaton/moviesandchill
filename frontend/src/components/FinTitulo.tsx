@@ -1,4 +1,4 @@
-import { IconClose, IconPlay } from './ui/Icon';
+import { IconClose } from './ui/Icon';
 import type { EstadoSiguiente } from '../hooks/useSiguiente';
 import type { Relacionado } from '../services/siguiente';
 
@@ -16,9 +16,10 @@ interface Props {
  * izquierda —lo hace el reproductor— y sigue con los créditos, y el resto de
  * la pantalla ofrece qué ver después.
  *
- * «Ver créditos» devuelve el vídeo a pantalla completa; al terminar, esta
- * pantalla vuelve. Antes, al acabar una película el reproductor se cerraba de
- * golpe y devolvía a la portada.
+ * Sin botón de «Ver créditos» (esto existe para saltarlos); pulsar el vídeo
+ * encogido lo devuelve a pantalla completa por si alguien quiere quedarse.
+ * Antes, al acabar una película el reproductor se cerraba de golpe y
+ * devolvía a la portada.
  */
 export default function FinTitulo({ sig, titulo, subtitulo, onSalir, onElegir }: Props) {
   if (sig.decision.tipo !== 'final') return null;
@@ -31,13 +32,8 @@ export default function FinTitulo({ sig, titulo, subtitulo, onSalir, onElegir }:
         <p className="mt-2 text-3xl font-bold leading-tight">{titulo}</p>
         {subtitulo && <p className="mt-1 text-lg text-nf-dim">{subtitulo}</p>}
         <div className="mt-6 flex flex-wrap items-center gap-3">
-          <button onClick={sig.verCreditos}
-            className="flex items-center gap-2 rounded bg-white px-5 py-3 text-base font-semibold text-black hover:bg-white/85">
-            <span className="w-5 h-5"><IconPlay /></span>
-            Ver créditos
-          </button>
           <button onClick={onSalir}
-            className="flex items-center gap-2 rounded bg-white/15 px-5 py-3 text-base font-semibold text-white hover:bg-white/25">
+            className="flex items-center gap-2 rounded bg-white px-5 py-3 text-base font-semibold text-black hover:bg-white/85">
             <span className="w-4 h-4"><IconClose /></span>
             Salir
           </button>

@@ -26,8 +26,8 @@ export default function SiguienteEp({ sig }: { sig: EstadoSiguiente }) {
   if (d.tipo === 'final') return null;
   if (d.tipo === 'nada' && !sig.mensaje) return null;
 
-  // Ver el siguiente: como Netflix, «Ver créditos» y «Siguiente episodio», y
-  // el de seguir es la cuenta atrás (se va llenando y, al llenarse, se pulsa).
+  // Ver el siguiente: un solo botón, que es la cuenta atrás (se va llenando y,
+  // al llenarse, se pulsa). Sin «Ver créditos»: todo esto existe para saltarlos.
   if (d.tipo === 'ver') {
     const lleno = Math.round((sig.corriendo ? sig.progreso : 1) * 100);
     return (
@@ -36,11 +36,6 @@ export default function SiguienteEp({ sig }: { sig: EstadoSiguiente }) {
           <p className="mb-2 inline-block rounded-lg bg-black/80 px-3 py-1.5 text-[13px] text-nf-ok">{sig.mensaje}</p>
         )}
         <div className="flex items-center gap-2">
-          <button onClick={sig.descartar}
-            className="h-[52px] shrink-0 rounded-xl bg-black/70 px-4 text-[15px] font-semibold ring-1 ring-white/40
-                       active:bg-white/20">
-            Ver créditos
-          </button>
           <button onClick={sig.confirmar} aria-label={sig.texto}
             className="relative h-[52px] min-w-0 flex-1 overflow-hidden rounded-xl bg-white/35 text-[15px] font-semibold
                        text-black">

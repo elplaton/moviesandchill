@@ -29,7 +29,7 @@ falso.downloader = None
 sys.modules["app.routers.download"] = falso
 
 from app.services.siguiente import (cuantos_bajar, elegir_archivo, episodios_delante,
-                                    etiqueta, pendientes_de_bajar, terminados_de)
+                                    etiqueta, hay_posterior, pendientes_de_bajar, terminados_de)
 
 fallos = []
 def comprueba(que, esperado, obtenido):
@@ -112,6 +112,13 @@ comprueba("terminado es a partir del 95 %",
                                 {"path": "b", "position": 90, "duration": 100},
                                 {"path": "c", "position": 10, "duration": 0}]))
 
+print("\nEl ultimo capitulo (solo entonces, relacionados)")
+claves = {(1, 1), (1, 2), (2, 1), (2, 2), (0, 1)}
+comprueba("con la temporada siguiente en el catalogo no es el ultimo", True, hay_posterior(claves, (1, 2)))
+comprueba("el ultimo de la ultima temporada es el ultimo", False, hay_posterior(claves, (2, 2)))
+comprueba("un especial (temporada 0) no cuenta como siguiente", False, hay_posterior(claves, (2, 2)))
+comprueba("desde un especial, la serie sigue", True, hay_posterior(claves, (0, 1)))
+
 print()
-print(f"{21 - len(fallos)} correctas, {len(fallos)} fallidas")
+print(f"{25 - len(fallos)} correctas, {len(fallos)} fallidas")
 sys.exit(1 if fallos else 0)

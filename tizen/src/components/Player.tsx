@@ -406,11 +406,11 @@ export default function Player(props: Props) {
       if (key === 'down') { if (n) setCursorFin({ fila: 1, col: 0 }); return true; }
       if (key === 'left') { setCursorFin(c => ({ ...c, col: Math.max(0, c.col - 1) })); return true; }
       if (key === 'right') {
-        setCursorFin(c => ({ ...c, col: Math.min(c.fila === 0 ? 1 : Math.max(0, n - 1), c.col + 1) }));
+        setCursorFin(c => ({ ...c, col: Math.min(c.fila === 0 ? 0 : Math.max(0, n - 1), c.col + 1) }));
         return true;
       }
       if (key === 'enter') {
-        if (cursorFin.fila === 0) { if (cursorFin.col === 0) sig.verCreditos(); else close(); }
+        if (cursorFin.fila === 0) close();
         else elegirRelacionado(cursorFin.col);
         return true;
       }
@@ -504,6 +504,18 @@ export default function Player(props: Props) {
       ultimas.current.save();
     };
     const onEnded = () => {
+      // Un `ended` lejos del final no es el final: es que el tramo de video
+      // llego mas corto de lo prometido (pasa al ver sin descargar, si
+      // Telegram corta a mitad). Sin esto la tele daba el capitulo por
+      // terminado a la mitad, lo marcaba visto, sacaba la pantalla del final
+      // y, al volver, el video (ya «acabado») empezaba desde el principio.
+      // Se vuelve a pedir ese punto y se sigue, como en la web y el movil.
+      if (v.duration && isFinite(v.duration) && v.currentTime < v.duration - 15) {
+        const t = v.currentTime;
+        v.currentTime = Math.max(0, t - 1);
+        v.play().catch(() => {});
+        return;
+      }
       markWatched({ path, title, subtitle, poster, backdrop,
                     tmdb_id: tmdbId ?? null, media_type: mediaType,
                     position: v.duration || 0, duration: v.duration || 0 });
@@ -713,7 +725,7 @@ export default function Player(props: Props) {
 
       <FinTitulo sig={sig} titulo={title} subtitulo={subtitle}
         fila={cursorFin.fila} columna={cursorFin.col}
-        onVerCreditos={sig.verCreditos} onSalir={close} onElegir={elegirRelacionado} />
+        onSalir={close} onElegir={elegirRelacionado} />
 
       <SiguesAhi sig={sig} cursor={cursorSigues} titulo={title} />
       <SiguienteEp sig={sig} enfocada={mandoEnTarjeta}
