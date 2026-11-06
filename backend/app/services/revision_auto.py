@@ -32,8 +32,9 @@ y se decide con `decidir()`:
 
 Lo deshecho y lo descartado por el admin no se vuelve a aplicar ni a sugerir.
 
-Corre en segundo plano al arrancar y cada 6 h, **solo si hay grupos sin
-mirar**, y con «Revisar ahora» del panel.
+Corre **segun entra**: cada 15 min mira si el catalogo ha cambiado y, si si,
+pasa por los grupos que no se han mirado (ver `de_fondo`); y con «Revisar
+ahora» del panel.
 """
 import asyncio
 import json
@@ -354,29 +355,59 @@ async def pasada(api_key: str) -> dict:
         return dict(_estado)
 
 
-# Cada cuanto se mira si el lote de la revision con IA ha acabado.
+# Cada cuanto se mira si el lote de la revision con IA ha acabado, y cada
+# cuanto si el catalogo ha cambiado (archivos nuevos, fichas recien buscadas).
 MIRA_LOTE_S = 5 * 60
+MIRA_CAMBIOS_S = 15 * 60
+
+
+async def _huella() -> tuple | None:
+    """Lo que cambia cuando entra algo que puede acabar en Revision: archivos
+    nuevos y archivos que el indexador acaba de buscar en TMDB (un archivo no
+    sale en Revision hasta que se ha buscado y no se ha encontrado)."""
+    from app.database.connection import get_pool
+
+    pool = get_pool()
+    if not pool:
+        return None
+    async with pool.acquire() as conn:
+        f = await conn.fetchrow("""SELECT COALESCE(MAX(id), 0) AS ultimo,
+                                          COUNT(*) FILTER (WHERE tmdb_searched) AS buscados,
+                                          COUNT(*) FILTER (WHERE tmdb_manual) AS manuales
+                                     FROM media_items""")
+    return tuple(f)
 
 
 async def de_fondo(api_key: str) -> None:
-    """Al arrancar y cada 6 h, la pasada exacta (solo si hay grupos sin mirar)
-    y, con la revision con IA encendida (services/revision_ia.py), un lote
-    con lo que la exacta no resolvio. Cada 5 min se mira si el lote acabo."""
-    from app.services import revision_ia
+    """La revision va **segun entra**: cada 15 min se mira si el catalogo ha
+    cambiado y, si si, la pasada exacta (lo que cuadra perfecto se acepta
+    solo) y despues un lote para Claude con lo que quede (services/
+    revision_ia.py, si esta encendida). Cada 5 min se mira si el lote acabo y,
+    al acabar, se manda el siguiente si mientras tanto ha entrado mas. Lo que
+    se quedo sin coincidencia se vuelve a mirar cada 6 h (y a los 30 dias se
+    busca otra vez en TMDB), por si TMDB añade la ficha despues."""
+    from app.services import revision, revision_ia
 
     await asyncio.sleep(ESPERA_ARRANQUE_S)
-    ultima = 0.0
+    huella_vista, ultima_completa, ultimo_cambio = None, 0.0, 0.0
     while True:
         try:
-            await revision_ia.recoger()
+            if await revision_ia.recoger():
+                await revision_ia.mandar(api_key)
         except Exception as e:
             logger.error("Revision con IA: no se ha podido recoger el lote: %s", e)
-        if time.time() - ultima >= CADA_S:
-            ultima = time.time()
+        ahora = time.time()
+        if ahora - ultimo_cambio >= MIRA_CAMBIOS_S or ahora - ultima_completa >= CADA_S:
+            ultimo_cambio = ahora
             try:
-                if await _por_mirar():
-                    await pasada(api_key)
-                await revision_ia.mandar(api_key)
+                huella = await _huella()
+                if huella != huella_vista or ahora - ultima_completa >= CADA_S:
+                    if huella_vista is not None and huella != huella_vista:
+                        revision.olvidar()   # que los grupos se calculen con lo nuevo
+                    huella_vista, ultima_completa = huella, ahora
+                    if await _por_mirar():
+                        await pasada(api_key)
+                    await revision_ia.mandar(api_key)
             except Exception as e:
                 logger.error("Revision automatica fallo: %s", e)
         await asyncio.sleep(MIRA_LOTE_S)

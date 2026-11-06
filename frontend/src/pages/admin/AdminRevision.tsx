@@ -729,7 +729,7 @@ export default function AdminRevision({ onToast }: { onToast: (m: string) => voi
             </p>
             <p className="text-nf-faint text-[11px] mt-1">
               Lo que coincide exactamente con TMDB (título, y año o capítulos) se pone solo; lo dudoso queda
-              aquí con su sugerencia. Mira lo nuevo al arrancar y cada 6 h.
+              aquí con su sugerencia. Va según entra: mira lo nuevo cada 15 minutos.
             </p>
           </div>
           <div className="flex gap-2">
