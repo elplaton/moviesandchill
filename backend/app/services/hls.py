@@ -612,6 +612,14 @@ async def trozo(s: Sesion, n: int) -> list[str]:
             if n in s.listos and all(os.path.isfile(r) for r in s.listos[n]):
                 return list(s.listos[n])
             if not _fabricando(s, n):
+                # Solo la peticion mas reciente mueve ffmpeg. Tras un salto, la
+                # del trozo de antes sigue viva aqui aunque el reproductor ya no
+                # la quiera, y si las dos pudieran reiniciarlo cada una lo
+                # llevaria a lo suyo matando lo de la otra: se vio arrancar
+                # ffmpeg en el 4 y en el 412 decenas de veces en un segundo
+                # hasta que las dos se rendian y el video se quedaba sin nada.
+                if s.pedido != n:
+                    raise SinHls(f"el trozo {n} ya no se espera: se ha pedido el {s.pedido}")
                 if s.proc and s.proc.returncode not in (None, 0):
                     error = (await s.proc.stderr.read()).decode(errors="replace")[-300:] if s.proc.stderr else ""
                     logger.warning("HLS al vuelo %s: ffmpeg fallo (%s): %s", s.path, s.proc.returncode, error.strip())

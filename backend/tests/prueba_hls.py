@@ -137,6 +137,7 @@ async def main(carpeta):
         await probar(carpeta, titulo, mp, mp4.fotogramas_clave)
 
     await probar_indice_escaso(carpeta, peli, claves, duracion)
+    await probar_salto_con_peticion_vieja(carpeta, peli, claves, duracion)
 
     print("MP4 que no se sirven por aqui")
     frag = generar(carpeta, "frag.mp4", ["-preset", "ultrafast"],
@@ -194,6 +195,27 @@ async def main(carpeta):
     comprueba("pero si se adelanta de verdad, si", 1, len(s.proc.senales))
     hls.ADELANTE_MAX = viejo
     hls._tfdt_video = tfdt_de_verdad
+
+
+async def probar_salto_con_peticion_vieja(carpeta, peli, claves, duracion):
+    """Se salta mientras carga un trozo del principio: la peticion vieja sigue
+    viva en el servidor. Antes cada una reiniciaba ffmpeg en lo suyo, matando
+    lo de la otra, y ninguna llegaba nunca."""
+    print("Saltar con una peticion vieja todavia esperando")
+    d = os.path.join(carpeta, "hls-salto")
+    os.makedirs(d)
+    s = hls.Sesion(path="tg:1:6", url=peli, claves=claves, duracion=duracion,
+                   audio=0, hevc=False, dir=d)
+    vieja = asyncio.create_task(hls.trozo(s, 1))
+    await asyncio.sleep(0.05)
+    nueva = await asyncio.wait_for(hls.trozo(s, len(claves) - 2), 30)
+    comprueba("el trozo del salto llega", True, bool(nueva) and all(os.path.isfile(r) for r in nueva))
+    try:
+        r = await asyncio.wait_for(vieja, 30)
+        comprueba("la vieja no se queda reiniciando ffmpeg", True, bool(r))
+    except hls.SinHls as e:
+        comprueba("la vieja se retira en vez de reiniciar ffmpeg", True, "ya no se espera" in str(e))
+    await hls._parar(s)
 
 
 async def probar_indice_escaso(carpeta, peli, claves, duracion):
