@@ -439,7 +439,9 @@ interface GrupoRevision {
   busqueda?: string;
   ejemplos?: string[] | null;
 }
-interface Aplicada { id: number; titulo: string; porque: string | null; ficha: Sugerencia | null; archivos: number; creado: string }
+interface Aplicada { id: number; titulo: string; porque: string | null; ficha: Sugerencia | null; archivos: number; creado: string; por_ia?: boolean }
+interface LoteIA { lote: string; grupos: number; creado: string; terminado: string | null; aplicadas: number | null; sugeridas: number | null; ninguna: number | null; fallos: number | null; dolares: number | null }
+interface HistorialIA { lotes: LoteIA[]; meses: { mes: string; dolares: number }[]; total: number }
 
 const POR_PAGINA = 30;
 const num = (n: number) => n.toLocaleString('es-ES', MILES);
@@ -650,12 +652,51 @@ function HojaCorregir({ g, onCerrar, onHecho }: { g: GrupoRevision; onCerrar: ()
 
 const dolar = (n: number) => `${n.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} $`;
 
+const MESES_IA = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+const mesIA = (ym: string) => { const [a, m] = ym.split('-'); return `${MESES_IA[Number(m) - 1]} ${a}`; };
+const fechaIA = (iso: string) => new Date(iso + (iso.endsWith('Z') ? '' : 'Z')).toLocaleString('es-ES', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+
+/** Los lotes mandados a Claude y el gasto de cada mes, en lista (en el teléfono no cabe una tabla). */
+function HistorialIAMovil() {
+  const [h, setH] = useState<HistorialIA | null>(null);
+  useEffect(() => {
+    apiFetch('/admin/revision/ia/historial').then(async r => { if (r.ok) setH(await r.json()); }).catch(() => {});
+  }, []);
+  if (!h) return <p className="text-[12px] text-nf-text3 mt-2">Cargando…</p>;
+  if (!h.lotes.length) return <p className="text-[12px] text-nf-text3 mt-2">Todavía no se ha mandado ningún lote.</p>;
+  return (
+    <div className="mt-3">
+      <p className="text-[10px] uppercase tracking-wide text-nf-text3">Gasto por mes</p>
+      {h.meses.map(m => (
+        <div key={m.mes} className="flex justify-between text-[13px] py-1 border-b border-white/5">
+          <span className="text-nf-text2">{mesIA(m.mes)}</span><span className="tabular-nums">{dolar(m.dolares)}</span>
+        </div>
+      ))}
+      <div className="flex justify-between text-[13px] py-1 font-semibold"><span>Total</span><span className="tabular-nums">{dolar(h.total)}</span></div>
+      <p className="text-[10px] uppercase tracking-wide text-nf-text3 mt-3">Últimos lotes</p>
+      {h.lotes.map(l => (
+        <div key={l.lote} className="py-1.5 border-b border-white/5">
+          <div className="flex justify-between text-[13px]">
+            <span className="text-nf-text2">{fechaIA(l.creado)} · {num(l.grupos)} grupos</span>
+            <span className="tabular-nums">{l.dolares != null ? dolar(l.dolares) : 'en marcha…'}</span>
+          </div>
+          {l.terminado && (
+            <p className="text-[11px] text-nf-text3">{l.aplicadas} solos · {l.sugeridas} sugeridos · {l.ninguna} ninguna{l.fallos ? ` · ${l.fallos} fallos` : ''}</p>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 /** La revisión con IA en el teléfono: estado, clave, tope y «Mandar ahora». */
 function BloqueIAMovil({ ia, onCambio }: { ia: EstadoIA; onCambio: () => void }) {
   const [abierto, setAbierto] = useState(!ia.configurada);
+  const [verGasto, setVerGasto] = useState(false);
   const [clave, setClave] = useState('');
   const [tope, setTope] = useState(String(ia.tope));
   const [haciendo, setHaciendo] = useState('');
+  const pct = ia.tope > 0 ? Math.min(1, ia.gasto_mes / ia.tope) : 1;
   const pedir = async (ruta: string, cuerpo?: object, ok?: string) => {
     setHaciendo(ruta);
     try {
@@ -680,8 +721,15 @@ function BloqueIAMovil({ ia, onCambio }: { ia: EstadoIA; onCambio: () => void })
       <p className="text-[12px] text-nf-text2 mt-1">
         {dolar(ia.gasto_mes)} de {dolar(ia.tope)} este mes · {num(ia.pendientes)} por mirar{ia.lote ? ' · lote en marcha' : ''}
       </p>
-      {u && <p className="text-[11px] text-nf-text3 mt-0.5">Último lote: {u.aplicadas} solos, {u.sugeridas} sugerencias, {u.ninguna} sin ficha · {dolar(u.dolares)}</p>}
+      {ia.configurada && (
+        <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-white/10">
+          <div className={`h-full ${pct >= 1 ? 'bg-nf-red' : pct >= 0.8 ? 'bg-nf-warn' : 'bg-nf-ok'}`} style={{ width: `${pct * 100}%` }} />
+        </div>
+      )}
+      {ia.configurada && pct >= 1 && <p className="text-[11px] text-nf-red mt-1">Tope del mes alcanzado: no se manda nada hasta el mes que viene.</p>}
+      {u && <p className="text-[11px] text-nf-text3 mt-1">Último lote: {u.aplicadas} solos, {u.sugeridas} sugerencias, {u.ninguna} sin ficha · {dolar(u.dolares)}</p>}
       <div className="flex mt-2 space-x-2">
+        <button onClick={() => setVerGasto(v => !v)} className="tap flex-1 h-10 rounded-xl bg-white/10 text-[14px] font-medium">{verGasto ? 'Ocultar' : 'Gasto'}</button>
         <button onClick={() => setAbierto(a => !a)} className="tap flex-1 h-10 rounded-xl bg-white/10 text-[14px] font-medium">{abierto ? 'Cerrar' : 'Ajustes'}</button>
         {ia.configurada && ia.activa && (
           <button onClick={() => pedir('/admin/revision/ia/mandar')} disabled={!!haciendo || !!ia.lote}
@@ -690,6 +738,7 @@ function BloqueIAMovil({ ia, onCambio }: { ia: EstadoIA; onCambio: () => void })
           </button>
         )}
       </div>
+      {verGasto && <HistorialIAMovil />}
       {abierto && (
         <div className="mt-3 space-y-2">
           <input className={input} type="password" autoComplete="off" value={clave} onChange={e => setClave(e.target.value)}
@@ -723,6 +772,7 @@ function BloqueIAMovil({ ia, onCambio }: { ia: EstadoIA; onCambio: () => void })
 
 /** «Corregido solo»: lo que puso la revisión automática, con su deshacer. */
 function CorregidasMovil({ onCambio }: { onCambio: () => void }) {
+  const [origen, setOrigen] = useState<'' | 'ia' | 'exacta'>('');
   const [items, setItems] = useState<Aplicada[]>([]);
   const [total, setTotal] = useState<number | null>(null);
   const [cargando, setCargando] = useState(false);
@@ -730,7 +780,7 @@ function CorregidasMovil({ onCambio }: { onCambio: () => void }) {
   const cargar = async (offset: number) => {
     setCargando(true);
     try {
-      const r = await apiFetch(`/admin/revision/auto?offset=${offset}&limit=${POR_PAGINA}`);
+      const r = await apiFetch(`/admin/revision/auto?offset=${offset}&limit=${POR_PAGINA}&origen=${origen}`);
       const d = await leer(r);
       if (!r.ok) throw new Error(d.detail || 'No se ha podido leer la lista');
       setTotal(d.total ?? 0);
@@ -738,7 +788,7 @@ function CorregidasMovil({ onCambio }: { onCambio: () => void }) {
     } catch (e) { toast(e instanceof Error ? e.message : 'No se ha podido leer la lista', 'error', 6000); }
     finally { setCargando(false); }
   };
-  useEffect(() => { cargar(0); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { setItems([]); setTotal(null); cargar(0); }, [origen]); // eslint-disable-line react-hooks/exhaustive-deps
   const deshacer = async (a: Aplicada) => {
     setDeshaciendo(a.id);
     try {
@@ -757,6 +807,12 @@ function CorregidasMovil({ onCambio }: { onCambio: () => void }) {
       <p className="text-[12px] text-nf-text3 mb-3">
         Lo que se puso sin preguntar porque coincidía exactamente con TMDB. «Deshacer» lo deja como estaba y no se vuelve a tocar.
       </p>
+      <div className="flex flex-wrap gap-2 mb-2">
+        {([['', 'Todo'], ['ia', 'Claude'], ['exacta', 'Exacta']] as const).map(([v, t]) => (
+          <button key={v} onClick={() => setOrigen(v)}
+            className={`h-8 px-3 rounded-full text-[13px] font-semibold ${origen === v ? 'bg-white text-black' : 'bg-white/10 text-nf-text2'}`}>{t}</button>
+        ))}
+      </div>
       {total != null && <p className="text-[12px] text-nf-text3 mb-2">{num(total)} corregidos solos</p>}
       {total === 0 && <p className="rounded-2xl bg-white/5 p-4 text-[13px] text-nf-text2">Todavía no se ha corregido nada solo.</p>}
       {items.map(a => (
@@ -765,7 +821,7 @@ function CorregidasMovil({ onCambio }: { onCambio: () => void }) {
             ? <img src={a.ficha.poster} alt="" loading="lazy" className="w-9 h-[54px] rounded object-cover shrink-0 bg-white/10" />
             : <div className="w-9 h-[54px] rounded shrink-0 bg-white/10" />}
           <div className="min-w-0 flex-1">
-            <p className="text-[14px] font-medium truncate">{a.ficha ? conAño(a.ficha.title, a.ficha.year) : a.titulo}</p>
+            <p className="text-[14px] font-medium truncate">{a.ficha ? conAño(a.ficha.title, a.ficha.year) : a.titulo}{a.por_ia ? <span className="ml-1.5 text-[10px] font-normal text-nf-text3 bg-white/10 rounded px-1 py-0.5 align-middle">Claude</span> : null}</p>
             <p className="text-[11px] text-nf-text3 truncate">Era «{a.titulo}» · {num(a.archivos)} {a.archivos === 1 ? 'archivo' : 'archivos'}</p>
             {a.porque && <p className="text-[11px] text-nf-text3 truncate">{a.porque}</p>}
           </div>

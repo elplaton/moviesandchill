@@ -449,6 +449,21 @@ async def _ensure_tables():
         await conn.execute("ALTER TABLE revision_auto ADD COLUMN IF NOT EXISTS candidatas JSONB")
         await conn.execute("ALTER TABLE revision_auto ADD COLUMN IF NOT EXISTS ia VARCHAR(40)")
         await conn.execute("ALTER TABLE revision_auto ADD COLUMN IF NOT EXISTS ia_lote TEXT")
+        # Cada lote mandado a Claude, con lo que salio y lo que costo de verdad
+        # (del `usage` de cada respuesta): el historial y el gasto por mes.
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS revision_ia_lotes (
+                id         SERIAL PRIMARY KEY,
+                lote       TEXT NOT NULL UNIQUE,
+                modelo     VARCHAR(40) NOT NULL,
+                grupos     INTEGER NOT NULL,
+                creado     TIMESTAMP NOT NULL DEFAULT NOW(),
+                terminado  TIMESTAMP,
+                aplicadas  INTEGER, sugeridas INTEGER, ninguna INTEGER, fallos INTEGER,
+                entrada    BIGINT, salida BIGINT,
+                dolares    NUMERIC(10, 4)
+            )
+        """)
 
         # Donde mandar los avisos. Una cuenta tiene tantas como aparatos: el
         # telefono, la PWA instalada y el navegador del escritorio son

@@ -435,21 +435,26 @@ async def estado() -> dict:
     return {**_estado, "cuentas": cuentas, "ia": ia}
 
 
-async def aplicadas(offset: int = 0, limit: int = 30) -> dict:
+async def aplicadas(offset: int = 0, limit: int = 30, origen: str = "") -> dict:
+    """Lo aplicado, lo mas nuevo primero. `origen`: "ia" (lo decidio Claude,
+    services/revision_ia.py), "exacta" (la coincidencia exacta o una
+    sugerencia aceptada a mano) o "" (todo)."""
     from app.database.connection import get_pool
 
+    filtro = {"ia": "AND ia IS NOT NULL", "exacta": "AND ia IS NULL"}.get(origen, "")
     pool = get_pool()
     async with pool.acquire() as conn:
-        total = await conn.fetchval("SELECT COUNT(*) FROM revision_auto WHERE estado = 'aplicada'")
-        filas = await conn.fetch("""
-            SELECT id, titulo, motivo, porque, sugerencia, archivos, creado
-              FROM revision_auto WHERE estado = 'aplicada'
+        total = await conn.fetchval(f"SELECT COUNT(*) FROM revision_auto WHERE estado = 'aplicada' {filtro}")
+        filas = await conn.fetch(f"""
+            SELECT id, titulo, motivo, porque, sugerencia, archivos, creado, ia
+              FROM revision_auto WHERE estado = 'aplicada' {filtro}
              ORDER BY creado DESC, archivos DESC OFFSET $1 LIMIT $2
         """, offset, limit)
     return {"total": total, "items": [
         {"id": f["id"], "titulo": f["titulo"], "motivo": f["motivo"], "porque": f["porque"],
          "ficha": json.loads(f["sugerencia"]) if isinstance(f["sugerencia"], str) else f["sugerencia"],
-         "archivos": f["archivos"], "creado": f["creado"].isoformat()} for f in filas]}
+         "archivos": f["archivos"], "creado": f["creado"].isoformat(), "por_ia": f["ia"] is not None}
+        for f in filas]}
 
 
 async def deshacer(id_: int) -> int:

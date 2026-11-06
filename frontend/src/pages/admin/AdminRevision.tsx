@@ -55,8 +55,21 @@ interface Sugerencia {
   porque: string | null;
 }
 
+/** El historial de la revisión con IA: cada lote con lo que salió y lo que costó de verdad. */
+interface LoteIA {
+  lote: string; grupos: number; creado: string; terminado: string | null;
+  aplicadas: number | null; sugeridas: number | null; ninguna: number | null; fallos: number | null;
+  entrada: number | null; salida: number | null; dolares: number | null;
+}
+interface HistorialIA {
+  lotes: LoteIA[];
+  meses: { mes: string; lotes: number; grupos: number; aplicadas: number; dolares: number }[];
+  total: number;
+}
+
 /** Algo que se corrigió solo (o una sugerencia aceptada), con su deshacer. */
 interface Aplicada {
+  por_ia?: boolean;
   id: number;
   titulo: string;
   motivo: ClaveMotivo;
@@ -205,6 +218,91 @@ function CajaSugerencia({ g, onAceptada, onDescartada }: {
 
 const dolares = (n: number) => `${n.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} $`;
 
+const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre',
+  'noviembre', 'diciembre'];
+const nombreMes = (ym: string) => { const [a, m] = ym.split('-'); return `${MESES[Number(m) - 1]} ${a}`; };
+const fecha = (iso: string) => new Date(iso + (iso.endsWith('Z') ? '' : 'Z'))
+  .toLocaleString('es-ES', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+
+/** El gasto del mes frente al tope: en aviso al pasar del 80 %, en rojo al llegar. */
+function BarraGasto({ gasto, tope }: { gasto: number; tope: number }) {
+  const pct = tope > 0 ? Math.min(1, gasto / tope) : 1;
+  const color = pct >= 1 ? 'bg-nf-red' : pct >= 0.8 ? 'bg-nf-warn' : 'bg-nf-ok';
+  return (
+    <div className="mt-2 h-1.5 w-full max-w-md overflow-hidden rounded-full bg-white/10" title={`${Math.round(pct * 100)} % del tope`}>
+      <div className={`h-full ${color}`} style={{ width: `${pct * 100}%` }} />
+    </div>
+  );
+}
+
+/** Los lotes mandados a Claude y el gasto de cada mes (lo que costó de verdad). */
+function HistorialIAPanel() {
+  const [h, setH] = useState<HistorialIA | null>(null);
+  const [error, setError] = useState('');
+  useEffect(() => {
+    apiFetch('/admin/revision/ia/historial')
+      .then(async r => (r.ok ? setH(await r.json()) : setError(await motivoDe(r))))
+      .catch(() => setError('Error de conexión'));
+  }, []);
+  if (error) return <p className="text-red-400 text-xs mt-3">{error}</p>;
+  if (!h) return <p className="text-nf-dim text-xs mt-3">Cargando el historial…</p>;
+  if (!h.lotes.length) return <p className="text-nf-dim text-xs mt-3">Todavía no se ha mandado ningún lote.</p>;
+  return (
+    <div className="mt-3 grid gap-4 md:grid-cols-[minmax(0,14rem)_1fr]">
+      <div>
+        <p className="text-nf-faint text-[10px] uppercase tracking-wide mb-1">Gasto por mes</p>
+        <table className="w-full text-xs">
+          <tbody>
+            {h.meses.map(m => (
+              <tr key={m.mes} className="border-b border-white/5">
+                <td className="py-1 text-nf-dim">{nombreMes(m.mes)}</td>
+                <td className="py-1 text-right text-white tabular-nums">{dolares(m.dolares)}</td>
+              </tr>
+            ))}
+            <tr>
+              <td className="py-1 text-nf-dim">Total</td>
+              <td className="py-1 text-right text-white font-semibold tabular-nums">{dolares(h.total)}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div className="min-w-0 overflow-x-auto">
+        <p className="text-nf-faint text-[10px] uppercase tracking-wide mb-1">Últimos lotes</p>
+        <table className="w-full text-xs tabular-nums">
+          <thead className="text-nf-faint">
+            <tr>
+              <th className="text-left font-normal py-1">Mandado</th>
+              <th className="text-right font-normal">Grupos</th>
+              <th className="text-right font-normal">Solos</th>
+              <th className="text-right font-normal">Sugeridos</th>
+              <th className="text-right font-normal">Ninguna</th>
+              <th className="text-right font-normal">Fallos</th>
+              <th className="text-right font-normal">Coste</th>
+            </tr>
+          </thead>
+          <tbody>
+            {h.lotes.map(l => (
+              <tr key={l.lote} className="border-t border-white/5 text-nf-dim">
+                <td className="py-1">{fecha(l.creado)}</td>
+                <td className="text-right text-white">{l.grupos.toLocaleString()}</td>
+                {l.terminado ? (<>
+                  <td className="text-right text-nf-ok">{l.aplicadas}</td>
+                  <td className="text-right">{l.sugeridas}</td>
+                  <td className="text-right">{l.ninguna}</td>
+                  <td className="text-right">{l.fallos || ''}</td>
+                  <td className="text-right text-white">{l.dolares != null ? dolares(l.dolares) : ''}</td>
+                </>) : (
+                  <td colSpan={5} className="text-right text-nf-faint">en marcha…</td>
+                )}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 /**
  * La revisión con IA: lo que la revisión exacta no resuelve se le manda a
  * Claude en lotes (Batch API). La clave se comprueba al guardarla y nunca se
@@ -212,6 +310,7 @@ const dolares = (n: number) => `${n.toLocaleString('es-ES', { minimumFractionDig
  */
 function BloqueIA({ ia, onCambio, onToast }: { ia: EstadoIA; onCambio: () => void; onToast: (m: string) => void }) {
   const [abierto, setAbierto] = useState(!ia.configurada);
+  const [verHistorial, setVerHistorial] = useState(false);
   const [clave, setClave] = useState('');
   const [tope, setTope] = useState(String(ia.tope));
   const [guardando, setGuardando] = useState(false);
@@ -262,6 +361,10 @@ function BloqueIA({ ia, onCambio, onToast }: { ia: EstadoIA; onCambio: () => voi
             {dolares(ia.gasto_mes)} de {dolares(ia.tope)} este mes · {ia.pendientes.toLocaleString()} grupos por mirar
             {ia.lote && ' · lote en marcha (suele tardar menos de una hora)'}
           </p>
+          {ia.configurada && <BarraGasto gasto={ia.gasto_mes} tope={ia.tope} />}
+          {ia.configurada && ia.gasto_mes >= ia.tope && (
+            <p className="text-nf-red text-[11px] mt-1">Tope del mes alcanzado: no se manda nada hasta el mes que viene (o súbelo en Ajustes).</p>
+          )}
           {u && (
             <p className="text-nf-faint text-[11px] mt-0.5">
               Último lote: {u.aplicadas} corregidos solos, {u.sugeridas} sugerencias, {u.ninguna} sin ficha que encaje
@@ -270,6 +373,7 @@ function BloqueIA({ ia, onCambio, onToast }: { ia: EstadoIA; onCambio: () => voi
           )}
         </div>
         <div className="flex gap-2">
+          <button onClick={() => setVerHistorial(v => !v)} className={BOTON}>{verHistorial ? 'Ocultar gasto' : 'Gasto e historial'}</button>
           <button onClick={() => setAbierto(a => !a)} className={BOTON}>{abierto ? 'Cerrar' : 'Ajustes'}</button>
           {ia.configurada && ia.activa && (
             <button onClick={mandar} disabled={mandando || !!ia.lote} className={BOTON}>
@@ -278,6 +382,7 @@ function BloqueIA({ ia, onCambio, onToast }: { ia: EstadoIA; onCambio: () => voi
           )}
         </div>
       </div>
+      {verHistorial && <HistorialIAPanel />}
       {abierto && (
         <div className="mt-3 grid gap-3 md:grid-cols-[1fr_auto_auto] items-end">
           <label className="block">
@@ -333,6 +438,8 @@ const hace = (iso: string) => {
  * estaba y el grupo no se vuelve a tocar ni a sugerir.
  */
 function Corregidas({ onToast, onCambio }: { onToast: (m: string) => void; onCambio: () => void }) {
+  // Todo, solo lo que decidió Claude o solo la coincidencia exacta.
+  const [origen, setOrigen] = useState<'' | 'ia' | 'exacta'>('');
   const [items, setItems] = useState<Aplicada[]>([]);
   const [total, setTotal] = useState(0);
   const [cargando, setCargando] = useState(true);
@@ -343,7 +450,7 @@ function Corregidas({ onToast, onCambio }: { onToast: (m: string) => void; onCam
     setCargando(true);
     setError('');
     try {
-      const res = await apiFetch(`/admin/revision/auto?offset=${offset}&limit=${POR_PAGINA}`);
+      const res = await apiFetch(`/admin/revision/auto?offset=${offset}&limit=${POR_PAGINA}&origen=${origen}`);
       if (!res.ok) { setError(await motivoDe(res)); return; }
       const d: { total: number; items: Aplicada[] } = await res.json();
       setTotal(d.total);
@@ -353,7 +460,7 @@ function Corregidas({ onToast, onCambio }: { onToast: (m: string) => void; onCam
     } finally {
       setCargando(false);
     }
-  }, []);
+  }, [origen]);
   useEffect(() => { cargar(0); }, [cargar]);
 
   const deshacer = async (a: Aplicada) => {
@@ -381,6 +488,14 @@ function Corregidas({ onToast, onCambio }: { onToast: (m: string) => void; onCam
         Lo que la revisión automática puso sin preguntar, porque el título era exactamente el de TMDB y el año o los
         capítulos cuadraban. Si alguno está mal, «Deshacer» lo deja como estaba y no se vuelve a tocar.
       </p>
+      <div className="flex gap-2 mb-4">
+        {([['', 'Todo'], ['ia', 'Lo que decidió Claude'], ['exacta', 'Coincidencia exacta']] as const).map(([v, t]) => (
+          <button key={v} onClick={() => setOrigen(v)}
+            className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${origen === v ? 'bg-white text-black' : 'bg-white/10 text-nf-dim hover:bg-white/20'}`}>
+            {t}
+          </button>
+        ))}
+      </div>
       {error && <p className="text-red-400 text-sm mb-4">{error}</p>}
       {!cargando && !items.length && !error && <p className="text-nf-dim text-sm">Todavía no se ha corregido nada solo.</p>}
       <ul className="divide-y divide-white/5">
@@ -391,6 +506,7 @@ function Corregidas({ onToast, onCambio }: { onToast: (m: string) => void; onCam
               <p className="text-white text-sm truncate">
                 {a.ficha ? conAño(a.ficha.title, a.ficha.year) : a.titulo}
                 {a.ficha && <span className="text-nf-dim text-xs"> · {tipoTexto(a.ficha.media_type)}</span>}
+                {a.por_ia && <span className="ml-2 rounded bg-white/10 px-1.5 py-0.5 text-[10px] text-nf-dim align-middle">Claude</span>}
               </p>
               <p className="text-nf-dim text-xs truncate">
                 Era «{a.titulo}» · {archivosTexto(a.archivos)} · {hace(a.creado)}

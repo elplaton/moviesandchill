@@ -69,11 +69,13 @@ async def revision_ignorar(req: Clave, user: Annotated[str, Depends(get_current_
 # --- Revision automatica (services/revision_auto.py) ---------------------------
 
 @router.get("/admin/revision/auto")
-async def revision_auto_lista(user: Annotated[str, Depends(get_current_admin)], offset: int = 0, limit: int = 30):
-    """Lo que se ha corregido solo, lo mas nuevo primero, con su estado."""
+async def revision_auto_lista(user: Annotated[str, Depends(get_current_admin)], offset: int = 0, limit: int = 30,
+                              origen: str = ""):
+    """Lo que se ha corregido solo, lo mas nuevo primero, con su estado.
+    `origen`: "ia", "exacta" o "" (todo)."""
     from app.services import revision_auto
 
-    return {**await revision_auto.aplicadas(max(offset, 0), min(max(limit, 1), 100)),
+    return {**await revision_auto.aplicadas(max(offset, 0), min(max(limit, 1), 100), origen),
             "estado": await revision_auto.estado()}
 
 
@@ -171,3 +173,11 @@ async def revision_ia_mandar(user: Annotated[str, Depends(get_current_admin)]):
     if not api_key:
         raise HTTPException(status_code=409, detail="TMDB está desactivado")
     return await revision_ia.mandar(api_key)
+
+
+@router.get("/admin/revision/ia/historial")
+async def revision_ia_historial(user: Annotated[str, Depends(get_current_admin)]):
+    """Los ultimos lotes mandados a Claude, el gasto de cada mes y el total."""
+    from app.services import revision_ia
+
+    return await revision_ia.historial()

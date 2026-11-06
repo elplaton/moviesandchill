@@ -35,7 +35,8 @@ self.addEventListener('notificationclick', (event) => {
     ? `/?ficha=${d.kind === 'series' ? 's' : 'm'}${d.tmdb_id}`
     : d.reason === 'descarga' ? '/descargas'
     // El aviso al admin de que la cola de peticiones crece.
-    : d.reason === 'peticiones' ? '/admin/peticiones' : '/';
+    : d.reason === 'peticiones' ? '/admin/peticiones'
+    : d.reason === 'revision' ? '/admin/revision' : '/';
   event.waitUntil((async () => {
     const abiertas = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
     for (const cliente of abiertas) {

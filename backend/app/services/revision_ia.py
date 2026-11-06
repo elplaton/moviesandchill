@@ -43,9 +43,11 @@ MODELO = "claude-sonnet-5-5"
 # La Batch API cobra la mitad de todo.
 PRECIOS = (2.00, 10.00, 0.20, 2.50)
 DESCUENTO_LOTE = 0.5
-# Lo que cuesta de media un grupo (medido en la prueba: 0,66 centimos sin lote),
-# para no pasarse del tope al montar un lote.
-COSTE_GRUPO_ESTIMADO = 0.0066 * DESCUENTO_LOTE
+# Lo que cuesta de media un grupo (medido: 0,66 centimos sin lote, 0,33 en
+# lote), con un 50 % de margen: el tope se comprueba antes de mandar con esta
+# cuenta y lo real se apunta al volver, asi que un lote no puede pasarse por
+# haber calculado de menos.
+COSTE_GRUPO_ESTIMADO = 0.0066 * DESCUENTO_LOTE * 1.5
 CANDIDATAS_MAX = 8
 LOTE_MAX = 2000
 TOPE_MES_DEFECTO = 20.0
@@ -231,6 +233,37 @@ async def _sumar_gasto(dolares: float) -> None:
     await set_app_settings({"revision_ia_gasto": json.dumps({"mes": a["mes"], "dolares": a["gasto_mes"] + dolares})})
 
 
+async def avisar_gasto() -> None:
+    """Un aviso al movil de los admins al pasar del 80 % del tope del mes y
+    otro al alcanzarlo (entonces la revision con IA se para hasta el mes
+    siguiente). Cada uno una vez al mes."""
+    from app.database.connection import get_app_settings, get_pool, set_app_settings
+    from app.services.push import enviar
+
+    a = await _ajustes()
+    if not a["activa"] or a["tope"] <= 0:
+        return
+    nivel = 100 if a["gasto_mes"] >= a["tope"] else 80 if a["gasto_mes"] >= a["tope"] * 0.8 else 0
+    if not nivel:
+        return
+    marca = f'{a["mes"]}:{nivel}'
+    avisado = (await get_app_settings()).get("revision_ia_aviso") or ""
+    if avisado == marca or (nivel == 80 and avisado == f'{a["mes"]}:100'):
+        return
+    await set_app_settings({"revision_ia_aviso": marca})
+    texto = (f"Gastado {a['gasto_mes']:.2f} $ de {a['tope']:.2f} $ este mes: la revisión con IA se para hasta el mes "
+             "que viene (o sube el tope)" if nivel == 100
+             else f"Gastado {a['gasto_mes']:.2f} $ de {a['tope']:.2f} $ este mes (más del 80 % del tope)")
+    async with get_pool().acquire() as conn:
+        admins = [r["id"] for r in await conn.fetch("SELECT id FROM users WHERE role = 'admin' AND active IS NOT FALSE")]
+    for uid in admins:
+        try:
+            await enviar(uid, {"title": "Revisión con IA", "body": texto, "reason": "revision", "tag": "revision-ia-gasto"})
+        except Exception as e:
+            logger.warning("Aviso de gasto de la IA al admin %d fallo: %s", uid, e)
+    logger.info("Revision con IA: %s", texto)
+
+
 async def mandar(api_key_tmdb: str) -> dict:
     """Monta y manda un lote con lo pendiente, sin pasarse del tope del mes.
     No hace nada si esta apagada, sin clave o con un lote ya en marcha."""
@@ -244,6 +277,7 @@ async def mandar(api_key_tmdb: str) -> dict:
     cuantos = min(LOTE_MAX, int(margen / COSTE_GRUPO_ESTIMADO))
     if cuantos <= 0:
         logger.info("Revision con IA: tope del mes alcanzado (%.2f de %.2f $)", a["gasto_mes"], a["tope"])
+        await avisar_gasto()
         return await estado()
 
     pool = get_pool()
@@ -300,6 +334,9 @@ async def mandar(api_key_tmdb: str) -> dict:
         await conn.executemany("UPDATE revision_auto SET candidatas = $2::jsonb, ia_lote = $3 WHERE id = $1",
                                [(id_, json.dumps(cands), lote.id) for id_, cands, marca in apuntes if not marca])
     await set_app_settings({"revision_ia_lote": lote.id})
+    async with pool.acquire() as conn:
+        await conn.execute("INSERT INTO revision_ia_lotes (lote, modelo, grupos) VALUES ($1, $2, $3) "
+                           "ON CONFLICT (lote) DO NOTHING", lote.id, MODELO, len(peticiones))
     logger.info("Revision con IA: lote %s con %d grupos", lote.id, len(peticiones))
     return await estado()
 
@@ -317,7 +354,7 @@ async def recoger() -> dict | None:
         return None
     pool = get_pool()
     resumen = {"aplicadas": 0, "sugeridas": 0, "ninguna": 0, "fallos": 0, "dolares": 0.0}
-    gasto = 0.0
+    gasto, entrada, salida = 0.0, 0, 0
     async for r in await cliente.messages.batches.results(lote.id):
         id_ = int(r.custom_id[1:])
         if r.result.type != "succeeded":
@@ -330,6 +367,9 @@ async def recoger() -> dict | None:
             continue
         msg = r.result.message
         gasto += _coste(msg.usage)
+        entrada += (msg.usage.input_tokens or 0) + (getattr(msg.usage, "cache_read_input_tokens", 0) or 0) \
+            + (getattr(msg.usage, "cache_creation_input_tokens", 0) or 0)
+        salida += msg.usage.output_tokens or 0
         if msg.stop_reason in ("refusal", "max_tokens"):
             # Se marca para no volver a mandarlo en cada lote: queda a mano.
             logger.warning("Revision con IA: el grupo %d acabo en %s", id_, msg.stop_reason)
@@ -347,6 +387,21 @@ async def recoger() -> dict | None:
         resumen[cual] += 1
     resumen["dolares"] = round(gasto, 4)
     await _sumar_gasto(gasto)
+    try:
+        await avisar_gasto()
+    except Exception as e:
+        logger.warning("Revision con IA: no se ha podido avisar del gasto: %s", e)
+    async with pool.acquire() as conn:
+        await conn.execute("""
+            INSERT INTO revision_ia_lotes (lote, modelo, grupos) VALUES ($1, $2, 0) ON CONFLICT (lote) DO NOTHING
+        """, lote.id, MODELO)
+        await conn.execute("""
+            UPDATE revision_ia_lotes
+               SET terminado = NOW(), aplicadas = $2, sugeridas = $3, ninguna = $4, fallos = $5,
+                   entrada = $6, salida = $7, dolares = $8
+             WHERE lote = $1
+        """, lote.id, resumen["aplicadas"], resumen["sugeridas"], resumen["ninguna"], resumen["fallos"],
+            entrada, salida, round(gasto, 4))
     await set_app_settings({"revision_ia_lote": "",
                             "revision_ia_ultimo": json.dumps({**resumen, "terminado": time.time()})})
     from app.services import revision
@@ -401,3 +456,30 @@ async def _aplicar(id_: int, respuesta: dict) -> str:
     nota = "" if conf != "alta" else " (no se aplica sola: faltan carátula o capítulos)"
     await marcar("sugerida", f"Claude ({conf}){nota}: {motivo}", _ficha(elegida))
     return "sugeridas"
+
+
+async def historial(limite: int = 30) -> dict:
+    """Los ultimos lotes, el gasto de cada mes y el total, para el panel. El
+    gasto sale de lo que costo cada lote de verdad (su `usage`)."""
+    from app.database.connection import get_pool
+
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        lotes = await conn.fetch("""SELECT lote, modelo, grupos, creado, terminado, aplicadas, sugeridas, ninguna,
+                                           fallos, entrada, salida, dolares
+                                      FROM revision_ia_lotes ORDER BY creado DESC LIMIT $1""", limite)
+        meses = await conn.fetch("""SELECT to_char(creado, 'YYYY-MM') AS mes, COUNT(*) AS lotes,
+                                           COALESCE(SUM(grupos), 0) AS grupos, COALESCE(SUM(aplicadas), 0) AS aplicadas,
+                                           COALESCE(SUM(dolares), 0) AS dolares
+                                      FROM revision_ia_lotes GROUP BY 1 ORDER BY 1 DESC LIMIT 12""")
+        total = await conn.fetchval("SELECT COALESCE(SUM(dolares), 0) FROM revision_ia_lotes")
+    return {
+        "lotes": [{**{k: f[k] for k in ("lote", "modelo", "grupos", "aplicadas", "sugeridas", "ninguna", "fallos",
+                                        "entrada", "salida")},
+                   "dolares": float(f["dolares"]) if f["dolares"] is not None else None,
+                   "creado": f["creado"].isoformat(), "terminado": f["terminado"].isoformat() if f["terminado"] else None}
+                  for f in lotes],
+        "meses": [{"mes": f["mes"], "lotes": f["lotes"], "grupos": f["grupos"], "aplicadas": f["aplicadas"],
+                   "dolares": float(f["dolares"])} for f in meses],
+        "total": float(total or 0),
+    }
