@@ -11,12 +11,19 @@ Lo delicado es saltar. Copiando la imagen, un trozo solo puede empezar en un
 fotograma clave, asi que la lista de trozos se arma con los del propio
 archivo (el indice del MKV, `mkv.fotogramas_clave`, o las tablas de la
 cabecera del MP4, `mp4.fotogramas_clave`): un trozo por fotograma clave. ffmpeg
-corta igual (`-hls_time` minimo: corta en cada uno), de modo que el trozo N
-de la lista es el trozo N que fabrica. Tres cosas medidas que sostienen eso:
+corta en **todos** los fotogramas clave del video (`-hls_time` minimo), y eso
+no es lo mismo: el indice de un MKV puede apuntar solo a algunos. Pasaba con
+«2x03 Tulsa King [HDTV 1080p].mkv»: un fotograma clave cada 2 s y una entrada
+en el indice cada 6 s, asi que ffmpeg hacia tres piezas por trozo de la lista,
+y numerandolas por orden el «trozo 426» (el ultimo, 2554 s) llevaba dentro el
+segundo 2259. El reproductor lo cargaba, daba la pelicula por terminada ahi
+(en Chrome, hls.js baja la duracion a lo que tiene) y el capitulo «acababa» a
+los 35 minutos de 42. Por eso **cada pieza se coloca por su tiempo** (`tfdt`)
+y no por su numero, y un trozo de la lista se sirve con todas las piezas que
+caen en el (`_refrescar`). Tres cosas medidas que sostienen esto:
 
 - `-ss` con la imagen copiada arranca un fotograma clave **antes** del pedido.
-  No se pelea: se mira el tiempo del primer trozo fabricado (`tfdt`) y se
-  numera a partir de ahi (`desfase`).
+  No se pelea: cada pieza va a donde dice su `tfdt`.
 - Sin `-noaccurate_seek` el audio (que si se decodifica) empieza en el punto
   exacto y la imagen en el fotograma clave anterior: segundos de desfase.
 - El muxer fMP4 lleva cada pista a cero e ignora `-copyts`; con
@@ -91,12 +98,15 @@ class Sesion:
     proc: asyncio.subprocess.Process | None = None
     run_dir: str = ""
     run_desde: int = 0
-    desfase: int | None = None
     # El ultimo trozo que ha hecho **esta** tanda de ffmpeg. No vale mirar
     # `listos`: ahi siguen los trozos de tandas anteriores, y uno lejano hacia
     # creer que la tanda nueva iba muy adelantada (ver `_refrescar`).
     hecho: int = -1
-    listos: dict[int, str] = field(default_factory=dict)
+    # Cada trozo de la lista, con las piezas de ffmpeg que lo forman (una si
+    # el indice apunta a todos los fotogramas clave; varias si no).
+    listos: dict[int, list[str]] = field(default_factory=dict)
+    # Pieza de ffmpeg -> (trozo de la lista en el que cae, su tfdt).
+    piezas: dict[str, tuple[int, float]] = field(default_factory=dict)
     pedido: int = 0
     pausado: bool = False
     fallos: int = 0
@@ -372,7 +382,6 @@ async def _arrancar(s: Sesion, n: int) -> None:
     docstring del modulo); `_refrescar` comprueba donde cayo de verdad."""
     await _parar(s)
     s.run_desde = n
-    s.desfase = None
     s.hecho = -1
     s.run_dir = os.path.join(s.dir, f"r{n}-{int(time.monotonic() * 1000)}")
     os.makedirs(s.run_dir, exist_ok=True)
@@ -453,6 +462,20 @@ def _tfdt_video(ruta: str) -> float | None:
     return None
 
 
+def juntar(piezas: list[str]) -> bytes:
+    """Un trozo hecho de varias piezas de ffmpeg: sus fragmentos (moof + mdat)
+    uno detras de otro, que es un segmento fMP4 valido. La cabecera `styp` de
+    cada pieza solo se deja en la primera."""
+    salida = bytearray()
+    for i, ruta in enumerate(piezas):
+        with open(ruta, "rb") as f:
+            b = f.read()
+        if i and b[4:8] == b"styp":
+            b = b[struct.unpack(">I", b[:4])[0]:]
+        salida += b
+    return bytes(salida)
+
+
 def _cajas(b: bytes, i: int = 0, j: int | None = None):
     j = len(b) if j is None else j
     while i + 8 <= j:
@@ -494,35 +517,54 @@ def _escala_video(init: bytes) -> tuple[int, int] | None:
     return None
 
 
-def _indice_de(s: Sesion, segundos: float) -> int:
-    """El fotograma clave mas cercano a `segundos`."""
+# Cuanto puede ir el `tfdt` de una pieza por delante del fotograma clave de la
+# lista: es el tiempo de decodificacion, y con fotogramas B va unas centesimas
+# antes que el de presentacion. Muy por debajo de la distancia entre dos
+# fotogramas clave, que es de segundos.
+HOLGURA_S = 0.3
+
+
+def _tramo_de(s: Sesion, segundos: float) -> int:
+    """El trozo de la lista en el que cae una pieza que empieza en `segundos`:
+    el ultimo cuyo fotograma clave no es posterior."""
     import bisect
-    i = bisect.bisect_left(s.claves, segundos)
-    candidatos = [c for c in (i - 1, i) if 0 <= c < s.total]
-    return min(candidatos, key=lambda c: abs(s.claves[c] - segundos))
+    return max(0, bisect.bisect_right(s.claves, segundos + HOLGURA_S) - 1)
 
 
 def _refrescar(s: Sesion) -> None:
-    """Apunta los trozos que ffmpeg ha terminado, con su numero de verdad, y
-    pausa o reanuda ffmpeg segun lo lejos que vaya de lo que se ve."""
+    """Apunta los trozos de la lista que ya estan enteros y pausa o reanuda
+    ffmpeg segun lo lejos que vaya de lo que se ve.
+
+    Cada pieza que fabrica ffmpeg se coloca por su `tfdt`, no por su numero:
+    ffmpeg corta en todos los fotogramas clave y la lista solo tiene los del
+    indice (ver el docstring del modulo). Un trozo esta entero cuando tiene la
+    pieza de su principio y ya hay una pieza de un trozo posterior (o ffmpeg
+    ha terminado): hasta entonces le puede faltar el final."""
     if not s.run_dir or not os.path.isdir(s.run_dir):
         return
     hechos = sorted(int(f[1:-4]) for f in os.listdir(s.run_dir)
                     if f.startswith("s") and f.endswith(".m4s"))
-    if not hechos:
-        return
-    if s.desfase is None:
-        t = _tfdt_video(os.path.join(s.run_dir, f"s{hechos[0]}.m4s"))
-        if t is None:
-            return
-        s.desfase = _indice_de(s, t) - hechos[0]
-        if s.desfase:
-            logger.info("HLS al vuelo %s: ffmpeg cayo %d trozos antes de lo previsto", s.path, -s.desfase)
+    tramos: dict[int, list[tuple[str, float]]] = {}
+    ultimo = -1
     for j in hechos:
-        n = j + s.desfase
-        if 0 <= n < s.total:
-            s.listos[n] = os.path.join(s.run_dir, f"s{j}.m4s")
-            s.hecho = max(s.hecho, n)
+        ruta = os.path.join(s.run_dir, f"s{j}.m4s")
+        if ruta not in s.piezas:
+            t = _tfdt_video(ruta)
+            if t is None:
+                break   # aun no se puede leer: las de despues, tampoco
+            s.piezas[ruta] = (_tramo_de(s, t), t)
+        n, t = s.piezas[ruta]
+        tramos.setdefault(n, []).append((ruta, t))
+        ultimo = max(ultimo, n)
+    terminado = s.proc is not None and s.proc.returncode == 0
+    for n, lista in tramos.items():
+        if not 0 <= n < s.total or (n == ultimo and not terminado):
+            continue
+        # La tanda empezo a mitad de este trozo: le falta el principio.
+        if abs(lista[0][1] - s.claves[n]) > HOLGURA_S and not (n == 0 and lista[0][1] < 1):
+            continue
+        s.listos[n] = [r for r, _ in lista]
+        s.hecho = max(s.hecho, n)
 
     # Lo adelantada que va se mide con lo que ha hecho esta tanda. Con todo
     # `listos` (como estaba) una tanda anterior que hubiera llegado lejos
@@ -540,10 +582,12 @@ def _refrescar(s: Sesion) -> None:
 
     # Lo que ya quedo atras no vuelve a pedirse casi nunca; si se pide, se fabrica.
     for n in [n for n in s.listos if n < s.pedido - ATRAS]:
-        try:
-            os.remove(s.listos.pop(n))
-        except OSError:
-            pass
+        for ruta in s.listos.pop(n):
+            s.piezas.pop(ruta, None)
+            try:
+                os.remove(ruta)
+            except OSError:
+                pass
 
 
 def _fabricando(s: Sesion, n: int) -> bool:
@@ -554,8 +598,9 @@ def _fabricando(s: Sesion, n: int) -> bool:
     return s.run_desde - 1 <= n <= hasta + SALTO
 
 
-async def trozo(s: Sesion, n: int) -> str:
-    """La ruta del trozo `n`, fabricandolo si hace falta."""
+async def trozo(s: Sesion, n: int) -> list[str]:
+    """Las piezas del trozo `n` (en orden: se sirven una detras de otra),
+    fabricandolo si hace falta."""
     if not 0 <= n < s.total:
         raise SinHls("trozo fuera de la pelicula")
     s.usado = time.monotonic()
@@ -564,8 +609,8 @@ async def trozo(s: Sesion, n: int) -> str:
     while True:
         async with s.lock:
             _refrescar(s)
-            if n in s.listos and os.path.isfile(s.listos[n]):
-                return s.listos[n]
+            if n in s.listos and all(os.path.isfile(r) for r in s.listos[n]):
+                return list(s.listos[n])
             if not _fabricando(s, n):
                 if s.proc and s.proc.returncode not in (None, 0):
                     error = (await s.proc.stderr.read()).decode(errors="replace")[-300:] if s.proc.stderr else ""
@@ -587,7 +632,7 @@ async def init(s: Sesion) -> str:
     while True:
         async with s.lock:
             _refrescar(s)
-            for d in ([s.run_dir] if s.run_dir else []) + [os.path.dirname(r) for r in s.listos.values()]:
+            for d in ([s.run_dir] if s.run_dir else []) + [os.path.dirname(r[0]) for r in s.listos.values() if r]:
                 ruta = os.path.join(d, "init.mp4")
                 if os.path.isfile(ruta) and s.listos:
                     return ruta

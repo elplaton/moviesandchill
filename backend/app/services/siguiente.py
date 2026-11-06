@@ -294,7 +294,7 @@ async def _que_viene_streaming(path: str, user_id: int) -> dict:
     from app.database.connection import get_pool
     from app.database.creditos import enlaces_de_titulo
     from app.database.watched import episodios_vistos
-    from app.services import reproduccion
+    from app.services import interior, reproduccion
 
     ids = reproduccion.leer_ruta(path)
     pool = get_pool()

@@ -34,9 +34,12 @@ def comprueba(nombre, esperado, obtenido):
         print(f"  MAL {nombre}: esperado {esperado!r}, obtenido {obtenido!r}")
 
 
-def tfdts(ruta):
-    """{pista: segundos} de un trozo, con las escalas de su init."""
-    with open(os.path.join(os.path.dirname(ruta), "init.mp4"), "rb") as f:
+def tfdts(ruta, init_de=None):
+    """{pista: segundos} de un trozo, con las escalas de su init. `ruta` puede
+    ser la lista de piezas que devuelve `hls.trozo()` (manda la primera)."""
+    if isinstance(ruta, list):
+        ruta = ruta[0]
+    with open(os.path.join(os.path.dirname(init_de or ruta), "init.mp4"), "rb") as f:
         init = f.read()
     escalas = {}
     for t, a, z in hls._cajas(init):
@@ -109,6 +112,7 @@ async def probar(carpeta, titulo, peli, lector):
                    audio=0, hevc=False, dir=d)
     for n in (0, 1, 7, 8, 15, 3):
         ruta = await hls.trozo(s, n)
+        comprueba(f"el trozo {n} es una sola pieza (el indice apunta a todos)", 1, len(ruta))
         t = tfdts(ruta)
         # El `tfdt` es el tiempo de decodificacion: con fotogramas B va unas
         # centesimas por delante del de presentacion, que es el de la lista.
@@ -131,6 +135,8 @@ async def main(carpeta):
             ("MP4, cabecera al principio", "peli-fs.mp4", ("-movflags", "+faststart"))):
         mp = generar(carpeta, nombre, ["-preset", "veryfast", "-bf", "3"], contenedor)
         await probar(carpeta, titulo, mp, mp4.fotogramas_clave)
+
+    await probar_indice_escaso(carpeta, peli, claves, duracion)
 
     print("MP4 que no se sirven por aqui")
     frag = generar(carpeta, "frag.mp4", ["-preset", "ultrafast"],
@@ -169,18 +175,59 @@ async def main(carpeta):
     os.makedirs(s.run_dir)
     for j in (2, 3):
         open(os.path.join(s.run_dir, f"s{j}.m4s"), "wb").close()
-    s.listos = {n: os.path.join(d, "viejo", f"s{n}.m4s") for n in range(15, 22)}
-    s.proc, s.desfase, s.run_desde, s.pedido = Proc(), 0, 2, 2
+    s.listos = {n: [os.path.join(d, "viejo", f"s{n}.m4s")] for n in range(15, 22)}
+    s.proc, s.run_desde, s.pedido = Proc(), 2, 2
     viejo = hls.ADELANTE_MAX
     hls.ADELANTE_MAX = 5
+    # Piezas vacias: su tiempo lo dice el nombre (una por fotograma clave).
+    tfdt_de_verdad = hls._tfdt_video
+    hls._tfdt_video = lambda ruta: claves[int(os.path.basename(ruta)[1:-4])]
     hls._refrescar(s)
     comprueba("la tanda nueva no se pausa por los trozos de la vieja", [], s.proc.senales)
-    comprueba("y sabe hasta donde ha llegado ella", 3, s.hecho)
+    # La ultima pieza de una tanda en marcha puede no ser la ultima de su
+    # trozo (si el indice no apunta a todos los fotogramas clave, a ese trozo
+    # le faltan piezas): hasta que no llega la del siguiente no esta entero.
+    comprueba("y sabe hasta donde ha llegado ella (lo ultimo, aun sin cerrar)", 2, s.hecho)
     for j in range(4, 10):
         open(os.path.join(s.run_dir, f"s{j}.m4s"), "wb").close()
     hls._refrescar(s)
     comprueba("pero si se adelanta de verdad, si", 1, len(s.proc.senales))
     hls.ADELANTE_MAX = viejo
+    hls._tfdt_video = tfdt_de_verdad
+
+
+async def probar_indice_escaso(carpeta, peli, claves, duracion):
+    """El indice del MKV no apunta a todos los fotogramas clave (pasaba con
+    «2x03 Tulsa King [HDTV 1080p].mkv»: uno cada 2 s en el video y uno cada
+    6 s en el indice). ffmpeg corta en todos, asi que cada trozo de la lista
+    son varias piezas; numerandolas por orden, el trozo N llevaba dentro otro
+    momento de la pelicula y el ultimo acababa mucho antes de su sitio: el
+    reproductor daba el capitulo por terminado a la mitad."""
+    print("Indice que no apunta a todos los fotogramas clave")
+    escasas = claves[::2]
+    d = os.path.join(carpeta, "hls-escaso")
+    os.makedirs(d)
+    s = hls.Sesion(path="tg:1:5", url=peli, claves=escasas, duracion=duracion,
+                   audio=0, hevc=False, dir=d)
+    for n in (0, 1, 2, len(escasas) - 1, 3):
+        piezas = await hls.trozo(s, n)
+        inicio = tfdts(piezas[0]).get(1, -99)
+        ultimo = tfdts(piezas[-1]).get(1, -99)
+        fin = escasas[n + 1] if n + 1 < len(escasas) else duracion
+        comprueba(f"el trozo {n} empieza en su sitio ({escasas[n]:.2f} s)", True,
+                  abs(escasas[n] - inicio) < 0.15)
+        comprueba(f"y todas sus piezas caen antes del siguiente ({fin:.2f} s)", True, ultimo < fin - 0.1)
+        junto = os.path.join(d, f"junto{n}.m4s")
+        with open(junto, "wb") as f:
+            f.write(hls.juntar(piezas))
+        tiempos = subprocess.run(
+            ["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "packet=pts_time,duration_time",
+             "-of", "csv=p=0", "concat:" + os.path.join(os.path.dirname(piezas[0]), "init.mp4") + "|" + junto],
+            capture_output=True, text=True).stdout.split()
+        pts = [float(x.split(",")[0]) for x in tiempos if x.split(",")[0] not in ("", "N/A")]
+        comprueba(f"y juntas llegan hasta el siguiente sin hueco ({len(piezas)} piezas)", True,
+                  bool(pts) and abs(min(pts) - escasas[n]) < 0.1 and 0 < fin - max(pts) < 0.1)
+    await hls._parar(s)
 
 
 async def probar_avi(carpeta):
@@ -229,11 +276,11 @@ async def probar_avi(carpeta):
     await hls._parar(s)
 
 
-def volumen_medio(init, trozo):
+def volumen_medio(init, piezas):
     """El volumen medio (dB) del audio de un trozo fMP4, pegado a su init."""
-    junto = trozo + ".junto.mp4"
+    junto = piezas[0] + ".junto.mp4"
     with open(junto, "wb") as f:
-        f.write(open(init, "rb").read() + open(trozo, "rb").read())
+        f.write(open(init, "rb").read() + hls.juntar(piezas))
     out = subprocess.run(["ffmpeg", "-hide_banner", "-i", junto, "-map", "0:a:0", "-af", "volumedetect",
                           "-f", "null", "-"], capture_output=True, text=True).stderr
     for linea in out.splitlines():

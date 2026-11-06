@@ -75,8 +75,12 @@ async def trozo(n: int, user: Annotated[str, Depends(get_stream_user)], path: st
 
     s = await _sesion(path, audio)
     try:
-        ruta = await hls.trozo(s, n)
+        piezas = await hls.trozo(s, n)
     except hls.SinHls as e:
         logger.warning("HLS al vuelo %s: trozo %d: %s", path, n, e)
         raise HTTPException(status_code=504, detail=str(e))
-    return FileResponse(ruta, media_type="video/iso.segment")
+    if len(piezas) == 1:
+        return FileResponse(piezas[0], media_type="video/iso.segment")
+    # El indice del MKV no apunta a todos los fotogramas clave y ffmpeg ha
+    # cortado este trozo en varias piezas: se sirven juntas (ver hls.py).
+    return Response(hls.juntar(piezas), media_type="video/iso.segment")
