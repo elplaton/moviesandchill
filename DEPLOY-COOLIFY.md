@@ -56,6 +56,7 @@ Tres cosas que conviene saber:
 | `TMD_DATABASE_URL` | `postgres://postgres:...@s7ydgwa0uz7peksfcamaercm:5432/postgres` |
 | `TMD_REDIS_URL` | `redis://default:...@<hostname del recurso Redis>:6379/0` (opcional) |
 | `TMD_TMBD_API_KEY` | clave de TMDB (ojo: `TMBD`, la errata es intencionada) |
+| `TMD_ANTHROPIC_API_KEY` | clave de la API de Anthropic para la revisión con IA (Admin → Revisión). Opcional: vacía, no se usa |
 | `TMD_TMDB_ENABLED` | `true` |
 | `TMD_CHANNELS` | JSON con los canales, p.ej. `[{"id": 2229558644, "name": "Las Cositas 3"}]` |
 

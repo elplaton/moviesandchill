@@ -141,7 +141,7 @@ async def revision_sugerencia_descartar(req: Clave, user: Annotated[str, Depends
 # --- Revision con IA (services/revision_ia.py) ---------------------------------
 
 class AjustesIA(BaseModel):
-    clave: str | None = None     # "" la borra; None no la toca
+    # La clave no: va en el .env (TMD_ANTHROPIC_API_KEY).
     activa: bool | None = None
     tope: float | None = None
 
@@ -158,7 +158,7 @@ async def revision_ia_guardar(req: AjustesIA, user: Annotated[str, Depends(get_c
     from app.services import revision_ia
 
     try:
-        return await revision_ia.guardar(req.clave, req.activa, req.tope)
+        return await revision_ia.guardar(req.activa, req.tope)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 

@@ -97,6 +97,11 @@ def load_config(force_reload: bool = False) -> dict:
         # la tele usa la IP de casa, pero la sesion del movil esta en el
         # dominio. Vacio = la direccion por la que llegue la peticion.
         "public_url": os.getenv("TMD_PUBLIC_URL", ""),
+        # La clave de la API de Anthropic para la revision con IA
+        # (services/revision_ia.py). Vacia, la revision con IA no hace nada.
+        # Va aqui y no en el panel: es un secreto y no tiene que poder leerse
+        # ni cambiarse desde la web.
+        "anthropic_api_key": os.getenv("TMD_ANTHROPIC_API_KEY", ""),
     }
 
     log_level = os.getenv("LOG_LEVEL")

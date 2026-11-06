@@ -15,12 +15,14 @@ interface Motivo {
 }
 
 /** Cómo va la revisión automática (backend/app/services/revision_auto.py). */
-/** La revisión con IA (backend/app/services/revision_ia.py). La clave nunca llega: solo sus 4 últimas. */
+/** La revisión con IA (backend/app/services/revision_ia.py). La clave va en el
+ *  .env del servidor (TMD_ANTHROPIC_API_KEY): aquí solo llega si está puesta. */
 interface EstadoIA {
   modelo: string;
   activa: boolean;
   configurada: boolean;
-  clave_fin: string | null;
+  /** Lo último que dijo Anthropic al mandar un lote, si falló (clave revocada, sin saldo...). */
+  error: string | null;
   tope: number;
   gasto_mes: number;
   lote: string | null;
@@ -305,19 +307,19 @@ function HistorialIAPanel() {
 
 /**
  * La revisión con IA: lo que la revisión exacta no resuelve se le manda a
- * Claude en lotes (Batch API). La clave se comprueba al guardarla y nunca se
- * enseña entera; el tope corta el gasto del mes.
+ * Claude en lotes (Batch API). La clave no está aquí sino en el .env del
+ * servidor (TMD_ANTHROPIC_API_KEY); aquí solo el interruptor y el tope, que
+ * corta el gasto del mes.
  */
 function BloqueIA({ ia, onCambio, onToast }: { ia: EstadoIA; onCambio: () => void; onToast: (m: string) => void }) {
-  const [abierto, setAbierto] = useState(!ia.configurada);
+  const [abierto, setAbierto] = useState(false);
   const [verHistorial, setVerHistorial] = useState(false);
-  const [clave, setClave] = useState('');
   const [tope, setTope] = useState(String(ia.tope));
   const [guardando, setGuardando] = useState(false);
   const [mandando, setMandando] = useState(false);
   const [error, setError] = useState('');
 
-  const guardar = async (cambios: { clave?: string; activa?: boolean; tope?: number }) => {
+  const guardar = async (cambios: { activa?: boolean; tope?: number }) => {
     setGuardando(true);
     setError('');
     try {
@@ -361,6 +363,13 @@ function BloqueIA({ ia, onCambio, onToast }: { ia: EstadoIA; onCambio: () => voi
             {dolares(ia.gasto_mes)} de {dolares(ia.tope)} este mes · {ia.pendientes.toLocaleString()} grupos por mirar
             {ia.lote && ' · lote en marcha (suele tardar menos de una hora)'}
           </p>
+          {!ia.configurada && (
+            <p className="text-nf-warn text-[11px] mt-1">
+              Falta la clave: pon <code className="font-mono">TMD_ANTHROPIC_API_KEY</code> en el .env del servidor
+              (en Coolify, en sus variables de entorno) y redespliega.
+            </p>
+          )}
+          {ia.error && <p className="text-red-400 text-[11px] mt-1">{ia.error}</p>}
           {ia.configurada && <BarraGasto gasto={ia.gasto_mes} tope={ia.tope} />}
           {ia.configurada && ia.gasto_mes >= ia.tope && (
             <p className="text-nf-red text-[11px] mt-1">Tope del mes alcanzado: no se manda nada hasta el mes que viene (o súbelo en Ajustes).</p>
@@ -384,13 +393,7 @@ function BloqueIA({ ia, onCambio, onToast }: { ia: EstadoIA; onCambio: () => voi
       </div>
       {verHistorial && <HistorialIAPanel />}
       {abierto && (
-        <div className="mt-3 grid gap-3 md:grid-cols-[1fr_auto_auto] items-end">
-          <label className="block">
-            <span className="text-nf-faint text-[11px]">Clave de la API de Anthropic</span>
-            <input type="password" value={clave} onChange={e => setClave(e.target.value)} autoComplete="off"
-              placeholder={ia.clave_fin ? `Guardada (…${ia.clave_fin}). Escribe otra para cambiarla` : 'sk-ant-…'}
-              className={`${CAMPO} mt-1 w-full`} />
-          </label>
+        <div className="mt-3 flex flex-wrap gap-3 items-end">
           <label className="block">
             <span className="text-nf-faint text-[11px]">Tope al mes ($)</span>
             <input type="number" min="0" step="1" value={tope} onChange={e => setTope(e.target.value)}
@@ -398,12 +401,8 @@ function BloqueIA({ ia, onCambio, onToast }: { ia: EstadoIA; onCambio: () => voi
           </label>
           <div className="flex gap-2">
             <button disabled={guardando} className={ROJO}
-              onClick={async () => {
-                const cambios: { clave?: string; tope?: number } = { tope: Number(tope) || 0 };
-                if (clave.trim()) cambios.clave = clave.trim();
-                if (await guardar(cambios)) { setClave(''); onToast('Ajustes de la IA guardados'); }
-              }}>
-              {guardando ? 'Comprobando…' : 'Guardar'}
+              onClick={async () => { if (await guardar({ tope: Number(tope) || 0 })) onToast('Tope guardado'); }}>
+              {guardando ? 'Guardando…' : 'Guardar tope'}
             </button>
             {ia.configurada && (
               <button disabled={guardando} className={BOTON} onClick={() => guardar({ activa: !ia.activa })}>
@@ -411,12 +410,13 @@ function BloqueIA({ ia, onCambio, onToast }: { ia: EstadoIA; onCambio: () => voi
               </button>
             )}
           </div>
-          {error && <p className="text-red-400 text-xs md:col-span-3">{error}</p>}
-          <p className="text-nf-faint text-[11px] md:col-span-3">
+          {error && <p className="text-red-400 text-xs w-full">{error}</p>}
+          <p className="text-nf-faint text-[11px] w-full">
             Lo que la revisión exacta no resuelve se le manda a Claude en lotes (la mitad de precio). Elige entre las
             candidatas de TMDB o dice que ninguna: lo que da con seguridad alta se aplica solo y se puede deshacer; lo
             demás queda como sugerencia. Probado sobre 35 grupos reales: ningún error con seguridad alta. Con el tope
-            alcanzado no se manda nada hasta el mes siguiente.
+            alcanzado no se manda nada hasta el mes siguiente. La clave va en el .env del servidor
+            (TMD_ANTHROPIC_API_KEY), no aquí; al encenderla se comprueba con Anthropic.
           </p>
         </div>
       )}

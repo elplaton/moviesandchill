@@ -29,7 +29,9 @@ Va por la **Batch API** (la mitad de precio; los lotes acaban en menos de una
 hora casi siempre y como mucho en 24 h) y con un **tope de gasto al mes**: con
 el tope alcanzado no se manda nada hasta el mes siguiente. El lote en marcha se
 apunta en `app_settings`, asi que un reinicio sigue esperandolo. La clave de
-Anthropic se pone en el panel y vive en `app_settings`; nunca se devuelve.
+Anthropic va en el `.env` (`TMD_ANTHROPIC_API_KEY`), no en el panel: es un
+secreto y no tiene que poder leerse ni cambiarse desde la web. En el panel
+solo estan el interruptor y el tope.
 """
 import json
 import logging
@@ -88,6 +90,12 @@ Ejemplos:
 
 # --- Ajustes -------------------------------------------------------------------
 
+def _clave_env() -> str:
+    from app.routers.download import config
+
+    return ((config or {}).get("anthropic_api_key") or "").strip()
+
+
 async def _ajustes() -> dict:
     from app.database.connection import get_app_settings
 
@@ -99,7 +107,8 @@ async def _ajustes() -> dict:
     gasto = json.loads(a.get("revision_ia_gasto") or "{}")
     mes = datetime.now(timezone.utc).strftime("%Y-%m")
     return {
-        "clave": a.get("revision_ia_clave") or "",
+        "clave": _clave_env(),
+        "error": a.get("revision_ia_error") or None,
         "activa": a.get("revision_ia_activa") == "1",
         "tope": tope,
         "gasto_mes": float(gasto.get("dolares") or 0) if gasto.get("mes") == mes else 0.0,
@@ -110,7 +119,8 @@ async def _ajustes() -> dict:
 
 
 async def estado() -> dict:
-    """Lo que enseña el panel. La clave nunca sale: solo si hay y sus 4 ultimas."""
+    """Lo que enseña el panel. La clave nunca sale: solo si esta puesta en el
+    `.env` y, si Anthropic la rechazo, el motivo."""
     from app.database.connection import get_pool
 
     a = await _ajustes()
@@ -120,30 +130,31 @@ async def estado() -> dict:
         async with pool.acquire() as conn:
             pendientes = await conn.fetchval("""SELECT COUNT(*) FROM revision_auto
                                                  WHERE estado IN ('sugerida', 'sin_candidato') AND ia IS NULL""")
-    return {"modelo": MODELO, "activa": a["activa"], "configurada": bool(a["clave"]),
-            "clave_fin": a["clave"][-4:] if a["clave"] else None, "tope": a["tope"],
+    return {"modelo": MODELO, "activa": a["activa"], "configurada": bool(a["clave"]), "error": a["error"],
+            "tope": a["tope"],
             "gasto_mes": round(a["gasto_mes"], 4), "lote": a["lote"] or None, "pendientes": pendientes,
             "ultimo": a["ultimo"]}
 
 
-async def guardar(clave: str | None, activa: bool | None, tope: float | None) -> dict:
-    """Guarda lo que llegue. Una clave nueva se comprueba antes contra la API
-    (pedir la ficha del modelo no cuesta nada)."""
+async def guardar(activa: bool | None, tope: float | None) -> dict:
+    """El interruptor y el tope. Al encenderla se comprueba la clave del `.env`
+    contra la API (pedir la ficha del modelo no cuesta nada)."""
     from app.database.connection import set_app_settings
 
     valores: dict[str, str] = {}
-    if clave is not None:
-        clave = clave.strip()
-        if clave:
-            import anthropic
+    if activa:
+        clave = _clave_env()
+        if not clave:
+            raise ValueError("Falta TMD_ANTHROPIC_API_KEY en el .env del servidor")
+        import anthropic
 
-            try:
-                await anthropic.AsyncAnthropic(api_key=clave).models.retrieve(MODELO)
-            except anthropic.AuthenticationError:
-                raise ValueError("Anthropic no acepta esa clave")
-            except anthropic.APIError as e:
-                raise ValueError(f"No se ha podido comprobar la clave: {e}")
-        valores["revision_ia_clave"] = clave
+        try:
+            await anthropic.AsyncAnthropic(api_key=clave).models.retrieve(MODELO)
+        except anthropic.AuthenticationError:
+            raise ValueError("Anthropic no acepta la clave de TMD_ANTHROPIC_API_KEY")
+        except anthropic.APIError as e:
+            raise ValueError(f"No se ha podido comprobar la clave: {e}")
+        valores["revision_ia_error"] = ""
     if activa is not None:
         valores["revision_ia_activa"] = "1" if activa else "0"
     if tope is not None:
@@ -329,11 +340,16 @@ async def mandar(api_key_tmdb: str) -> dict:
         lote = await _cliente(a["clave"]).messages.batches.create(requests=peticiones)
     except anthropic.APIError as e:
         logger.warning("Revision con IA: no se ha podido mandar el lote: %s", e)
+        # Que se vea en el panel: una clave revocada o sin saldo no puede
+        # fallar en silencio.
+        motivo = ("Anthropic no acepta la clave de TMD_ANTHROPIC_API_KEY"
+                  if isinstance(e, anthropic.AuthenticationError) else f"No se ha podido mandar el lote: {e}")
+        await set_app_settings({"revision_ia_error": motivo[:300]})
         return await estado()
     async with pool.acquire() as conn:
         await conn.executemany("UPDATE revision_auto SET candidatas = $2::jsonb, ia_lote = $3 WHERE id = $1",
                                [(id_, json.dumps(cands), lote.id) for id_, cands, marca in apuntes if not marca])
-    await set_app_settings({"revision_ia_lote": lote.id})
+    await set_app_settings({"revision_ia_lote": lote.id, "revision_ia_error": ""})
     async with pool.acquire() as conn:
         await conn.execute("INSERT INTO revision_ia_lotes (lote, modelo, grupos) VALUES ($1, $2, $3) "
                            "ON CONFLICT (lote) DO NOTHING", lote.id, MODELO, len(peticiones))

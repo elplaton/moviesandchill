@@ -422,9 +422,10 @@ function Channels() {
 
 interface MotivoRevision { clave: string; titulo: string; descripcion: string; grupos: number; archivos: number; sugeridas: number }
 // Cómo va la revisión automática (services/revision_auto.py).
-// La revisión con IA (services/revision_ia.py). La clave nunca llega: solo sus 4 últimas.
+// La revisión con IA (services/revision_ia.py). La clave va en el .env del servidor
+// (TMD_ANTHROPIC_API_KEY): aquí solo llega si está puesta.
 interface EstadoIA {
-  activa: boolean; configurada: boolean; clave_fin: string | null; tope: number; gasto_mes: number;
+  activa: boolean; configurada: boolean; error: string | null; tope: number; gasto_mes: number;
   lote: string | null; pendientes: number;
   ultimo: { aplicadas: number; sugeridas: number; ninguna: number; fallos: number; dolares: number } | null;
 }
@@ -689,11 +690,10 @@ function HistorialIAMovil() {
   );
 }
 
-/** La revisión con IA en el teléfono: estado, clave, tope y «Mandar ahora». */
+/** La revisión con IA en el teléfono: estado, tope y «Mandar ahora» (la clave va en el .env del servidor). */
 function BloqueIAMovil({ ia, onCambio }: { ia: EstadoIA; onCambio: () => void }) {
-  const [abierto, setAbierto] = useState(!ia.configurada);
+  const [abierto, setAbierto] = useState(false);
   const [verGasto, setVerGasto] = useState(false);
-  const [clave, setClave] = useState('');
   const [tope, setTope] = useState(String(ia.tope));
   const [haciendo, setHaciendo] = useState('');
   const pct = ia.tope > 0 ? Math.min(1, ia.gasto_mes / ia.tope) : 1;
@@ -721,6 +721,8 @@ function BloqueIAMovil({ ia, onCambio }: { ia: EstadoIA; onCambio: () => void })
       <p className="text-[12px] text-nf-text2 mt-1">
         {dolar(ia.gasto_mes)} de {dolar(ia.tope)} este mes · {num(ia.pendientes)} por mirar{ia.lote ? ' · lote en marcha' : ''}
       </p>
+      {!ia.configurada && <p className="text-[11px] text-nf-warn mt-1">Falta la clave: TMD_ANTHROPIC_API_KEY en el .env del servidor.</p>}
+      {ia.error && <p className="text-[11px] text-nf-red mt-1">{ia.error}</p>}
       {ia.configurada && (
         <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-white/10">
           <div className={`h-full ${pct >= 1 ? 'bg-nf-red' : pct >= 0.8 ? 'bg-nf-warn' : 'bg-nf-ok'}`} style={{ width: `${pct * 100}%` }} />
@@ -741,20 +743,14 @@ function BloqueIAMovil({ ia, onCambio }: { ia: EstadoIA; onCambio: () => void })
       {verGasto && <HistorialIAMovil />}
       {abierto && (
         <div className="mt-3 space-y-2">
-          <input className={input} type="password" autoComplete="off" value={clave} onChange={e => setClave(e.target.value)}
-            placeholder={ia.clave_fin ? `Guardada (…${ia.clave_fin}). Otra para cambiarla` : 'Clave de Anthropic (sk-ant-…)'} />
           <label className="flex items-center space-x-2 text-[13px] text-nf-text2">
             <span>Tope al mes ($)</span>
             <input className={`${input} w-24`} type="number" min="0" inputMode="decimal" value={tope} onChange={e => setTope(e.target.value)} />
           </label>
           <div className="flex space-x-2">
             <button disabled={!!haciendo} className="flex-1 h-11 rounded-xl bg-nf-red text-[15px] font-semibold disabled:opacity-40"
-              onClick={async () => {
-                const c: { clave?: string; tope: number } = { tope: Number(tope) || 0 };
-                if (clave.trim()) c.clave = clave.trim();
-                if (await pedir('/admin/revision/ia', c, 'Ajustes de la IA guardados')) setClave('');
-              }}>
-              {haciendo === '/admin/revision/ia' ? 'Comprobando…' : 'Guardar'}
+              onClick={() => pedir('/admin/revision/ia', { tope: Number(tope) || 0 }, 'Tope guardado')}>
+              {haciendo === '/admin/revision/ia' ? 'Guardando…' : 'Guardar tope'}
             </button>
             {ia.configurada && (
               <button disabled={!!haciendo} onClick={() => pedir('/admin/revision/ia', { activa: !ia.activa })}
@@ -763,7 +759,7 @@ function BloqueIAMovil({ ia, onCambio }: { ia: EstadoIA; onCambio: () => void })
               </button>
             )}
           </div>
-          <p className="text-[11px] text-nf-text3">Lo que la revisión exacta no resuelve va a Claude en lotes. Con seguridad alta se aplica solo (con deshacer); lo demás queda como sugerencia.</p>
+          <p className="text-[11px] text-nf-text3">Lo que la revisión exacta no resuelve va a Claude en lotes. Con seguridad alta se aplica solo (con deshacer); lo demás queda como sugerencia. La clave va en el .env del servidor.</p>
         </div>
       )}
     </div>
