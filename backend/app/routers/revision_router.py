@@ -88,7 +88,11 @@ async def revision_auto_lanzar(user: Annotated[str, Depends(get_current_admin)])
     if not api_key:
         raise HTTPException(status_code=409, detail="TMDB está desactivado")
     if not revision_auto._cerrojo.locked():
-        spawn(revision_auto.pasada(api_key), "revision_auto_manual")
+        async def todo():
+            from app.services import revision_ia
+            await revision_auto.pasada(api_key)
+            await revision_ia.mandar(api_key)
+        spawn(todo(), "revision_auto_manual")
     return {"ok": True}
 
 
@@ -130,3 +134,40 @@ async def revision_sugerencia_descartar(req: Clave, user: Annotated[str, Depends
     if not await revision_auto.descartar(req.clave):
         raise HTTPException(status_code=404, detail="Esa sugerencia ya no está")
     return {"ok": True}
+
+
+# --- Revision con IA (services/revision_ia.py) ---------------------------------
+
+class AjustesIA(BaseModel):
+    clave: str | None = None     # "" la borra; None no la toca
+    activa: bool | None = None
+    tope: float | None = None
+
+
+@router.get("/admin/revision/ia")
+async def revision_ia_estado(user: Annotated[str, Depends(get_current_admin)]):
+    from app.services import revision_ia
+
+    return await revision_ia.estado()
+
+
+@router.post("/admin/revision/ia")
+async def revision_ia_guardar(req: AjustesIA, user: Annotated[str, Depends(get_current_admin)]):
+    from app.services import revision_ia
+
+    try:
+        return await revision_ia.guardar(req.clave, req.activa, req.tope)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/admin/revision/ia/mandar")
+async def revision_ia_mandar(user: Annotated[str, Depends(get_current_admin)]):
+    """Manda ya un lote con lo pendiente (si no hay otro en marcha)."""
+    from app.routers.peticiones_router import _api_key
+    from app.services import revision_ia
+
+    api_key = _api_key()
+    if not api_key:
+        raise HTTPException(status_code=409, detail="TMDB está desactivado")
+    return await revision_ia.mandar(api_key)

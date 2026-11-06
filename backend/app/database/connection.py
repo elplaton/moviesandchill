@@ -444,6 +444,11 @@ async def _ensure_tables():
                 creado      TIMESTAMP NOT NULL DEFAULT NOW()
             )
         """)
+        # Revision con IA (services/revision_ia.py): las candidatas que se le
+        # mandaron a Claude, el lote en el que van y que modelo contesto.
+        await conn.execute("ALTER TABLE revision_auto ADD COLUMN IF NOT EXISTS candidatas JSONB")
+        await conn.execute("ALTER TABLE revision_auto ADD COLUMN IF NOT EXISTS ia VARCHAR(40)")
+        await conn.execute("ALTER TABLE revision_auto ADD COLUMN IF NOT EXISTS ia_lote TEXT")
 
         # Donde mandar los avisos. Una cuenta tiene tantas como aparatos: el
         # telefono, la PWA instalada y el navegador del escritorio son

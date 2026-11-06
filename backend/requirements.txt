@@ -22,3 +22,6 @@ pywebpush>=2.0.0
 # Cache compartida (portada, fichas, pistas). Si no hay Redis configurado la
 # libreria no se usa y la aplicacion funciona igual, solo mas lenta.
 redis>=5.0.0
+# Revision con IA (services/revision_ia.py): Claude elige la ficha de TMDB de
+# lo que la revision exacta no resuelve. Solo se usa con una clave puesta.
+anthropic>=2.6,<3

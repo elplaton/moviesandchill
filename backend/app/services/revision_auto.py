@@ -354,16 +354,32 @@ async def pasada(api_key: str) -> dict:
         return dict(_estado)
 
 
+# Cada cuanto se mira si el lote de la revision con IA ha acabado.
+MIRA_LOTE_S = 5 * 60
+
+
 async def de_fondo(api_key: str) -> None:
-    """Al arrancar y cada 6 h, solo si hay grupos sin mirar."""
+    """Al arrancar y cada 6 h, la pasada exacta (solo si hay grupos sin mirar)
+    y, con la revision con IA encendida (services/revision_ia.py), un lote
+    con lo que la exacta no resolvio. Cada 5 min se mira si el lote acabo."""
+    from app.services import revision_ia
+
     await asyncio.sleep(ESPERA_ARRANQUE_S)
+    ultima = 0.0
     while True:
         try:
-            if await _por_mirar():
-                await pasada(api_key)
+            await revision_ia.recoger()
         except Exception as e:
-            logger.error("Revision automatica fallo: %s", e)
-        await asyncio.sleep(CADA_S)
+            logger.error("Revision con IA: no se ha podido recoger el lote: %s", e)
+        if time.time() - ultima >= CADA_S:
+            ultima = time.time()
+            try:
+                if await _por_mirar():
+                    await pasada(api_key)
+                await revision_ia.mandar(api_key)
+            except Exception as e:
+                logger.error("Revision automatica fallo: %s", e)
+        await asyncio.sleep(MIRA_LOTE_S)
 
 
 # --- Lo que pide el panel ------------------------------------------------------
@@ -378,7 +394,14 @@ async def estado() -> dict:
             for f in await conn.fetch("""SELECT estado, COUNT(*) AS grupos, COALESCE(SUM(archivos), 0) AS archivos
                                            FROM revision_auto GROUP BY estado"""):
                 cuentas[f["estado"]] = {"grupos": f["grupos"], "archivos": f["archivos"]}
-    return {**_estado, "cuentas": cuentas}
+    from app.services import revision_ia
+
+    try:
+        ia = await revision_ia.estado()
+    except Exception as e:
+        logger.warning("Revision con IA: no se ha podido leer su estado: %s", e)
+        ia = None
+    return {**_estado, "cuentas": cuentas, "ia": ia}
 
 
 async def aplicadas(offset: int = 0, limit: int = 30) -> dict:

@@ -129,6 +129,22 @@ comprueba("la misma con el año que cuadra: sola", "segura",
 cual, _, porque = decidir([dune], "movie", 2024, None, {"tmdb_id": 693134, "media_type": "movie"})
 comprueba("si es la que ya tenia, se confirma y lo dice", ("segura", "la ficha que tenía es la buena"), (cual, porque))
 
+print("\nLo que se le manda a Claude (revision_ia)")
+from app.services import revision_ia
+cands = [{"tmdb_id": 73223, "media_type": "tv", "title": "Black Clover", "year": 2017},
+         {"tmdb_id": 1, "media_type": "movie", "title": "Black Clover: La espada del rey mago", "year": 2023}]
+esq = revision_ia.esquema([revision_ia.clave_de(c) for c in cands])
+comprueba("solo puede elegir entre las candidatas o ninguna", ["tv:73223", "movie:1", "ninguna"],
+          esq["properties"]["eleccion"]["enum"])
+comprueba("una serie guardada como 'series' tambien es tv:", "tv:5", revision_ia.clave_de({"tmdb_id": 5, "media_type": "series"}))
+g = {"titulo": "Black Clover", "original": None, "año": None, "ficha": None, "pie": None,
+     "miembros": [(i, 1, "c", None, None, f"{i} - Black Clover.mkv") for i in range(1, 136)]}
+import json as _json
+m = _json.loads(revision_ia.mensaje(g, cands))
+comprueba("el mensaje lleva cuantos archivos son y como mucho 5 nombres", (135, True),
+          (m["n_archivos"], 0 < len(m["archivos"]) <= 5))
+comprueba("y la clave de cada candidata", ["tv:73223", "movie:1"], [c["clave"] for c in m["candidatas"]])
+
 print()
 print(f"{len(fallos)} fallidas" if fallos else "todas correctas")
 sys.exit(1 if fallos else 0)

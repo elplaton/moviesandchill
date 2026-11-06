@@ -15,7 +15,21 @@ interface Motivo {
 }
 
 /** Cómo va la revisión automática (backend/app/services/revision_auto.py). */
+/** La revisión con IA (backend/app/services/revision_ia.py). La clave nunca llega: solo sus 4 últimas. */
+interface EstadoIA {
+  modelo: string;
+  activa: boolean;
+  configurada: boolean;
+  clave_fin: string | null;
+  tope: number;
+  gasto_mes: number;
+  lote: string | null;
+  pendientes: number;
+  ultimo: { aplicadas: number; sugeridas: number; ninguna: number; fallos: number; dolares: number; terminado: number } | null;
+}
+
 interface EstadoAuto {
+  ia: EstadoIA | null;
   corriendo: boolean;
   empezo: number | null;
   termino: number | null;
@@ -185,6 +199,122 @@ function CajaSugerencia({ g, onAceptada, onDescartada }: {
           {haciendo === 'no' ? '…' : 'No es esta'}
         </button>
       </div>
+    </div>
+  );
+}
+
+const dolares = (n: number) => `${n.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} $`;
+
+/**
+ * La revisión con IA: lo que la revisión exacta no resuelve se le manda a
+ * Claude en lotes (Batch API). La clave se comprueba al guardarla y nunca se
+ * enseña entera; el tope corta el gasto del mes.
+ */
+function BloqueIA({ ia, onCambio, onToast }: { ia: EstadoIA; onCambio: () => void; onToast: (m: string) => void }) {
+  const [abierto, setAbierto] = useState(!ia.configurada);
+  const [clave, setClave] = useState('');
+  const [tope, setTope] = useState(String(ia.tope));
+  const [guardando, setGuardando] = useState(false);
+  const [mandando, setMandando] = useState(false);
+  const [error, setError] = useState('');
+
+  const guardar = async (cambios: { clave?: string; activa?: boolean; tope?: number }) => {
+    setGuardando(true);
+    setError('');
+    try {
+      const res = await apiFetch('/admin/revision/ia', { method: 'POST', body: JSON.stringify(cambios) });
+      if (!res.ok) { setError(await motivoDe(res)); return false; }
+      onCambio();
+      return true;
+    } catch {
+      setError('Error de conexión');
+      return false;
+    } finally {
+      setGuardando(false);
+    }
+  };
+
+  const mandar = async () => {
+    setMandando(true);
+    try {
+      const res = await apiFetch('/admin/revision/ia/mandar', { method: 'POST' });
+      if (!res.ok) onToast(await motivoDe(res));
+      else onCambio();
+    } catch {
+      onToast('Error de conexión');
+    } finally {
+      setMandando(false);
+    }
+  };
+
+  const u = ia.ultimo;
+  return (
+    <div className="mt-4 border-t border-white/10 pt-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-white text-sm font-medium">
+            Revisión con IA <span className="text-nf-dim font-normal">· Claude Sonnet 5.5</span>
+            <span className={`ml-2 rounded px-1.5 py-0.5 text-[10px] align-middle ${ia.activa && ia.configurada ? 'bg-nf-ok/15 text-nf-ok' : 'bg-white/10 text-nf-dim'}`}>
+              {!ia.configurada ? 'sin clave' : ia.activa ? 'encendida' : 'apagada'}
+            </span>
+          </p>
+          <p className="text-nf-dim text-xs mt-0.5">
+            {dolares(ia.gasto_mes)} de {dolares(ia.tope)} este mes · {ia.pendientes.toLocaleString()} grupos por mirar
+            {ia.lote && ' · lote en marcha (suele tardar menos de una hora)'}
+          </p>
+          {u && (
+            <p className="text-nf-faint text-[11px] mt-0.5">
+              Último lote: {u.aplicadas} corregidos solos, {u.sugeridas} sugerencias, {u.ninguna} sin ficha que encaje
+              {u.fallos ? `, ${u.fallos} fallos` : ''} · {dolares(u.dolares)}
+            </p>
+          )}
+        </div>
+        <div className="flex gap-2">
+          <button onClick={() => setAbierto(a => !a)} className={BOTON}>{abierto ? 'Cerrar' : 'Ajustes'}</button>
+          {ia.configurada && ia.activa && (
+            <button onClick={mandar} disabled={mandando || !!ia.lote} className={BOTON}>
+              {ia.lote ? 'Lote en marcha' : mandando ? 'Mandando…' : 'Mandar ahora'}
+            </button>
+          )}
+        </div>
+      </div>
+      {abierto && (
+        <div className="mt-3 grid gap-3 md:grid-cols-[1fr_auto_auto] items-end">
+          <label className="block">
+            <span className="text-nf-faint text-[11px]">Clave de la API de Anthropic</span>
+            <input type="password" value={clave} onChange={e => setClave(e.target.value)} autoComplete="off"
+              placeholder={ia.clave_fin ? `Guardada (…${ia.clave_fin}). Escribe otra para cambiarla` : 'sk-ant-…'}
+              className={`${CAMPO} mt-1 w-full`} />
+          </label>
+          <label className="block">
+            <span className="text-nf-faint text-[11px]">Tope al mes ($)</span>
+            <input type="number" min="0" step="1" value={tope} onChange={e => setTope(e.target.value)}
+              className={`${CAMPO} mt-1 w-28`} />
+          </label>
+          <div className="flex gap-2">
+            <button disabled={guardando} className={ROJO}
+              onClick={async () => {
+                const cambios: { clave?: string; tope?: number } = { tope: Number(tope) || 0 };
+                if (clave.trim()) cambios.clave = clave.trim();
+                if (await guardar(cambios)) { setClave(''); onToast('Ajustes de la IA guardados'); }
+              }}>
+              {guardando ? 'Comprobando…' : 'Guardar'}
+            </button>
+            {ia.configurada && (
+              <button disabled={guardando} className={BOTON} onClick={() => guardar({ activa: !ia.activa })}>
+                {ia.activa ? 'Apagar' : 'Encender'}
+              </button>
+            )}
+          </div>
+          {error && <p className="text-red-400 text-xs md:col-span-3">{error}</p>}
+          <p className="text-nf-faint text-[11px] md:col-span-3">
+            Lo que la revisión exacta no resuelve se le manda a Claude en lotes (la mitad de precio). Elige entre las
+            candidatas de TMDB o dice que ninguna: lo que da con seguridad alta se aplica solo y se puede deshacer; lo
+            demás queda como sugerencia. Probado sobre 35 grupos reales: ningún error con seguridad alta. Con el tope
+            alcanzado no se manda nada hasta el mes siguiente.
+          </p>
+        </div>
+      )}
     </div>
   );
 }
@@ -611,6 +741,7 @@ export default function AdminRevision({ onToast }: { onToast: (m: string) => voi
             </button>
           </div>
         </div>
+        {auto?.ia && <BloqueIA ia={auto.ia} onCambio={cargarResumen} onToast={onToast} />}
       </div>
 
       {verCorregidas ? (

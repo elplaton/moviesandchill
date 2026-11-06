@@ -422,7 +422,13 @@ function Channels() {
 
 interface MotivoRevision { clave: string; titulo: string; descripcion: string; grupos: number; archivos: number; sugeridas: number }
 // Cómo va la revisión automática (services/revision_auto.py).
-interface EstadoAuto { corriendo: boolean; mirados: number; por_mirar: number; cuentas: Record<string, { grupos: number; archivos: number }> }
+// La revisión con IA (services/revision_ia.py). La clave nunca llega: solo sus 4 últimas.
+interface EstadoIA {
+  activa: boolean; configurada: boolean; clave_fin: string | null; tope: number; gasto_mes: number;
+  lote: string | null; pendientes: number;
+  ultimo: { aplicadas: number; sugeridas: number; ninguna: number; fallos: number; dolares: number } | null;
+}
+interface EstadoAuto { corriendo: boolean; mirados: number; por_mirar: number; cuentas: Record<string, { grupos: number; archivos: number }>; ia: EstadoIA | null }
 interface ResumenRevision { motivos: MotivoRevision[]; canales: { channel_id: number; nombre: string }[]; auto: EstadoAuto }
 interface FichaActual { tmdb_id: number; media_type: TipoPeticion; title: string; year: number | null; poster: string | null }
 interface Sugerencia extends FichaActual { porque: string | null }
@@ -642,6 +648,79 @@ function HojaCorregir({ g, onCerrar, onHecho }: { g: GrupoRevision; onCerrar: ()
   );
 }
 
+const dolar = (n: number) => `${n.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} $`;
+
+/** La revisión con IA en el teléfono: estado, clave, tope y «Mandar ahora». */
+function BloqueIAMovil({ ia, onCambio }: { ia: EstadoIA; onCambio: () => void }) {
+  const [abierto, setAbierto] = useState(!ia.configurada);
+  const [clave, setClave] = useState('');
+  const [tope, setTope] = useState(String(ia.tope));
+  const [haciendo, setHaciendo] = useState('');
+  const pedir = async (ruta: string, cuerpo?: object, ok?: string) => {
+    setHaciendo(ruta);
+    try {
+      const r = await apiFetch(ruta, { method: 'POST', ...(cuerpo ? { body: JSON.stringify(cuerpo) } : {}) });
+      const d = await leer(r);
+      if (!r.ok) throw new Error(d.detail || 'No se ha podido');
+      if (ok) toast(ok, 'ok');
+      onCambio();
+      return true;
+    } catch (e) { toast(e instanceof Error ? e.message : 'No se ha podido', 'error', 6000); return false; }
+    finally { setHaciendo(''); }
+  };
+  const u = ia.ultimo;
+  return (
+    <div className="mt-3 border-t border-white/10 pt-3">
+      <div className="flex items-center justify-between">
+        <p className="text-[14px] font-semibold">Revisión con IA <span className="text-nf-text3 font-normal">· Sonnet 5.5</span></p>
+        <span className={`text-[11px] px-2 py-0.5 rounded-full ${ia.activa && ia.configurada ? 'bg-nf-ok/15 text-nf-ok' : 'bg-white/10 text-nf-text3'}`}>
+          {!ia.configurada ? 'sin clave' : ia.activa ? 'encendida' : 'apagada'}
+        </span>
+      </div>
+      <p className="text-[12px] text-nf-text2 mt-1">
+        {dolar(ia.gasto_mes)} de {dolar(ia.tope)} este mes · {num(ia.pendientes)} por mirar{ia.lote ? ' · lote en marcha' : ''}
+      </p>
+      {u && <p className="text-[11px] text-nf-text3 mt-0.5">Último lote: {u.aplicadas} solos, {u.sugeridas} sugerencias, {u.ninguna} sin ficha · {dolar(u.dolares)}</p>}
+      <div className="flex mt-2 space-x-2">
+        <button onClick={() => setAbierto(a => !a)} className="tap flex-1 h-10 rounded-xl bg-white/10 text-[14px] font-medium">{abierto ? 'Cerrar' : 'Ajustes'}</button>
+        {ia.configurada && ia.activa && (
+          <button onClick={() => pedir('/admin/revision/ia/mandar')} disabled={!!haciendo || !!ia.lote}
+            className="tap flex-1 h-10 rounded-xl bg-white/10 text-[14px] font-medium disabled:opacity-40">
+            {ia.lote ? 'Lote en marcha' : haciendo ? '…' : 'Mandar ahora'}
+          </button>
+        )}
+      </div>
+      {abierto && (
+        <div className="mt-3 space-y-2">
+          <input className={input} type="password" autoComplete="off" value={clave} onChange={e => setClave(e.target.value)}
+            placeholder={ia.clave_fin ? `Guardada (…${ia.clave_fin}). Otra para cambiarla` : 'Clave de Anthropic (sk-ant-…)'} />
+          <label className="flex items-center space-x-2 text-[13px] text-nf-text2">
+            <span>Tope al mes ($)</span>
+            <input className={`${input} w-24`} type="number" min="0" inputMode="decimal" value={tope} onChange={e => setTope(e.target.value)} />
+          </label>
+          <div className="flex space-x-2">
+            <button disabled={!!haciendo} className="flex-1 h-11 rounded-xl bg-nf-red text-[15px] font-semibold disabled:opacity-40"
+              onClick={async () => {
+                const c: { clave?: string; tope: number } = { tope: Number(tope) || 0 };
+                if (clave.trim()) c.clave = clave.trim();
+                if (await pedir('/admin/revision/ia', c, 'Ajustes de la IA guardados')) setClave('');
+              }}>
+              {haciendo === '/admin/revision/ia' ? 'Comprobando…' : 'Guardar'}
+            </button>
+            {ia.configurada && (
+              <button disabled={!!haciendo} onClick={() => pedir('/admin/revision/ia', { activa: !ia.activa })}
+                className="flex-1 h-11 rounded-xl bg-white/10 text-[15px] font-medium disabled:opacity-40">
+                {ia.activa ? 'Apagar' : 'Encender'}
+              </button>
+            )}
+          </div>
+          <p className="text-[11px] text-nf-text3">Lo que la revisión exacta no resuelve va a Claude en lotes. Con seguridad alta se aplica solo (con deshacer); lo demás queda como sugerencia.</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** «Corregido solo»: lo que puso la revisión automática, con su deshacer. */
 function CorregidasMovil({ onCambio }: { onCambio: () => void }) {
   const [items, setItems] = useState<Aplicada[]>([]);
@@ -820,6 +899,7 @@ function Revision() {
               {auto.corriendo ? 'Revisando…' : lanzando ? 'Lanzando…' : 'Revisar ahora'}
             </button>
           </div>
+          {auto.ia && <BloqueIAMovil ia={auto.ia} onCambio={cargarResumen} />}
         </div>
       )}
       {verCorregidas ? <CorregidasMovil onCambio={() => { cargarResumen(); setGrupos([]); cargar(0); }} /> : (<>
