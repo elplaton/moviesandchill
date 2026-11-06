@@ -291,7 +291,7 @@ async def mirar_grupo(g: dict, api_key: str) -> str:
                                         f"que se llama así")
     if cual == "segura":
         antes = await revision.poner_ficha(g["miembros"], elegida["tmdb_id"], elegida["media_type"], api_key,
-                                           titulo=titulos[0])
+                                           titulo=titulos[0], recalcular=False)
         await _guardar(g["clave"], g["titulo"], g["motivo"], "aplicada", porque, _ficha(elegida),
                        len(g["miembros"]), antes)
         logger.info("Revision automatica: «%s» -> %s/%d «%s» (%d archivos; %s)", g["titulo"],

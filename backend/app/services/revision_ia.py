@@ -466,7 +466,7 @@ async def _aplicar(id_: int, respuesta: dict) -> str:
         seguro = episodios is not None
     if seguro:
         antes = await revision.poner_ficha(g["miembros"], elegida["tmdb_id"], elegida["media_type"],
-                                           _api_key(), titulo=titulo)
+                                           _api_key(), titulo=titulo, recalcular=False)
         await marcar("aplicada", f"Claude: {motivo}", _ficha(elegida), antes)
         return "aplicadas"
     nota = "" if conf != "alta" else " (no se aplica sola: faltan carátula o capítulos)"

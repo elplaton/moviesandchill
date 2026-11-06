@@ -338,7 +338,7 @@ _MULTIPARTE_RE = re.compile(r"\.(?:part\d+\.rar|r\d{2}|(?:7z|zip|rar|mkv|mp4|avi
 
 
 async def poner_ficha(miembros: list[tuple], tmdb_id: int, media_type: str, api_key: str,
-                      detalles: dict | None = None, titulo: str | None = None) -> list[list]:
+                      detalles: dict | None = None, titulo: str | None = None, recalcular: bool = True) -> list[list]:
     """Le pone a esos archivos la ficha dada y los marca para que nada
     automatico la cambie (`tmdb_manual`). Devuelve como estaba cada uno, para
     poder deshacerlo. En una serie, cada archivo lleva su capitulo: si se
@@ -371,7 +371,11 @@ async def poner_ficha(miembros: list[tuple], tmdb_id: int, media_type: str, api_
                        tmdb_valid = TRUE, tmdb_searched = TRUE, tmdb_manual = TRUE
                  WHERE id = $6
             """, filas)
-    olvidar()
+    # En una pasada (cientos de grupos seguidos) no: cada olvido obligaba a
+    # recalcular la lista entera (~7 s) en la siguiente pregunta del panel, que
+    # pregunta cada pocos segundos. La pasada olvida una vez al acabar.
+    if recalcular:
+        olvidar()
     cache.cambio_en_catalogo()
     cache.cambio_en_tmdb()
     return [[a["id"], a["tmdb_id"], a["tmdb_type"], a["media_type"], a["season"], a["episode"],
